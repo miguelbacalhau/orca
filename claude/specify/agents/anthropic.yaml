@@ -1,0 +1,4 @@
+interface:
+  display_name: "Specify"
+  short_description: "Turn rough ideas into high-level specs"
+  default_prompt: "Use $specify to turn this rough idea into a high-level spec."

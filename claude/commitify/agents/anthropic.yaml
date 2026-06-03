@@ -1,0 +1,4 @@
+interface:
+  display_name: "Commitify"
+  short_description: "Create Conventional Commits from staged changes"
+  default_prompt: "Use $commitify to inspect my changes and create a Conventional Commit."

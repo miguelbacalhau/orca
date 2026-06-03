@@ -1,0 +1,4 @@
+interface:
+  display_name: "Planify"
+  short_description: "Create phase-based plans with acceptance criteria"
+  default_prompt: "Use $planify to create a structured phase-based plan for my objective."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Reviewify"
+  short_description: "Review staged or working tree changes"
+  default_prompt: "Use $reviewify to review my repository changes like a PR."

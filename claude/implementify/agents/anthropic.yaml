@@ -1,0 +1,4 @@
+interface:
+  display_name: "Implementify"
+  short_description: "Execute plan phases with focused code changes"
+  default_prompt: "Use $implementify to execute the next phase from my plan file."

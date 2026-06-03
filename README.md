@@ -26,3 +26,21 @@ Remove the symlinks with:
 ```bash
 ./uninstall-codex-skills.sh
 ```
+
+## Install Claude Skills
+
+Install the Claude versions into the Claude skills directory with symlinks:
+
+```bash
+./install-claude-skills.sh
+```
+
+By default, this links `claude/*` into `$HOME/.claude/skills`.
+Use `--dry-run` to preview, `--target DIR` to install elsewhere, and `--force`
+to replace existing targets.
+
+Remove the symlinks with:
+
+```bash
+./uninstall-claude-skills.sh
+```

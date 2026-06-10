@@ -1,6 +1,6 @@
 ---
 name: orchestrify
-description: Drive a feature from idea to committed code using dedicated subagents per stage. Use when Claude should interview the user for the desired outcome, then run fully autonomously, write a spec with a dependency-ordered work breakdown, and for each unblocked work item spawn agents to plan, implement, review and fix, and commit in its own git worktree branched off a shared bare repository, with a merge agent integrating completed items into an integration worktree. Requires a bare-repo-with-worktrees layout (validated up front); there is no privileged main checkout, and the run's deliverable is a branch the user lands themselves. After the interview nothing asks the user anything; undecidable issues are reported at the end. Do not use for small single-file changes or when the user only wants a spec or a plan.
+description: Drive a feature from idea to committed code using dedicated subagents per stage. Use when Claude should interview the user for the desired outcome, then run fully autonomously, write a spec with a dependency-ordered work breakdown, and for each unblocked work item spawn agents to plan, implement, review and fix, and commit in its own git worktree branched off a shared bare repository, with a merge agent integrating completed items into an integration worktree. Requires a bare-repo-with-worktrees layout (validated up front); there is no privileged main checkout, and the run's deliverable is a branch the user lands themselves. After the interview — plus one optional breakdown checkpoint the user opts into during it — nothing else asks the user anything; undecidable issues are reported at the end. Do not use for small single-file changes or when the user only wants a spec or a plan.
 args: <idea>
 user-invocable: true
 ---
@@ -11,7 +11,7 @@ Coordinate a full implementation through isolated subagents. The main conversati
 
 Isolation is double: each subagent has its own context window, and each work item has its own git worktree. The repository is a bare repo, and every working copy — the user's, the run's integration tree, and each item — is a peer worktree off that one shared object store. There is no privileged main checkout: the orchestrator never reads or writes the user's worktree, and the run's deliverable is a branch the user lands themselves. Parallel items can never corrupt each other's files — overlap surfaces as an explicit merge conflict, resolved by a dedicated merge agent with both items' plans in hand.
 
-The initial interview is the ONLY interactive moment of the entire run. After it ends, never ask the user anything — no approval gates, no mid-run clarifications, no AskUserQuestion. Status updates are one-way reports. Anything the orchestrator cannot decide within the interview's stated intent becomes a `blocked` item surfaced in the final report.
+The interview is where the user sets intent. They may also opt into a single checkpoint there: a one-time review of the spec and work breakdown before any code is written. Apart from that opt-in checkpoint, never ask the user anything — no mid-run clarifications, no approval gates, no AskUserQuestion. Status updates are one-way reports. Anything the orchestrator cannot decide within the interview's stated intent becomes a `blocked` item surfaced in the final report.
 
 ## Input
 
@@ -28,8 +28,9 @@ Interview the user before writing anything. This is the only chance to capture i
 - Inputs and outputs: what data, events, or user actions go in; what results, side effects, or artifacts come out.
 - Constraints: existing code it must integrate with, performance or compatibility expectations, deadlines on scope.
 - The doubt rule: when the run hits an ambiguity, should it prefer the smaller interpretation and cut scope, or the more complete one? Default to smaller if the user has no preference.
+- The breakdown checkpoint: after the spec and work breakdown are written — but before any worktree or code — do they want to review and approve it once, or go straight through autonomously? The decomposition (interfaces, work split, dependency order) is where parallel-agent mistakes originate, so this is the highest-value moment to catch a wrong assumption, and it is the only optional pause in the run. Default to going straight through if the user has no preference.
 
-Close the interview by restating the understood outcome, features, non-goals, and doubt rule, and confirming them. That confirmation is the approval for the entire run — there is no later gate. From this point on, never ask the user anything; proceed on recorded assumptions.
+Close the interview by restating the understood outcome, features, non-goals, doubt rule, and breakdown-checkpoint choice, and confirming them. That confirmation authorizes the run. If the user opted into the breakdown checkpoint, the only remaining interaction is that one approval in Step 3; otherwise there is no later gate at all. From this point on, never ask the user anything else; proceed on recorded assumptions.
 
 ### Bare-repository pre-flight
 
@@ -176,7 +177,10 @@ Statuses: `pending` → `planning` → `planned` → `implementing` → `reviewi
 
 ## Step 3: Announce and proceed
 
-Report the spec to the user as a one-way status update — outcome, work items, dependency order, what will run in parallel, key assumptions — and proceed immediately. Do not wait for or request approval; the interview's closing confirmation already authorized the run. If the user interjects on their own, incorporate it; never solicit it.
+Report the spec to the user — outcome, work items, dependency order, what will run in parallel, key assumptions. How this lands depends on the breakdown-checkpoint choice made in the interview:
+
+- **Opted out (the default):** this is a one-way status update. Proceed immediately; do not wait for or request approval — the interview's closing confirmation already authorized the run. If the user interjects on their own, incorporate it; never solicit it.
+- **Opted in:** this is the one authorized pause. Present the spec and breakdown and ask once for approval. Incorporate any changes they request — revise `spec.md` and the work breakdown accordingly — then proceed. This is the final interactive moment of the run; after it, the run is autonomous and never waits on the user again.
 
 Set the spec status to `approved`. Create the integration worktree at the repo root, on a fresh branch based on the trunk tip:
 
@@ -196,16 +200,17 @@ Repeat until every item is `merged` or `blocked`:
 
 1. Collect items whose dependencies are all `merged`.
 2. Spawn plan agents for all of them **in parallel** (planning is read-only and safe to parallelize).
-3. As each plan completes, create the item's worktree at the repo root, branched off the integration branch tip:
+3. **Reconcile the plans before any code is written.** When all of this batch's plans are written, read them together — against each other and against the spec's Interfaces — for what no single plan agent could see, since each one explored only its own item: a dependency one plan reveals that the breakdown never declared (an item that actually needs another's output), two plans assuming different shapes for the same shared contract, or heavy real overlap in files both will edit. This is the only moment cross-item knowledge exists before implementation. On a clean pass, proceed unchanged. On a missed dependency or contract mismatch, handle it under **Escalation** (amend: re-order, re-split, or revise the interface, then regenerate the affected plans) before spawning any implementer — catching it here is a re-order; catching it at merge is a semantic conflict.
+4. Create each item's worktree at the repo root, branched off the integration branch tip:
 
    ```bash
    git worktree add <repo-root>/orchestrify-<slug>-<ID> -b orchestrify/<slug>/<ID> orchestrify/<slug>
    ```
 
    Branching off the integration branch only after dependencies are merged guarantees each item builds on its dependencies' actual code.
-4. Run implement → review → commit for each item **inside its worktree**, in parallel across items. All three agents for one item share that one persistent worktree — each agent gets a fresh context, but they must see the same files, so pass the worktree path explicitly in every prompt.
-5. As items reach `committed`, run the merge agent — merges are **serialized**, in dependency order, completion order for siblings.
-6. Update `state.md` after every transition. A merge may unblock dependents — re-run step 1.
+5. Run implement → review → commit for each item **inside its worktree**, in parallel across items. All three agents for one item share that one persistent worktree — each agent gets a fresh context, but they must see the same files, so pass the worktree path explicitly in every prompt.
+6. As items reach `committed`, run the merge agent — merges are **serialized**, in dependency order, completion order for siblings.
+7. Update `state.md` after every transition. A merge may unblock dependents — re-run step 1.
 
 ### 4a. Plan agent (read-only)
 
@@ -308,6 +313,11 @@ The reviewer deliberately gets a fresh context — it must not inherit the imple
 ```text
 You are reviewing the uncommitted changes for ONE work item of a larger
 feature. You did not write this code; read it cold, like a PR review.
+Review adversarially: assume there is at least one real defect and that
+the tests are weaker than they look. Your job is to find problems, not
+to confirm the work is good — an approval that finds nothing is the
+failure mode here. The implementer shared your instincts, so distrust
+exactly the parts that look obviously fine.
 
 Work EXCLUSIVELY inside this worktree: <repo-root>/orchestrify-<slug>-<ID>.
 
@@ -321,6 +331,11 @@ regressions to surrounding code, missing or weak tests, deviations in
 the plan that were recorded but are actually wrong calls. Flag files
 touched outside the item's declared ownership (<paths>) whose changes
 the plan does not justify.
+
+Attack the tests specifically: the same model wrote the code and the
+tests, so they share blind spots and a green run proves little. Name the
+edge cases, error paths, and interface boundaries the tests do NOT
+exercise, and add the missing ones rather than trusting the existing suite.
 
 Fix what you find directly in the worktree. Re-run the plan's
 Verification commands after fixing.
@@ -467,5 +482,5 @@ Tell the user:
 - Pass context between stages through artifact files, never by relaying summaries — the implement agent reads the plan file itself, the reviewer reads the plan and diff itself.
 - One worktree per work item, created by the orchestrator at the repo root off the shared bare repo, shared by that item's implement/review/commit agents, removed only after merge. All worktrees — the user's, the integration tree, and each item — are peers off the bare repo; the run never reads or writes the user's worktree. Only the serialized merge agent writes the integration branch, inside the integration worktree.
 - If a run is abandoned, clean up with `git worktree list` and remove any `orchestrify/` worktrees and branches left behind.
-- After the interview closes, the run never waits on the user: no approval requests, no clarifying questions, no AskUserQuestion. Ambiguity resolves against the spec and the doubt rule; what cannot be resolved that way becomes a `blocked` item in the final report.
+- After the interview closes — and the optional breakdown checkpoint in Step 3, if the user opted into it — the run never waits on the user: no approval requests, no clarifying questions, no AskUserQuestion. Ambiguity resolves against the spec and the doubt rule; what cannot be resolved that way becomes a `blocked` item in the final report.
 - Keep the user informed at phase transitions with one or two one-way status lines: items started, items merged, amendments made, anything blocked. Inform, never ask.

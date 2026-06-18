@@ -55,8 +55,16 @@ mkdir -p "$(dirname "$output")"
 # The prompt is passed as an argument, so nothing is lost.
 attempt() {
   : > "$output"  # truncate so a stale/partial artifact from a prior attempt never reads as success
+  # NOTE: `codex exec review` (CLI 0.140.0) rejects `--uncommitted` when a custom
+  # [PROMPT] is also passed ("--uncommitted cannot be used with [PROMPT]"), so the
+  # adversarial prompt forces default review mode. That mode is agentic: Codex runs
+  # `git status`/`git diff` itself from the worktree cwd and reviews the working-tree
+  # changes — tracked edits AND untracked new files — with no staging by us (the
+  # commit stage owns staging, by name, later). The trade vs `--uncommitted` is that
+  # untracked-file coverage is best-effort rather than guaranteed; the prompt names
+  # the item's owned paths to steer Codex onto them.
   ( cd "$worktree" && "$tmo" "$timeout_secs" \
-      codex exec review --uncommitted -o "$output" "$prompt" < /dev/null )
+      codex exec review -o "$output" "$prompt" < /dev/null )
 }
 
 # Success requires both a clean exit AND a non-empty artifact: the stdin-hang

@@ -55,9 +55,9 @@ else
   fail=1
 fi
 
-# --- AGENTS: the six subagent definitions must be installed for the harness ---
+# --- AGENTS: the seven subagent definitions must be installed for the harness ---
 missing=""
-for name in plan implement fix commit merge integrate; do
+for name in spec plan implement fix commit merge integrate; do
   if [[ ! -e "$HOME/.claude/agents/orchestrify-$name.md" && ! -e "./.claude/agents/orchestrify-$name.md" ]]; then
     missing="$missing $name"
   fi

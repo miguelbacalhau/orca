@@ -15,7 +15,7 @@ Resolve this skill's installed directory before starting. Use:
 
 - `scripts/preflight.sh` for the mechanical environment checks.
 - `scripts/claude-review.sh` for independent review execution.
-- `references/plan-agent.md`, `implement-agent.md`, `claude-review.md`, `fix-agent.md`, `commit-agent.md`, `merge-agent.md`, and `integrate-agent.md` as stage prompts.
+- `references/spec-agent.md`, `plan-agent.md`, `implement-agent.md`, `claude-review.md`, `fix-agent.md`, `commit-agent.md`, `merge-agent.md`, and `integrate-agent.md` as stage prompts.
 
 Read a stage reference before spawning that stage. Include its complete instructions in the subagent prompt, followed by the per-item values. Do not assume subagents inherit this skill.
 
@@ -81,48 +81,17 @@ Create:
 
 Keep all worktrees at `<repo-root>`, never inside `.orchestrify/`. Make `<slug>` a short kebab-case phrase.
 
-Do only light reconnaissance in the orchestrator context. Write `spec.md`:
+Do not explore the codebase in the orchestrator context. Read `references/spec-agent.md` and spawn one spec worker, passing:
 
-```markdown
-# Spec: <summary>
+- the run directory
+- the repository root
+- the **interview brief**: the outcome, features, non-goals, inputs/outputs, constraints, and doubt rule exactly as you restated and confirmed them at the close of the interview
 
-**Created:** <YYYY-MM-DD HH:MM>
-**Status:** draft
+That confirmed restatement is the brief — pass it faithfully; it is the whole of the user's intent, and every later decision cites the spec it produces. The worker explores the repository, defines the shared interfaces, and writes `<run-dir>/spec.md` (outcome, features, non-goals, inputs/outputs, interfaces, a 2-8 item dependency-ordered work breakdown with file ownership, assumptions, doubt rule, risks), returning a short summary. Its exploration stays in its own context; only the spec and summary return. If it reports that the requested scope cannot split cleanly against the codebase, treat that as a structural problem (section 5) before proceeding.
 
-## Outcome
-<What will exist when complete.>
+The spec worker authors `spec.md` once; the orchestrator maintains it thereafter — Decisions log, interface revisions, and amendments are orchestrator edits, not a re-spawn. The exception is a structural revision requested at the section 3 checkpoint, which re-spawns the spec worker with the current spec plus the requested changes.
 
-## Features
-- <Capability>
-
-## Non-goals
-- <Excluded scope>
-
-## Inputs & Outputs
-- **In:** <Data, events, or actions>
-- **Out:** <Results, side effects, or artifacts>
-
-## Interfaces Between Work Items
-- **<Boundary>:** <Exact shared contract>
-
-## Work Breakdown
-| ID | Work item | Depends on | Files it owns |
-| --- | --- | --- | --- |
-| W1 | <Coherent unit> | — | <Paths or globs> |
-
-## Assumptions
-- <Assumption>
-
-## Doubt Rule
-<prefer-smaller-scope or prefer-complete>
-
-## Risks & Open Questions
-- <Risk or uncertainty>
-```
-
-Use 2-8 independently implementable, verifiable, and committable items. Define shared interfaces in the spec before parallel implementation. If two items cannot share an exact boundary, combine them.
-
-Initialize `state.md` with one row per item and these states:
+Read the returned `spec.md` and initialize `state.md` with one row per item and these states:
 
 `pending → planning → planned → implementing → reviewing → committed → merged`
 
@@ -133,7 +102,7 @@ Use `blocked` with a reason for failures. Only `merged` unblocks dependents.
 Report the outcome, work items, dependency order, expected parallelism, and assumptions.
 
 - If the user declined the checkpoint, proceed immediately.
-- If the user opted in, ask once for approval and revise the artifacts as requested.
+- If the user opted in, ask once for approval and revise as requested: a structural revision (re-splitting items, reordering dependencies, reworking an interface) re-spawns the spec worker with the current spec plus the changes; a trivial revision (wording, a renamed item) the orchestrator edits inline.
 
 Set the spec status to `approved`, then create the integration worktree:
 

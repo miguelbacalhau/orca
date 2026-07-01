@@ -45,7 +45,7 @@ That is the default install path; if the skill is installed elsewhere, run `pref
 - `BARE_REPO: PASS|FAIL` — the project is a bare repository with worktrees.
 - `TRUNK_CANDIDATE: <branch>` — informational, not a gate: the bare repo's default branch, the run's likely trunk. Confirm the trunk with the user; the integration branch is created from its tip.
 - `CODEX: PASS|FAIL` — the Codex CLI is installed and authenticated.
-- `AGENTS: PASS|FAIL` — all six subagent definitions are installed.
+- `AGENTS: PASS|FAIL` — all seven subagent definitions are installed.
 - `RESULT: PASS|FAIL` — mirrored by the exit code, which is 0 iff every gate passed.
 
 On `RESULT: PASS`, proceed. On any `FAIL`, do not start — relay the failing gate's remediation below and stop. These are pre-flight gates, not mid-run questions.
@@ -54,7 +54,7 @@ On `RESULT: PASS`, proceed. On any `FAIL`, do not start — relay the failing ga
 
 - **Bare repo** is the substrate the entire run depends on: every working copy — the user's, the integration tree, each item — is a peer worktree off one shared bare object store, so there is no privileged main checkout to corrupt. A `FAIL` means the repo is a conventional checkout. Converting it is the user's decision — surface the steps, do not do it autonomously: move the existing `.git` into a `.bare/` directory, add a top-level `.git` file containing `gitdir: ./.bare`, run `git --git-dir=.bare config core.bare true`, then recreate working copies as worktrees (`git --git-dir=.bare worktree add <branch>`).
 - **Codex** is the independent, cross-model reviewer in stage 4c — a different model family from the Claude implementer, so it does not share the implementer's blind spots. A missing or unauthenticated `codex` would fail every item at review time, deep into an autonomous run. Fix: install with `npm i -g @openai/codex`, or authenticate with `codex login` (or `codex login --with-api-key`). Installing or authenticating is the user's action — surface the command, do not do it autonomously.
-- **Subagent definitions** — every Claude stage is a dedicated subagent type (`orchestrify-plan`, `-implement`, `-fix`, `-commit`, `-merge`, `-integrate`) whose instructions load as its system prompt; the orchestrator spawns by type and passes only per-item values. They ship with the skill and are installed into the Claude agents directory by `install-claude-skills.sh`, which the harness loads at session start. A `FAIL` means the skill is not fully installed — re-run `install-claude-skills.sh` from the skills repo. If they were only just installed this session, the harness may not have picked them up yet; a fresh session loads them.
+- **Subagent definitions** — every Claude stage is a dedicated subagent type (`orchestrify-spec`, `-plan`, `-implement`, `-fix`, `-commit`, `-merge`, `-integrate`) whose instructions load as its system prompt; the orchestrator spawns by type and passes only per-item values. They ship with the skill and are installed into the Claude agents directory by `install-claude-skills.sh`, which the harness loads at session start. A `FAIL` means the skill is not fully installed — re-run `install-claude-skills.sh` from the skills repo. If they were only just installed this session, the harness may not have picked them up yet; a fresh session loads them.
 
 ### Permissions pre-flight
 
@@ -93,70 +93,17 @@ Create the run directory at the project root — the directory that holds the ba
 - Make `<slug>` a short kebab-case description of the idea, 3-5 words max.
 - Worktree directories sit at `<repo-root>` and are named after their branches: `orchestrify-<slug>` for integration, `orchestrify-<slug>-<ID>` for each item. The `.orchestrify/` metadata is scratch space on disk, outside every worktree, so nothing in it can be committed by accident.
 
-Do light codebase reconnaissance first — enough to split the work along real module boundaries, not enough to design implementations.
+With the run directory scaffolded, **delegate the spec — do not explore the codebase in the orchestrator context.** This is the same rule as every other stage: heavy exploration lives and dies in a subagent, and the orchestrator only reads the artifact that comes back. Spawn one `orchestrify-spec` subagent, passing only:
 
-Write `spec.md` with this structure:
+- the run directory
+- the repository root (`<repo-root>`)
+- the **interview brief**: the outcome, features, non-goals, inputs/outputs, constraints, and doubt rule exactly as you restated and confirmed them at the close of the interview
 
-```markdown
-# Spec: <idea summary>
+That confirmed restatement *is* the brief — pass it faithfully, because it is the whole of the user's intent and every later autonomous decision cites the spec it produces. The agent explores the codebase, defines the shared **Interfaces Between Work Items**, and writes the full spec — outcome, features, non-goals, inputs/outputs, interfaces, a 2-8 item dependency-ordered **Work Breakdown** with file ownership, assumptions, the doubt rule, and risks — to `<run-dir>/spec.md`, returning a short summary. Its exploration dies with its context; only `spec.md` and the summary return, so the orchestrator stays lean for the long autonomous loop ahead. If the agent reports that the requested scope cannot be split cleanly against the codebase — a feature the existing code fights, an interface it forces — resolve it under **Escalation** before proceeding.
 
-**Created:** <YYYY-MM-DD HH:MM>
-**Status:** draft
+The spec agent authors `spec.md` **once**. From here on the orchestrator owns and maintains it: the Decisions log, interface revisions, and breakdown amendments during the run are all orchestrator edits (Step 4's Escalation), never a re-spawn — the sole exception is a structural revision requested at the Step 3 checkpoint, which re-spawns the spec agent (see Step 3).
 
-## Outcome
-
-<What exists when this is done. One to three paragraphs.>
-
-## Features
-
-- <Capability, implementation-agnostic>
-
-## Non-goals
-
-- <Explicitly excluded scope>
-
-## Inputs & Outputs
-
-- **In:** <data, events, or actions the system receives>
-- **Out:** <results, side effects, or artifacts it produces>
-
-## Interfaces Between Work Items
-
-<The contracts work items share: type shapes, function signatures,
-file ownership, naming. Defined HERE so parallel agents cannot
-invent conflicting versions. If two items cannot agree on a
-boundary, merge them into one item.>
-
-- **<Boundary>:** <signature or shape both sides code against>
-
-## Work Breakdown
-
-| ID  | Work item                    | Depends on | Files it owns        |
-| --- | ---------------------------- | ---------- | -------------------- |
-| W1  | <coherent unit of work>      | —          | <paths or globs>     |
-| W2  | <coherent unit of work>      | W1         | <paths or globs>     |
-
-## Assumptions
-
-- <Assumption made to proceed>
-
-## Doubt Rule
-
-<From the interview: prefer-smaller-scope or prefer-complete. Every
-autonomous decision later in the run cites this.>
-
-## Risks & Open Questions
-
-- <Risk, uncertainty, or decision still needed>
-```
-
-Rules for the breakdown:
-
-- Each item must be independently implementable, verifiable, and committable.
-- "Files it owns" is a soft signal, not a parallelism gate — worktrees isolate execution, so overlap surfaces as a merge conflict instead of corruption. Still prefer splits along real module boundaries: heavy expected overlap between independent items means the split is wrong.
-- Keep it to 2-8 items. More than that means the idea needs a smaller first milestone.
-
-Initialize `state.md`:
+Read the returned `spec.md` — an artifact, not source — and initialize `state.md` from its Work Breakdown:
 
 ```markdown
 # State: <idea summary>
@@ -173,7 +120,7 @@ Statuses: `pending` → `planning` → `planned` → `implementing` → `reviewi
 Report the spec to the user — outcome, work items, dependency order, what will run in parallel, key assumptions. How this lands depends on the breakdown-checkpoint choice made in the interview:
 
 - **Opted out (the default):** this is a one-way status update. Proceed immediately; do not wait for or request approval — the interview's closing confirmation already authorized the run. If the user interjects on their own, incorporate it; never solicit it.
-- **Opted in:** this is the one authorized pause. Present the spec and breakdown and ask once for approval. Incorporate any changes they request — revise `spec.md` and the work breakdown accordingly — then proceed. This is the final interactive moment of the run; after it, the run is autonomous and never waits on the user again.
+- **Opted in:** this is the one authorized pause. Present the spec and breakdown and ask once for approval. Incorporate any changes they request: a **structural** revision — re-splitting items, reordering dependencies, reworking an interface — re-spawns the `orchestrify-spec` agent with the current `spec.md` plus the requested changes, because it may need fresh codebase exploration; a **trivial** revision — wording, a renamed item, a tweaked assumption — the orchestrator edits inline. Then proceed. This is the final interactive moment of the run; after it, the run is autonomous and never waits on the user again.
 
 Set the spec status to `approved`. Create the integration worktree at the repo root, on a fresh branch based on the trunk tip:
 
@@ -398,7 +345,7 @@ After writing the file, give the user a short spoken summary — what shipped wi
 
 - Never attribute commits to Claude. No commit produced by any agent in the run — commit agent, merge agent, escalation fixes — may mention Claude, AI, agents, this orchestration process, or the user anywhere in the message: not the subject, not the body, not the footers. No `Co-Authored-By: Claude` and no `Generated with` trailers. Commit messages describe only the change itself.
 - The orchestrator never implements, reviews, or explores deeply itself. If you catch yourself reading source files at length in the main context, delegate.
-- Each Claude stage is a dedicated subagent type (`orchestrify-plan`, `orchestrify-implement`, `orchestrify-fix`, `orchestrify-commit`, `orchestrify-merge`, `orchestrify-integrate`) whose instructions are its definition, loaded as its system prompt. The orchestrator spawns by type and passes only the per-item values — run directory, worktree path, ID and title, owned files, branch names. The heavy stage instructions never enter the orchestrator's context. Codex review (4c) is the exception: it is an external CLI the orchestrator runs directly, not a subagent.
+- Each Claude stage is a dedicated subagent type (`orchestrify-spec`, `orchestrify-plan`, `orchestrify-implement`, `orchestrify-fix`, `orchestrify-commit`, `orchestrify-merge`, `orchestrify-integrate`) whose instructions are its definition, loaded as its system prompt. The orchestrator spawns by type and passes only the per-item values — run directory, worktree path, ID and title, owned files, branch names; the spec agent instead gets the interview brief and repo root. The heavy stage instructions never enter the orchestrator's context. Codex review (4c) is the exception: it is an external CLI the orchestrator runs directly, not a subagent.
 - State lives in files, not in conversation memory. After any interruption, `state.md` plus the plan files are sufficient to resume.
 - Pass context between stages through artifact files, never by relaying summaries — the implement agent reads the plan file itself, the Codex reviewer reads the plan and diff itself and writes findings to its review file, and the fix agent reads that review file itself.
 - One worktree per work item, created by the orchestrator at the repo root off the shared bare repo, shared by that item's implement, Codex review, fix, and commit stages, removed only after merge. All worktrees — the user's, the integration tree, and each item — are peers off the bare repo; the run never reads or writes the user's worktree. Only the serialized merge agent writes the integration branch, inside the integration worktree.

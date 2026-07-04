@@ -79,6 +79,7 @@ Use the timestamp from your task message for the `Created` line — you have no 
 Rules for the breakdown:
 
 - Each item must be independently implementable, verifiable, and committable.
+- Never use `integration` as an item ID — it is reserved for the run's end-of-run integration review, and the workflow refuses to launch a breakdown that uses it.
 - "Files it owns" is a soft signal, not a parallelism gate — worktrees isolate execution, so overlap surfaces as a merge conflict instead of corruption. Still prefer splits along real module boundaries: heavy expected overlap between independent items means the split is wrong.
 - Define every shared contract in **Interfaces Between Work Items** before the split, so parallel agents cannot invent conflicting versions. If two items cannot agree on a boundary, merge them into one item.
 - Keep it to 2-8 items. More than that means the idea needs a smaller first milestone — say so in Risks rather than emitting a giant breakdown.

@@ -84,8 +84,7 @@ Create the run directory at the project root — the directory that holds the ba
 ├── orchestrify-<slug>-<ID>/            # one worktree per in-flight item (e.g. orchestrify-<slug>-W1)
 └── .orchestrify/YYYYMMDD-HHMMSS-<slug>/
     ├── brief.md    # the consumed brief — the run's confirmed intent
-    ├── spec.md     # requirements, interfaces, work breakdown
-    ├── state.md    # work-item status snapshots, owned by the main conversation
+    ├── spec.md     # requirements, interfaces, work breakdown, workflow runId
     ├── report.md   # final run report, written at the end
     ├── plans/      # one plan file per work item, written by plan agents
     └── reviews/    # per-item review prompts and Codex findings artifacts
@@ -109,17 +108,7 @@ Pass the brief faithfully — it is the whole of the user's intent, and every la
 
 The spec agent authors `spec.md` **once**. During the run, mid-loop amendments — interface revisions, breakdown changes, the `## Decisions` log — are made by the workflow's escalation agent (Step 4), never by a re-spawn; the sole exception is a structural revision requested at the Step 3 checkpoint, which re-spawns the spec agent (see Step 3).
 
-Read the returned `spec.md` — an artifact, not source — and initialize `state.md` from its Work Breakdown:
-
-```markdown
-# State: <idea summary>
-
-| ID  | Item    | Status  | Branch | Commit |
-| --- | ------- | ------- | ------ | ------ |
-| W1  | <title> | pending | —      | —      |
-```
-
-`state.md` holds snapshots: every item `pending` before the workflow launches, and the final `merged`/`cut`/`blocked` statuses (with branches and hashes) written from the workflow's result afterwards. Mid-run, the live status is the workflow's own progress display and journal — do not poll files during the run.
+Read the returned `spec.md` — an artifact, not source. Its Work Breakdown is the run's item list; there is no separate status file to maintain. Mid-run, the live status is the workflow's own progress display and journal — do not poll files during the run — and the final outcome lands in `report.md`.
 
 ## Step 3: Announce and proceed
 
@@ -198,7 +187,7 @@ Workflow({
 })
 ```
 
-Pass `items` as a real JSON array, never a stringified one. Persist the `runId` from the tool result immediately: append a `**Workflow run:** <runId>` line to `state.md`. It is the resume handle, and the interruption that needs it — session death — also erases the conversation, the only other place it would exist.
+Pass `items` as a real JSON array, never a stringified one. Persist the `runId` from the tool result immediately: append a `**Workflow run:** <runId>` line to the end of `spec.md`. It is the resume handle, and the interruption that needs it — session death — also erases the conversation, the only other place it would exist.
 
 ### What the workflow does
 
@@ -210,15 +199,14 @@ The escalation rule the workflow's agent applies is unchanged from the conversat
 
 The workflow runs in the background and narrates via its progress display; relay notable `log` lines (items merged, items blocked, amendments) to the user as one-way status updates. When it completes, it returns `{ shipped, cut, blocked, integration, tokensSpent }`:
 
-- Update `state.md`: each shipped item `merged` with its branch and hash; each cut item `cut` (its feature was amended out of the spec — the reason mirrors the `## Decisions` entry); each blocked item `blocked` with its reason.
 - Blocked items' worktrees and branches were kept — list them for the follow-up run.
-- Proceed to Step 5.
+- Proceed to Step 5; the returned values feed the report directly, with no intermediate status file to update.
 
-**If the run is interrupted** — session death, a kill, a harness restart — do not re-run stages conversationally: re-invoke the Workflow tool with the same `scriptPath` and `args` plus `resumeFromRunId: "<runId>"`, reading the runId from the `**Workflow run:**` line in `state.md`. Completed agent calls replay instantly from the journal; only in-flight and remaining work runs live. Before resuming, reconcile leftover git state (`git worktree list`) only if the journal and the worktrees disagree.
+**If the run is interrupted** — session death, a kill, a harness restart — do not re-run stages conversationally: re-invoke the Workflow tool with the same `scriptPath` and `args` plus `resumeFromRunId: "<runId>"`, reading the runId from the `**Workflow run:**` line at the end of `spec.md` (and rebuilding `args` from the spec's Work Breakdown). Completed agent calls replay instantly from the journal; only in-flight and remaining work runs live. Before resuming, reconcile leftover git state (`git worktree list`) only if the journal and the worktrees disagree.
 
 ## Step 5: Report
 
-Write the run report to `<run-dir>/report.md` **first**, then relay its highlights to the user. The file is the durable record of the run: it outlives the conversation, so anyone resuming, auditing, or picking up a follow-up run reads it instead of scrolling back. Everything needed is at hand — the workflow's returned `shipped`, `cut`, `blocked`, and `integration` values, `state.md`, the spec's `## Decisions` log, and the `## Deviations` sections of the plan files under `<run-dir>/plans/`, where the fix agents record the Medium/Low findings they deferred and the findings rooted outside their item — the Follow-ups section is sourced from those Deviations. Do not re-explore beyond these artifacts. Generate the completion timestamp with `date +"%Y-%m-%d %H:%M"`.
+Write the run report to `<run-dir>/report.md` **first**, then relay its highlights to the user. The file is the durable record of the run: it outlives the conversation, so anyone resuming, auditing, or picking up a follow-up run reads it instead of scrolling back. Everything needed is at hand — the workflow's returned `shipped`, `cut`, `blocked`, and `integration` values, the spec's `## Decisions` log, and the `## Deviations` sections of the plan files under `<run-dir>/plans/`, where the fix agents record the Medium/Low findings they deferred and the findings rooted outside their item — the Follow-ups section is sourced from those Deviations. Do not re-explore beyond these artifacts. Generate the completion timestamp with `date +"%Y-%m-%d %H:%M"`.
 
 ```markdown
 # Report: <idea summary>
@@ -261,7 +249,7 @@ After writing the file, give the user a short spoken summary — what shipped wi
 - Never attribute commits to Claude. No commit produced by any agent in the run — commit agent, merge agent, integration fixes — may mention Claude, AI, agents, this orchestration process, or the user anywhere in the message: not the subject, not the body, not the footers. No `Co-Authored-By: Claude` and no `Generated with` trailers. Commit messages describe only the change itself. The workflow backstops this with a deterministic check of every commit message — including merge commits — read back from `git log`: unambiguous markers (Claude, Anthropic, `Co-Authored-By`, `Generated with`/`Generated by`) trigger a rewrite. Keeping "AI" and "agent" out of ordinary prose is the agents' own instruction — those are legitimate domain vocabulary in many repos, so no regex can police them without mangling honest messages.
 - The main conversation never implements, reviews, or explores deeply itself. If you catch yourself reading source files at length in the main context, delegate.
 - Each Claude stage is a dedicated subagent type (`orchestrify-spec`, `orchestrify-plan`, `orchestrify-implement`, `orchestrify-fix`, `orchestrify-commit`, `orchestrify-merge`, `orchestrify-integrate`) whose instructions are its definition, loaded as its system prompt. The workflow spawns them by `agentType` and passes only the per-item values — run directory, worktree path, ID and title, owned files, branch names; the spec agent is spawned conversationally in Step 2 with the brief and repo root. The heavy stage instructions never enter the main context. Codex review is the exception: an external model driven through the Codex SDK by `scripts/codex-review.mjs`, invoked from inside the workflow; its findings come back as typed JSON, and the script renders the artifact the fix agent reads.
-- State lives in files and the workflow journal, not in conversation memory. `state.md` snapshots the breakdown before the run and the outcome after it; mid-run state is the journal, and an interrupted run resumes with `resumeFromRunId` — never by re-running stages conversationally.
+- State lives in files and the workflow journal, not in conversation memory. `spec.md` holds the breakdown and the `**Workflow run:**` runId line, `report.md` holds the outcome; mid-run state is the journal, and an interrupted run resumes with `resumeFromRunId` — never by re-running stages conversationally.
 - Pass context between stages through artifact files, never by relaying summaries — the implement agent reads the plan file itself, the Codex reviewer reads the plan and diff itself and writes findings to its review file, and the fix agent reads that review file itself. Structured agent returns (verdicts, hashes, reconciliation results) exist for the workflow's control flow, not as a substitute for the artifacts.
 - One worktree per work item, created by the workflow at the repo root off the shared bare repo, shared by that item's implement, Codex review, fix, and commit stages, removed only after merge. All worktrees — the user's, the integration tree, and each item — are peers off the bare repo; the run never reads or writes the user's worktree. Only the serialized merge agent writes the integration branch, inside the integration worktree.
 - If a run is abandoned, clean up with `git worktree list` and remove any `orchestrify/` worktrees and branches left behind — but prefer resuming via `resumeFromRunId` over abandoning.

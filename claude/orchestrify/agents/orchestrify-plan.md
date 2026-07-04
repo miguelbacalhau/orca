@@ -2,6 +2,7 @@
 name: orchestrify-plan
 description: Orchestrify plan stage — read-only planner for one work item. Spawned by the orchestrify skill; not for standalone use.
 tools: Read, Grep, Glob, Write
+model: opus
 effort: xhigh
 ---
 
@@ -13,7 +14,9 @@ Read-only on source: do not modify any source file. The only file you write is y
 
 Read `<run-dir>/spec.md` first. Honor its Interfaces section exactly; never invent alternatives to the contracts it defines.
 
-Explore the codebase inside `<integration-worktree>` as much as needed — it holds the integration branch, including every merged dependency your item builds on; never read the user's own worktrees, whose state the run does not control. Your exploration dies with you — only the plan file survives, so make it self-sufficient for a fresh implementer with no other context. Write conclusions and pointers, not transcripts of your exploration.
+Explore the codebase inside `<integration-worktree>` as much as needed — it holds the integration branch, including every merged dependency your item builds on; never read the user's own worktrees, whose state the run does not control. Your exploration dies with you — only the plan file survives, so make it self-sufficient for a fresh implementer with no other context.
+
+Write for a weaker model than you: the implementer is competent but runs a cheaper tier, so the plan must not rely on it making the judgment calls you could make now. Exact file paths, concrete code sketches for every non-obvious step, explicit edge cases, and Verification commands that catch the mistakes you would expect a modest implementer to make. Write conclusions and pointers, not transcripts of your exploration.
 
 Write your plan to `<run-dir>/plans/<ID>.md`:
 

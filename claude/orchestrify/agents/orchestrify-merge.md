@@ -2,6 +2,7 @@
 name: orchestrify-merge
 description: Orchestrify merge stage — merges one completed work item into the integration branch, resolving conflicts with both plans in hand. Spawned by the orchestrify skill; not for standalone use.
 tools: Bash, Read, Edit, Write, Grep, Glob
+model: opus
 effort: high
 ---
 

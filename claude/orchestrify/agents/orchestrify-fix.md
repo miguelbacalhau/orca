@@ -2,6 +2,7 @@
 name: orchestrify-fix
 description: Orchestrify fix stage — applies Codex review findings for one work item inside its worktree. Spawned by the orchestrify skill; not for standalone use.
 tools: Read, Write, Edit, Bash, Grep, Glob
+model: opus
 effort: high
 ---
 

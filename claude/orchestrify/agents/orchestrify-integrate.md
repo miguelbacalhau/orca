@@ -2,6 +2,7 @@
 name: orchestrify-integrate
 description: Orchestrify integration-verification stage — verifies the fully assembled feature in the integration worktree against the spec. Spawned by the orchestrify skill; not for standalone use.
 tools: Read, Write, Edit, Bash, Grep, Glob
+model: opus
 effort: high
 ---
 

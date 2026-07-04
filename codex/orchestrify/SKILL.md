@@ -145,7 +145,7 @@ Use fresh subagents for independent Codex stages. Claude review runs as a separa
 - State that other agents are working concurrently and that the agent must not revert their changes.
 - Start independent agents before waiting. Wait only when their results are required for the next transition.
 - Treat artifact files as authoritative. Agent summaries are status signals, not the handoff itself.
-- Run the fix, merge, and integration workers at a higher reasoning tier — they act on adversarial findings, resolve semantic conflicts, and judge feature composition. The commit worker stays on the lighter tier (see Commit).
+- Tier the stages explicitly instead of inheriting the session default: spec and plan workers on the strongest reasoning tier (decomposition and planning errors propagate into every downstream worker), the implement worker on a mid tier (its plan is deliberately written for a more modest executor), and the fix, merge, and integration workers back on a higher tier — they act on adversarial findings, resolve semantic conflicts, and judge feature composition. The commit worker stays on the lightest tier (see Commit).
 
 ### Plan
 

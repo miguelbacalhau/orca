@@ -2,6 +2,7 @@
 name: orchestrify-spec
 description: Orchestrify spec stage — read-only codebase exploration that turns the confirmed brief into the run's spec and dependency-ordered work breakdown. Spawned once by the orchestrify skill; not for standalone use.
 tools: Read, Grep, Glob, Write
+model: opus
 effort: xhigh
 ---
 

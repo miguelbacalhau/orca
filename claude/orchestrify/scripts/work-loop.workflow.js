@@ -17,7 +17,11 @@
 //   repoRoot          parent of the bare repo; all worktrees live here (absolute)
 //   slug              run slug; integration worktree is <repoRoot>/orchestrify-<slug>
 //   integrationBranch orchestrify/<slug>
-//   items             [{ id, title, deps: [ids], files: [paths] }] from the Work Breakdown
+//   items             [{ id, title, deps: [ids], files: [paths], taskId? }] from the Work
+//                     Breakdown; taskId is the id of the item's session task
+//                     (created by the main conversation before launch), updated
+//                     by the stage agents for live display — absent, the item
+//                     simply gets no status lines
 // }
 //
 // Review prompts are not inputs: the orchestrify-review agent carries the
@@ -71,6 +75,9 @@ const badItems = items.filter(i => !i || typeof i.id !== 'string' || typeof i.ti
   !Array.isArray(i.deps) || !Array.isArray(i.files))
 if (badItems.length)
   throw new Error(`malformed work items (need string id, string title, array deps, array files): ${JSON.stringify(badItems)}`)
+const badTaskIds = items.filter(i => i.taskId !== undefined && (typeof i.taskId !== 'string' || !i.taskId))
+if (badTaskIds.length)
+  throw new Error(`malformed work items: taskId, when present, must be a non-empty string: ${JSON.stringify(badTaskIds)}`)
 // "integration" is the reserved id of the integration-fixes review pass — a
 // work item with that id would collide with its artifact paths even though
 // the review mode is now passed explicitly.
@@ -217,12 +224,16 @@ const block = (id, reason) => {
 const review = async (id, worktree, round, mode, ownedFiles = []) => {
   const artifact = `${runDir}/reviews/${id}-codex.json`
   const archive = `${runDir}/reviews/${id}-codex.round${round}.json`
+  // The integration pseudo-item has no entry in `items`, so the find misses
+  // and the status line stays empty — no special-casing.
+  const status = statusLine(items.find(i => i.id === id), `review #${round}`)
   let lastReason
   for (let attempt = 1; attempt <= 2; attempt++) {
     const r = await withReviewSlot(() => agent(
       [`Worktree: ${worktree}`, `Run directory: ${runDir}`, `Item: ${id}`, `Mode: ${mode}`,
        `Artifact path: ${artifact}`, `Round archive path: ${archive}`,
-       mode === 'item' ? `Owned files: ${ownedFiles.join(', ') || 'the files its plan names'}` : '']
+       mode === 'item' ? `Owned files: ${ownedFiles.join(', ') || 'the files its plan names'}` : '',
+       status]
         .filter(Boolean).join('\n'),
       { agentType: 'orchestrify-review', schema: REVIEW,
         label: `review:${id}#${round}${attempt > 1 ? '~retry' : ''}`, phase: 'Review' }))
@@ -233,11 +244,29 @@ const review = async (id, worktree, round, mode, ownedFiles = []) => {
   throw new Error(`Codex review did not complete: ${lastReason}`)
 }
 
+// Live per-item display: the main conversation created one session task per
+// item before launch and put its id in item.taskId; each stage prompt ends
+// with one verbatim TaskUpdate instruction — computed here, executed as the
+// first action of the agent that is already running, so the checklist ticks
+// with no extra agents. Display-only and fail-soft: the line itself orders
+// the agent to proceed on failure, and an item without a taskId (old resume,
+// direct launch, the integration pseudo-item) gets no line — which also keeps
+// taskId-less prompts byte-identical to the pre-taskId journal keys.
+const statusLine = (item, stage, extra = '') => {
+  if (!item || !item.taskId) return ''
+  const fields = stage === 'planning'
+    ? `{status: "in_progress", activeForm: "${item.id}: planning"}`
+    : `{activeForm: "${item.id}: ${stage}"}`
+  return `Status task: as your FIRST action, call TaskUpdate on task #${item.taskId} with ${fields}. ` +
+    `If the call fails or the tool is missing, skip it and proceed.${extra}`
+}
+
 const planItem = i => agent(
   [`Run directory: ${runDir}`,
    `Item: ${i.id} — ${i.title}`,
    `Owned files: ${i.files.join(', ')}`,
-   `Integration worktree: ${integrationWt}`].join('\n'),
+   `Integration worktree: ${integrationWt}`,
+   statusLine(i, 'planning')].filter(Boolean).join('\n'),
   { agentType: 'orchestrify-plan', label: `plan:${i.id}`, phase: 'Plan' })
 
 // Commit with the attribution rule enforced against the repository itself, not
@@ -261,10 +290,12 @@ const tipAndSpan = async (wt, range, label) => {
 const commitItem = async (wt, id, title, extraLines = []) => {
   const head = async tag => (await shMarked(`git -C "${wt}" rev-parse HEAD`, `head:${id}#${tag}`, 'Merge')).trim()
   const base = await head('base')
+  const status = statusLine(items.find(i => i.id === id), 'committing')
   for (let attempt = 1; attempt <= 2; attempt++) {
     must(await agent(
       [`Worktree: ${wt}`, `Run directory: ${runDir}`, `Item: ${id} — ${title}`, ...extraLines,
-       attempt > 1 ? 'A previous message violated the attribution rule; describe only the change itself.' : '']
+       attempt > 1 ? 'A previous message violated the attribution rule; describe only the change itself.' : '',
+       status]
         .filter(Boolean).join('\n'),
       { agentType: 'orchestrify-commit', label: `commit:${id}#${attempt}`, phase: 'Merge' }),
       `commit:${id}#${attempt}`)
@@ -325,7 +356,8 @@ const buildItem = async item => {
 
   const impl = must(await agent(
     [`Worktree: ${wt}`, `Run directory: ${runDir}`,
-     `Item: ${item.id} — ${item.title}`, `Owned files: ${item.files.join(', ')}`].join('\n'),
+     `Item: ${item.id} — ${item.title}`, `Owned files: ${item.files.join(', ')}`,
+     statusLine(item, 'implementing')].filter(Boolean).join('\n'),
     { agentType: 'orchestrify-implement', label: `implement:${item.id}`, phase: 'Build', schema: IMPLEMENT }),
     `implement:${item.id}`)
   // "I could not implement this as specified" is a signal, not noise — without
@@ -339,7 +371,8 @@ const buildItem = async item => {
   if (first.total > 0) {
     for (let round = 1; ; round++) {
       must(await agent(
-        [`Worktree: ${wt}`, `Run directory: ${runDir}`, `Item: ${item.id} — ${item.title}`].join('\n'),
+        [`Worktree: ${wt}`, `Run directory: ${runDir}`, `Item: ${item.id} — ${item.title}`,
+         statusLine(item, `fixing #${round}`)].filter(Boolean).join('\n'),
         { agentType: 'orchestrify-fix', label: `fix:${item.id}#${round}`, phase: 'Review' }),
         `fix:${item.id}#${round}`)
       const verdict = await review(item.id, wt, round, 'item', item.files)
@@ -361,7 +394,10 @@ const buildItem = async item => {
     const m = must(await agent(
       [`Integration worktree: ${integrationWt}`, `Run directory: ${runDir}`,
        `Item: ${item.id} — ${item.title}`,
-       `Item branch: ${branch}`, `Integration branch: ${integrationBranch}`].join('\n'),
+       `Item branch: ${branch}`, `Integration branch: ${integrationBranch}`,
+       statusLine(item, 'merging', ' After the merge succeeds — only if you will report merged=true — ' +
+         'call TaskUpdate once more on the same task with {status: "completed"}; the same skip-on-failure rule applies.')]
+        .filter(Boolean).join('\n'),
       { agentType: 'orchestrify-merge', label: `merge:${item.id}`, phase: 'Merge', schema: MERGE }),
       `merge:${item.id}`)
     // The merge agent's commit message is repo state its schema never returns —

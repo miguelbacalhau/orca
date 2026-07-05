@@ -143,6 +143,8 @@ The work loop runs as **one deterministic workflow**, not as conversational orch
 
 Review prompts need no preparation: the `orchestrify-review` agent carries the static adversarial template in its own definition and assembles each prompt itself, substituting only the run directory, the plan path, and the item's owned files from the Work Breakdown. The template names `spec.md` and the plan by **path** — never pasting their text — because the workflow's escalation agents amend `spec.md` mid-run, and a pasted copy would freeze the pre-run contract while the code under review correctly follows the amended one.
 
+**Create the status tasks.** Once the breakdown is final, create one session task per work item — the live per-item surface the user watches during the run: `TaskCreate` with subject `Wn — <title>` for each item, then `TaskUpdate` with `addBlockedBy` mirroring each item's `deps` onto the created task ids. Put each item's task id into its `taskId` field in the Workflow args below; the script threads a `Status task:` line into every stage prompt, and the stage agents tick their own item's task as they run. A dependency-blocked item needs no updates from anyone — it truthfully sits `pending` with its blockers named on the task. This layer is display-only and fail-soft: if task creation fails, launch anyway — an item without a `taskId` simply gets no live row. The `integration` pseudo-item never gets a task.
+
 **Invoke the Workflow tool** with the bundled script and the run's values (this skill instructing the call is the user's consent for workflow orchestration). Resolve the script path to absolute form first — `$HOME/.claude/skills/orchestrify/scripts/` at the default install location, this skill's own `scripts/` directory otherwise; do not pass `~` unexpanded. `runDir` and `repoRoot` must be absolute too — the script rejects relative paths at launch:
 
 ```
@@ -153,7 +155,7 @@ Workflow({
     repoRoot: "<repo-root>",
     slug: "<slug>",
     integrationBranch: "orchestrify/<slug>",
-    items: [ { id: "W1", title: "…", deps: [], files: ["…"] }, … ]   // verbatim from the spec's Work Breakdown
+    items: [ { id: "W1", title: "…", deps: [], files: ["…"], taskId: "…" }, … ]   // verbatim from the spec's Work Breakdown, plus each item's status-task id
   }
 })
 ```
@@ -168,14 +170,16 @@ The escalation rule the workflow's agent applies is unchanged from the conversat
 
 ### While it runs and after
 
-The workflow runs in the background and narrates via its progress display; relay notable `log` lines (items merged, items blocked, amendments) to the user as one-way status updates. When it completes, it returns `{ shipped, cut, blocked, integration, tokensSpent }`:
+The workflow runs in the background, but its `log()` lines (items merged, items blocked, amendments) are **not visible on any live surface while the run is in flight** ([anthropics/claude-code#74419](https://github.com/anthropics/claude-code/issues/74419)) — they land only in the `logs` array of the completion-time `workflows/<runId>.json`, where notable ones are read back for the report. The live mid-run surface is the **session task list** created above: stage agents advance each item's task through its stages via `activeForm`, dependency-blocked items sit `pending` with their blockers named, and merged items complete. When it completes, it returns `{ shipped, cut, blocked, integration, tokensSpent }`:
 
 - Blocked items' worktrees and branches were kept — list them for the follow-up run.
 - Proceed to Step 5; the returned values feed the report directly, with no intermediate status file to update.
 
-**If the run is interrupted** — session death, a kill, a harness restart — do not re-run stages conversationally: re-invoke the Workflow tool with the same `scriptPath` and `args` plus `resumeFromRunId: "<runId>"`, reading the runId from the `**Workflow run:**` line at the end of `spec.md` (and rebuilding `args` from the spec's Work Breakdown). Completed agent calls replay instantly from the journal; only in-flight and remaining work runs live. Before resuming, reconcile leftover git state (`git worktree list`) only if the journal and the worktrees disagree. Migration note: a run started before the review stage moved to the `orchestrify-review` MCP agent cannot resume its review stages from the journal — the changed calls re-run live; everything before them still replays.
+**If the run is interrupted** — session death, a kill, a harness restart — do not re-run stages conversationally: re-invoke the Workflow tool with the same `scriptPath` and `args` plus `resumeFromRunId: "<runId>"`, reading the runId from the `**Workflow run:**` line at the end of `spec.md` (and rebuilding `args` from the spec's Work Breakdown). Completed agent calls replay instantly from the journal; only in-flight and remaining work runs live. Before resuming, reconcile leftover git state (`git worktree list`) only if the journal and the worktrees disagree. Migration note: a run started before the review stage moved to the `orchestrify-review` MCP agent cannot resume its review stages from the journal — the changed calls re-run live; everything before them still replays. Status tasks and resume: a `Status task:` line changes a stage call's journal key, but only when the item has a `taskId` — so resume a pre-taskId run **without** adding `taskId`s to the rebuilt args (the prompts stay byte-identical and everything replays; those items just get no live rows), and rebuild the args with the same `taskId`s for a run that already had them.
 
 ## Step 5: Report
+
+Reconcile the status tasks first, from the returned values — the stage agents' updates are best-effort, so the terminal states are set here: every `shipped` item's task → `status: "completed"` (a backstop for a merge agent whose final update was skipped), every `cut` item's task → deleted, every `blocked` item's task → `status: "pending"` with the subject prefixed `✗ blocked — <short reason>` (the task list has no failed state; a pending row with the marker beats a spinner that never stops). Items without a `taskId` have no task to touch.
 
 Write the run report to `<run-dir>/report.md` **first**, then relay its highlights to the user. The file is the durable record of the run: it outlives the conversation, so anyone resuming, auditing, or picking up a follow-up run reads it instead of scrolling back. Everything needed is at hand — the workflow's returned `shipped`, `cut`, `blocked`, and `integration` values, the spec's `## Decisions` log, and the `## Deviations` sections of the plan files under `<run-dir>/plans/`, where the fix agents record the Medium/Low findings they deferred and the findings rooted outside their item — the Follow-ups section is sourced from those Deviations. Do not re-explore beyond these artifacts. Generate the completion timestamp with `date +"%Y-%m-%d %H:%M"`.
 

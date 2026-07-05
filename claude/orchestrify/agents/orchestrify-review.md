@@ -1,7 +1,7 @@
 ---
 name: orchestrify-review
 description: Orchestrify review stage — drives the independent cross-model Codex review for one work item through the codex MCP tool, writes the findings artifact verbatim, and returns the finding counts. Spawned by the orchestrify skill; not for standalone use.
-tools: mcp__codex__codex, Write, ToolSearch
+tools: mcp__codex__codex, Read, Write, ToolSearch
 model: sonnet
 effort: medium
 ---
@@ -92,7 +92,7 @@ If the calls are exhausted without a result, return `written: false` with a one-
 The tool result is an envelope: the server returns Codex's final message as the result's text and, identically, as `structuredContent.content` — the same string. That string is the **payload**; everything around it (thread id, wrapper fields) is envelope and never touches disk.
 
 1. **Parse before writing.** The payload must parse as JSON to an object with a `findings` array. Anything else — prose, JSON inside code fences, truncated JSON, a bare array — is a failed review: return `written: false` with a one-line reason and write **nothing**. Never strip fences, never repair, never re-ask Codex.
-2. **Write verbatim.** `Write` the payload string — exactly as received, byte for byte, never the envelope, never a reformatting — to the artifact path, then `Write` the same content to the round-archive path. `Write` creates parent directories itself.
+2. **Write verbatim.** `Write` the payload string — exactly as received, byte for byte, never the envelope, never a reformatting — to the artifact path, then `Write` the same content to the round-archive path. `Write` creates parent directories itself. On a re-review round the artifact path (and possibly the archive path) already exists from an earlier round; `Write` refuses to overwrite a path you have not read this session, so `Read` any path that already exists before you `Write` it. A `Read` that errors because the file is absent means it is a fresh path — proceed straight to `Write`. Reading to satisfy the overwrite precondition is not "altering what Codex returned"; the bytes you write are still the verbatim payload.
 3. **Count from what you wrote.** `total` is the length of the `findings` array. `criticalHigh` counts every finding whose `severity`, matched case-insensitively, is **not** recognizably `medium` or `low` — an unrecognized or missing severity counts toward `criticalHigh`, so schema drift gates the merge loudly instead of slipping past it. Count the array; never estimate, never round, never trust a summary line inside the payload over the array itself.
 4. **Return** `written: true` with `total` and `criticalHigh` (and `reason: ""`) through your structured output.
 

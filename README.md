@@ -319,4 +319,3 @@ This repository previously shipped the same workflow as symlink-installed skills
 | `skills/run/scripts/preflight.sh` | Read-only environment validation — the gate lines above. |
 | `skills/run/scripts/work-loop.workflow.js` | The deterministic work loop, run through the Workflow tool. |
 | `agents/` | The nine stage agents, loaded as `orca:<stage>` (the reviewers are `review-codex` and `review-claude`). |
-| `plans/` | Design documents (e.g. the plugin migration plan). Not part of the plugin surface. |

@@ -179,7 +179,7 @@ Interactive, consent-per-step machine and session tooling — the per-machine co
 
 It is reviewer-aware: with a detected claude reviewer (codex not installed) there is nothing to fix — it says runs will use the Claude reviewer, explains that installing codex enables the stronger cross-model review, and offers to pin either choice via `/orca:config`. With claude pinned and codex present, it notes the codex gates were skipped by choice. A codex gate failing while the reviewer is codex is always a failure to fix — never a silent switch to the other reviewer.
 
-Optionally — offered, never defaulted — it can write `bypassPermissions` as the default mode for a repo where runs are always unattended. Layout failures route the other way: `BARE_REPO: FAIL` goes to `/orca:init`.
+Optionally — offered, never defaulted — it can write `bypassPermissions` as the default mode for a repo where runs are always unattended, and, when Neovim is on PATH, check for the [orca.nvim](https://github.com/miguelbacalhau/orca.nvim) companion and prescribe its install so `:OrcaReview` walks a deliverable branch's merge-base diff in your own editor (quickfix file list, native side-by-side diff, your LSP and colors) before you `git merge --no-ff` it. Layout failures route the other way: `BARE_REPO: FAIL` goes to `/orca:init`.
 
 ### `/orca:config [assignments | reset]`
 
@@ -420,3 +420,4 @@ This repository previously shipped the same workflow as symlink-installed skills
 | `scripts/work-loop.workflow.js` | The deterministic feature work loop, run through the Workflow tool — also nested by debug runs for the fix tail. |
 | `scripts/debug-loop.workflow.js` | The deterministic debug loop: repro gate, hypothesis fan-out, verification, diagnosis, nested fix, repro check. |
 | `agents/` | The thirteen stage agents, loaded as `orca:<stage>` (the reviewers are `review-codex` and `review-claude`; the debug stages are `reproduce`, `hypothesize`, `verify`, `diagnose`). |
+| [orca.nvim](https://github.com/miguelbacalhau/orca.nvim) *(separate repository)* | The Neovim companion: `:OrcaReview` reviews a branch's merge-base diff in your own editor. Dependency-free, installs like any plugin; `/orca:doctor` checks it and prescribes the install. |

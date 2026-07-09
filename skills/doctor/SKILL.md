@@ -1,5 +1,5 @@
 ---
-description: Diagnose and fix the machine and session tooling orca runs depend on — the Codex CLI (presence, version, authentication), the `MCP_TOOL_TIMEOUT` settings write, the reviewer resolution (codex or claude, pinned or detected), and the optional `bypassPermissions` default-mode write. Use when orca:feature's pre-flight fails a machine gate, when codex install/auth/timeout problems need walking through, or when the user wants to check or understand which reviewer runs will use. Not for repository layout — the bare-repo-with-worktrees conversion is orca:init's job — and does not start runs. Interactive and consent-per-step: diagnosis is free, every write is confirmed first.
+description: Diagnose and fix the machine and session tooling orca runs depend on — the Codex CLI (presence, version, authentication), the `MCP_TOOL_TIMEOUT` settings write, the reviewer resolution (codex or claude, pinned or detected), the optional `bypassPermissions` default-mode write, and the optional orca.nvim install check/prescription for reviewing deliverable branches in Neovim. Use when orca:feature's pre-flight fails a machine gate, when codex install/auth/timeout problems need walking through, or when the user wants to check or understand which reviewer runs will use. Not for repository layout — the bare-repo-with-worktrees conversion is orca:init's job — and does not start runs. Interactive and consent-per-step: diagnosis is free, every write is confirmed first.
 args: <optional focus, e.g. "codex" or "timeout">
 user-invocable: true
 disable-model-invocation: true
@@ -43,7 +43,22 @@ What there is to fix depends on the resolved reviewer:
 
 ## Step 4: Optional — offered, never defaulted
 
-For a repo where orca runs are always unattended, offer to write `"permissions": { "defaultMode": "bypassPermissions" }` into `<repo-root>/<branch>/.claude/settings.local.json`. State the tradeoff plainly: it disables the approval gate for every session opened in that worktree, not just orca runs. Declining is fine — the mode can be toggled per session with Shift+Tab instead. (Per-repo, so skipped entirely in machine-only mode.)
+**`bypassPermissions` default mode.** For a repo where orca runs are always unattended, offer to write `"permissions": { "defaultMode": "bypassPermissions" }` into `<repo-root>/<branch>/.claude/settings.local.json`. State the tradeoff plainly: it disables the approval gate for every session opened in that worktree, not just orca runs. Declining is fine — the mode can be toggled per session with Shift+Tab instead. (Per-repo, so skipped entirely in machine-only mode.)
+
+**The orca.nvim install check.** Per-machine (offered in machine-only mode too), and only when `nvim` is on PATH — absent, skip silently. The Neovim companion lives in its own repository, [`miguelbacalhau/orca.nvim`](https://github.com/miguelbacalhau/orca.nvim); its `:OrcaReview` opens a deliverable branch's merge-base diff in the user's own editor. Doctor prescribes; it never edits the user's nvim config. Probe with the user's real configuration:
+
+```bash
+nvim --headless "+lua io.write(pcall(require,'orca') and 'yes' or 'no')" +qa!
+```
+
+- `yes` → installed and reachable; nothing to do — report it.
+- `no` → prescribe installing `miguelbacalhau/orca.nvim` with the user's plugin manager — one lazy.nvim line as illustration (`{ "miguelbacalhau/orca.nvim" }`), no manager detection, and never write into their nvim config. For users who run no plugin manager, offer — consented like every write — a clone into Neovim's native packpath: `git clone https://github.com/miguelbacalhau/orca.nvim <stdpath('data')>/site/pack/orca/start/orca.nvim` (resolve the path by asking nvim itself: `nvim --headless "+lua io.write(vim.fn.stdpath('data'))" +q`), then `nvim --headless "+helptags <clone>/doc" +q` and re-probe. Caveat to state when the clone path is chosen: native packages require `packpath` intact — configs that reset it (plugin managers commonly do) ignore the clone silently, so if the re-probe still says `no`, the manager route is the fix.
+
+Updates ride the manager's own update flow, or `git -C <clone> pull` for clone installs — doctor can run the pull on request. Uninstall is symmetric: remove via the manager, or `rm -rf` the clone.
+
+Machine hygiene, pre-release only: the never-shipped symlink design left links on dev machines (`site/pack/orca/start/orca.nvim` → a checkout's `nvim/`). A *symlink* at the clone path is one of those — offer to replace it with a real install. No user-facing migration story is needed; v1 was never released.
+
+Verification is in-editor: `:checkhealth orca`.
 
 ## Step 5: Verify
 

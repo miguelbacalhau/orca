@@ -8,6 +8,7 @@
 # Usage:
 #   review.sh discover
 #   review.sh open <worktree>
+#   review.sh probe <nvim|vscode>
 #
 # Output contract — one machine-readable line per fact, fields
 # TAB-separated (worktree paths may contain spaces):
@@ -31,7 +32,13 @@
 #       reasons: EDITOR_NONE TERMINAL_NONE NO_TMUX NO_EDITOR
 #                TMUX_LAUNCH_FAILED VSCODE_LAUNCH_FAILED
 #
-#   either subcommand:
+#   probe (read-only, machine-level — needs no git repository, so doctor's
+#   machine-only mode can call it):
+#     PROBE_OK:<TAB><nvim|vscode>                   exit 0, the tier probes clean
+#     PROBE_FAILED:<TAB><nvim|vscode><TAB><detail>  exit 1, with the same detail
+#       strings the open subcommand emits
+#
+#   any subcommand:
 #     FAIL:<TAB><reason><TAB><detail>               exit 1, nothing launched
 #       reasons: NOT_GIT NOT_BARE NO_TRUNK BAD_ARGS NO_SUCH_WORKTREE
 #                UNKNOWN_VALUE PINNED_PROBE_FAILED PINNED_TERMINAL_UNSET
@@ -273,8 +280,22 @@ cmd_open() {
   print_only VSCODE_LAUNCH_FAILED "code --open-url failed — after opening, run \"Orca: Review\" from the palette" "cd $(shq "$worktree") && code ."
 }
 
+# Machine-level, deliberately outside resolve_repo: the probes are what
+# orca:doctor's install checks run, machine-only mode included.
+cmd_probe() {
+  local tier="${1:-}" probe_detail=""
+  case "$tier" in
+    nvim)   probe_nvim   && { printf 'PROBE_OK:\tnvim\n'; exit 0; } ;;
+    vscode) probe_vscode && { printf 'PROBE_OK:\tvscode\n'; exit 0; } ;;
+    *)      fail BAD_ARGS "usage: review.sh probe <nvim|vscode>" ;;
+  esac
+  printf 'PROBE_FAILED:\t%s\t%s\n' "$tier" "$probe_detail"
+  exit 1
+}
+
 case "${1:-}" in
   discover) cmd_discover ;;
   open)     shift; cmd_open "$@" ;;
-  *)        fail BAD_ARGS "usage: review.sh discover | review.sh open <worktree>" ;;
+  probe)    shift; cmd_probe "$@" ;;
+  *)        fail BAD_ARGS "usage: review.sh discover | review.sh open <worktree> | review.sh probe <nvim|vscode>" ;;
 esac

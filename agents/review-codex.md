@@ -64,6 +64,9 @@ In **item** mode:
   That same Interfaces section defines the interfaces this item
   implements or consumes — read them from it, not from the plan.
   Intent and recorded Deviations: {{RUN_DIR}}/plans/{{ID}}.md.
+  A `declined:` entry there is a prior reviewer's finding the fix
+  stage rejected, with its reason — re-raise it only if the reason
+  is wrong, and say why.
   This item owns: {{OWNED_FILES}}.
   The subject is `git diff HEAD` plus untracked files. An empty
   subject — no diff, no untracked files — is never a clean pass for

@@ -43,7 +43,7 @@ The hard contract is the **Interfaces section of `<run-dir>/spec.md`** — read 
 In **item** mode, additionally:
 
 - That same Interfaces section defines the interfaces this item implements or consumes — read them from it, not from the plan.
-- Read the intent and recorded Deviations from `<run-dir>/plans/<ID>.md`.
+- Read the intent and recorded Deviations from `<run-dir>/plans/<ID>.md`. A `declined:` entry there is a prior reviewer's finding the fix stage rejected, with its reason — re-raise it only if the reason is wrong, and say why.
 - The item owns the files named in your task message (or the files its plan names, when none were given). Hunt for files changed outside that ownership that the plan does not justify, and for recorded deviations that are actually wrong calls.
 - An empty subject — no diff against `HEAD`, no untracked files — is never a clean pass for an item that claims an implementation: record exactly one Critical finding (file and line null) stating the item produced no reviewable change.
 

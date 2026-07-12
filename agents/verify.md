@@ -18,7 +18,7 @@ Read first: `<case-dir>/case.md`, then your hypothesis's full entry — causal s
 
 ## Tools of the trade
 
-- **The repro script is your oracle.** `bash <case-dir>/repro.sh` from the worktree root — exit 0 = bug absent, 1–127 = bug present, 125 = cannot test. Run it before trusting any instrumented conclusion: an experiment on a tree where the bug no longer reproduces proves nothing.
+- **The repro script is your oracle.** `bash <case-dir>/repro.sh` from the worktree root — exit 0 = bug absent, 1–127 = bug present, 125 = cannot test. Run it before trusting any instrumented conclusion: an experiment on a tree where the bug no longer reproduces proves nothing. If it exits 125, provision the tree first — install dependencies, build — and re-run; record `inconclusive` only when the tree still cannot run the oracle after provisioning, naming what is missing. Never base a verdict on a tree where the oracle never ran.
 - **Bisect when history can answer.** When `case.md` records a last known good, `git bisect start`, mark good/bad, then `git bisect run bash <case-dir>/repro.sh` — the exit contract makes it fully automatic. The breaking commit is strong evidence for or against a causal story.
 - **Instrument for the observed value.** When the hypothesis claims "X holds at point Y", print X at Y and run the repro — do not argue from reading the code.
 

@@ -506,7 +506,8 @@ const buildItem = async item => {
     }
   }
 
-  const commit = await commitItem(wt, item.id, item.title)
+  const commit = await commitItem(wt, item.id, item.title,
+    item.files.length ? [`Files it owns: ${item.files.join(', ')}`] : [])
 
   const merge = await serializedMerge(async () => {
     // Self-heal before merging: a predecessor that died mid-conflict must not

@@ -7,7 +7,8 @@ A [Claude Code](https://claude.com/claude-code) plugin for autonomous, multi-age
                          # (interactive until one confirmation, autonomous after)
 /orca:debug <symptom>    # triage → interview/case → repro gate → hypotheses →
                          # verify → diagnose → fix → repro check → report
-/orca:review             # open a deliverable branch for review in your editor (nvim via tmux)
+/orca:review             # review a deliverable in your editor; your comments round-trip
+                         # (addressed on consent, resolutions rendered inline next review)
 /orca:init               # one-time repository layout setup      (interactive, consent per step)
 /orca:doctor             # one-time machine tooling setup        (interactive, consent per step)
 /orca:config             # optional per-repo reviewer & model/effort tuning
@@ -170,6 +171,8 @@ The human half of review — the runs' adversarial review stage is automated and
 
 Without tmux (on the nvim path), or without either companion installed (`/orca:doctor` prescribes both), it prints the exact command to run instead (`cd <worktree> && nvim "+OrcaReview"`, `cd <worktree> && code .` plus the palette command, or a `git difftool` fallback) and stops.
 
+**Review comments round-trip.** Comments you leave in the review with `:OrcaComment` persist to `.orca/review-notes/<key>.json` (`<key>` is the deliverable branch, sanitized — orca.nvim's rule). On the nvim path the skill leaves a background waiter on the tmux window: quit nvim and it wakes, reads the file, and summarizes every open comment — then **asks** before doing anything about it (window death means "nvim closed," not "review finished"; you can address now, resume the review with comments intact, or leave them for later). On consent, a dedicated agent converts each open comment into a fix or an answer in the integration worktree — change requests get fixed with tests and committed under the same no-attribution rules as every run commit; questions get answered from the code — and writes `status`/`resolution` back into the same file, where the next `:OrcaReview` renders them inline under their anchors. Editing a resolution's comment there re-opens it for the next round; that loop is the convergence mechanism, so there is deliberately no machine re-review after addressing. The file is the source of truth and the window-exit only the wake signal: comments left from the vscode tier, a print-only session, or a review whose session died are picked up by the next `/orca:review`, which surfaces "N unaddressed comments" in triage. The workflow is one-writer-at-a-time by design, and both sides fail loud on a notes schema version they don't speak (`/orca:doctor`'s nvim check diagnoses the skew).
+
 Two config keys govern it, set via `/orca:config`: `editor` (`nvim`|`vscode`|`none`) and `terminal` (`tmux`|`none`, nvim path only), with the same semantics as `reviewer` — absent detects (nvim first, then vscode), a pin fails loudly instead of silently falling back, `none` opts out to the printed command.
 
 ### `/orca:init [path or clone URL]`
@@ -300,13 +303,14 @@ What a repository looks like mid-run (`/orca:init` creates the top three entries
     ├── map.md                         # machine-local codebase map (cache; see Project context)
     ├── decisions.md                   # machine-local decision log (cache; see Project context)
     ├── feat-briefs/                   # unconsumed feature briefs (drafts/ for parked ones)
+    ├── review-notes/<key>.json        # orca.nvim review comments per deliverable branch (round-trip state)
     ├── bug-cases/<slug>/              # open bug cases: case.md, repro.sh, ledger.md, evidence/
     ├── YYYYMMDD-HHMMSS-feat-<slug>/   # one directory per feature run
     │   ├── brief.md                   # the consumed brief — moved here when the run starts
     │   ├── spec.md                    # spec, work breakdown, Decisions log, workflow runId
     │   ├── report.md                  # final run report
     │   ├── plans/                     # one plan per item, with its Deviations section
-    │   └── reviews/                   # raw findings JSON per review round (codex or claude)
+    │   └── reviews/                   # raw findings JSON per review round, plus comments-<ts>.json archives per addressing round
     └── YYYYMMDD-HHMMSS-bug-<slug>/    # one directory per debug run
         ├── hypotheses.md              # ranked candidates (hypotheses-2.md on the retry round)
         ├── verdicts/                  # one verdict JSON per hypothesis
@@ -316,7 +320,7 @@ What a repository looks like mid-run (`/orca:init` creates the top three entries
         └── fix/                       # the nested fix run: spec.md (synthesized), plans/, reviews/
 ```
 
-Two naming namespaces, deliberately different: `orca-*` **directory** names are local scratch — the cleanup and discovery story via `git worktree list` — and never enter git; the **branch** names that land in history and on GitHub (`feature/<slug>[-<ID>]`, `fix/<slug>[-<ID>]`) are neutral and carry no orca trace, while throwaway `bug/<slug>*` branches never merge at all. `.orca/` sits outside every worktree, so its contents cannot be committed by accident. Inside `.orca/`, every artifact is verb-prefixed — `feat-briefs/` and `feat-` run directories for the feature verb, `bug-cases/` and `bug-` run directories for the debug verb — so a bare `ls .orca/` reads unambiguously.
+Two naming namespaces, deliberately different: `orca-*` **directory** names are local scratch — the cleanup and discovery story via `git worktree list` — and never enter git; the **branch** names that land in history and on GitHub (`feature/<slug>[-<ID>]`, `fix/<slug>[-<ID>]`) are neutral and carry no orca trace, while throwaway `bug/<slug>*` branches never merge at all. `.orca/` sits outside every worktree, so its contents cannot be committed by accident. Inside `.orca/`, every artifact is verb-prefixed — `feat-briefs/` and `feat-` run directories for the feature verb, `bug-cases/` and `bug-` run directories for the debug verb, `review-notes/` for the review verb — so a bare `ls .orca/` reads unambiguously. `review-notes/` is the one directory holding user-authored input rather than a cache, but like everything else in `.orca/` it is machine-local scratch and never enters git.
 
 ## Project context
 
@@ -333,7 +337,7 @@ Delete both files any time; runs rebuild them. Nothing about this touches the re
 
 ## Stage agents
 
-Fourteen agents ship in the plugin (`agents/<stage>.md`, loaded as `orca:<stage>`). Each runs with its own context window and only the per-item values it needs; context passes between stages through artifact files, never relayed summaries.
+Fifteen agents ship in the plugin (`agents/<stage>.md`, loaded as `orca:<stage>`). Each runs with its own context window and only the per-item values it needs; context passes between stages through artifact files, never relayed summaries.
 
 The first nine serve feature runs — and, `spec` excepted (the diagnose agent writes the fix tail's contract, so no spec agent ever runs there), the fix tail of a diagnose-and-fix debug run:
 
@@ -364,9 +368,15 @@ And one serves both verbs, at the tail of a run that landed work:
 |---|---|---|---|
 | `context` | Folds the run's artifacts into the machine-local project context (map + decision log); distills, never re-explores | haiku | low |
 
+And one serves `/orca:review`'s comment round trip, spawned conversationally by the skill rather than by a workflow:
+
+| Stage | Role | Default model | Default effort |
+|---|---|---|---|
+| `address` | Converts the user's open review comments into fixes and answers in the integration worktree; writes resolutions back into the notes file | opus | high |
+
 A run uses exactly one of `review-codex` / `review-claude`, chosen by the resolved reviewer at launch. The `/orca:config` stage key for both is `review` — the overrides apply to whichever reviewer agent is active.
 
-Override any of these per repository with [`/orca:config`](#orcaconfig-assignments--reset) — except `context`, which, like the workflow's internal helper agents (reconciliation, escalation), is not configurable: its cost/judgment profile is part of the loop's design.
+Override any of these per repository with [`/orca:config`](#orcaconfig-assignments--reset) — except `context` and `address`, which, like the workflow's internal helper agents (reconciliation, escalation), are not configurable: their cost/judgment profiles are part of the design.
 
 ## Configuration
 

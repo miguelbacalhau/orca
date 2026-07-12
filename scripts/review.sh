@@ -9,6 +9,8 @@
 #   review.sh discover
 #   review.sh open <worktree>
 #   review.sh probe <nvim|vscode>
+#   review.sh wait <window-id>
+#   review.sh notes <worktree>
 #
 # Output contract — one machine-readable line per fact, fields
 # TAB-separated (worktree paths may contain spaces):
@@ -19,10 +21,20 @@
 #       ok      -> checked out at <worktree> per `git worktree list --porcelain`
 #       missing -> branch unmerged but no worktree has it; <worktree> is the
 #                  namespace-derived path a re-add would use
+#     A DELIVERABLE with a review-notes file carrying open comments gets the
+#     notes subcommand's NOTES: line appended right after it (NOTES_VERSION:
+#     on a version the script doesn't speak — informational here, exit
+#     unchanged). This is the decoupled pick-up: unconsumed comments are
+#     discoverable state, like queued briefs.
 #     Exit 0 even with zero DELIVERABLE lines — an empty list is an answer,
 #     not an error.
 #
 #   open (read-only except the launch itself):
+#     NOTES:<TAB><path>                             where review comments land —
+#       <repo-root>/.orca/review-notes/<key>.json, <key> the head branch
+#       sanitized per orca.nvim's rule; emitted for every tier and for the
+#       PRINT_ONLY paths alike (the path is where comments *will* land whether
+#       or not anyone waits on them); omitted when HEAD names no branch
 #     PROBE_FAILED:<TAB><nvim|vscode><TAB><detail>  informational — a detected
 #       (not pinned) tier failed its probe and the next tier was tried
 #     OPEN:<TAB>nvim-tmux<TAB><window-id>           exit 0, launched
@@ -38,10 +50,33 @@
 #     PROBE_FAILED:<TAB><nvim|vscode><TAB><detail>  exit 1, with the same detail
 #       strings the open subcommand emits
 #
+#   wait (machine-level, designed to run under a background Bash so the
+#   session is re-invoked when nvim exits):
+#     CLOSED:<TAB><window-id>                       exit 0, the tmux window is
+#       gone — polls list-windows every 5s; exits immediately when the window
+#       never existed (late waiter, not an error). Polling over `tmux
+#       wait-for` deliberately: the signal-before-listener race loses the
+#       wake, and window death also covers a crashed nvim.
+#
+#   notes (read-only — the validated read of the review-notes file):
+#     NOTES_NONE:<TAB><path>                        exit 0, no file — no
+#       comments; the plugin deletes the file with the last comment, so no
+#       file and no comments mean the same thing
+#     NOTES_VERSION:<TAB><found><TAB><spoken>       exit 1 — a version this
+#       script doesn't speak; refuse to touch or count anything
+#     NOTES:<TAB><path><TAB><open>,<addressed>,<answered>   exit 0, comment
+#       counts by status
+#     Counting is grep-only by design, like the config reads: the sole writer
+#     is vim.json.encode emitting compact well-formed JSON, and inside a JSON
+#     string every quote is escaped as \" — so the raw byte sequences
+#     "status":"open" etc. can only be the real keys; comment text cannot
+#     forge them. The script never parses comment bodies.
+#
 #   any subcommand:
 #     FAIL:<TAB><reason><TAB><detail>               exit 1, nothing launched
 #       reasons: NOT_GIT NOT_BARE NO_TRUNK BAD_ARGS NO_SUCH_WORKTREE
-#                UNKNOWN_VALUE PINNED_PROBE_FAILED PINNED_TERMINAL_UNSET
+#                NO_BRANCH UNKNOWN_VALUE PINNED_PROBE_FAILED
+#                PINNED_TERMINAL_UNSET
 #
 # Config comes from <repo-root>/.orca/config.json — the flat top-level
 # `editor` (nvim|vscode|none) and `terminal` (tmux|none) keys, each with
@@ -124,6 +159,42 @@ read_config_key() {
   echo "$values"
 }
 
+# The review-notes key: the head branch with anything outside
+# [A-Za-z0-9._-] replaced by '-' — orca.nvim's rule, mirrored exactly.
+# The path is fixed by the plugin: <repo-root>/.orca/review-notes/<key>.json.
+notes_key() { printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-'; }
+
+notes_path_for_branch() { # <branch> — requires resolve_repo to have run
+  printf '%s/.orca/review-notes/%s.json' "$repo_root" "$(notes_key "$1")"
+}
+
+# The version this side of the round trip speaks. The plugin and the skill
+# ship separately; either side must fail loud on a version it doesn't know.
+NOTES_VERSION_SPOKEN=1
+
+# Emit the notes subcommand's status line for one notes file. Returns 0 for
+# NOTES_NONE/NOTES, 1 for NOTES_VERSION — the caller decides whether that
+# return is fatal (notes) or informational (discover).
+emit_notes_line() { # <path>
+  local path="$1"
+  if [[ ! -f "$path" ]]; then
+    printf 'NOTES_NONE:\t%s\n' "$path"
+    return 0
+  fi
+  local version
+  version="$(grep -o '"version":[0-9][0-9]*' "$path" | grep -o '[0-9]*$' | sort -u | paste -sd, -)"
+  if [[ "$version" != "$NOTES_VERSION_SPOKEN" ]]; then
+    printf 'NOTES_VERSION:\t%s\t%s\n' "${version:-none}" "$NOTES_VERSION_SPOKEN"
+    return 1
+  fi
+  local n_open n_addressed n_answered
+  n_open="$(grep -o '"status":"open"' "$path" | wc -l | tr -d '[:space:]')"
+  n_addressed="$(grep -o '"status":"addressed"' "$path" | wc -l | tr -d '[:space:]')"
+  n_answered="$(grep -o '"status":"answered"' "$path" | wc -l | tr -d '[:space:]')"
+  printf 'NOTES:\t%s\t%s,%s,%s\n' "$path" "$n_open" "$n_addressed" "$n_answered"
+  return 0
+}
+
 probe_nvim() {
   if ! command -v nvim >/dev/null 2>&1; then
     probe_detail="nvim not on PATH"
@@ -166,7 +237,7 @@ cmd_discover() {
     /^branch refs\/heads\// { print substr($0, 19) "\t" path }
   ')"
 
-  local branch slug worktree state
+  local branch slug worktree state notes_file notes_line counts
   while IFS= read -r branch; do
     [[ -n "$branch" ]] || continue
     # Per-item branches (feature/<slug>-W<n>, kept by blocked items) are
@@ -186,6 +257,23 @@ cmd_discover() {
       esac
     fi
     printf 'DELIVERABLE:\t%s\t%s\t%s\n' "$branch" "$worktree" "$state"
+    # Unconsumed review comments are discoverable state: surface a notes
+    # file with open comments (or an unspeakable version) right after its
+    # deliverable. The branch *is* the head the plugin keyed by — reviews
+    # always open on the deliverable branch.
+    notes_file="$(notes_path_for_branch "$branch")"
+    if [[ -f "$notes_file" ]]; then
+      notes_line="$(emit_notes_line "$notes_file")" || true
+      case "$notes_line" in
+        NOTES_VERSION:*) printf '%s\n' "$notes_line" ;;
+        NOTES:*)
+          counts="${notes_line##*$'\t'}"
+          if [[ "${counts%%,*}" != "0" ]]; then
+            printf '%s\n' "$notes_line"
+          fi
+          ;;
+      esac
+    fi
   done < <(git --git-dir="$common_dir" branch --list 'feature/*' 'fix/*' \
              --no-merged "$trunk" --format='%(refname:short)')
   exit 0
@@ -199,6 +287,18 @@ cmd_open() {
   resolve_repo
   if [[ ! -d "$worktree" ]]; then
     fail NO_SUCH_WORKTREE "$worktree is not a directory — re-run discover (a missing deliverable needs its worktree re-added first)"
+  fi
+
+  # Where :OrcaComment will persist review comments — emitted before the
+  # tiers diverge, because the path is where comments *will* land whether or
+  # not anyone waits on them (the vscode tier and the PRINT_ONLY paths have
+  # no waiter; the next discover picks the file up instead). HEAD naming no
+  # branch never happens in orca's flow (reviews open on the deliverable
+  # branch); skip the line rather than guess a key.
+  local head_branch
+  head_branch="$(git -C "$worktree" symbolic-ref --short HEAD 2>/dev/null || true)"
+  if [[ -n "$head_branch" ]]; then
+    printf 'NOTES:\t%s\n' "$(notes_path_for_branch "$head_branch")"
   fi
 
   local difftool_cmd="cd $(shq "$worktree") && git difftool -d $(shq "$trunk")...HEAD"
@@ -293,9 +393,54 @@ cmd_probe() {
   exit 1
 }
 
+# Machine-level like probe: the window is the wake signal, not repo state.
+# Window ids are unique for a tmux server's lifetime, so a dead server, a
+# dead window, and a never-existing window all read the same — gone.
+# Liveness via list-windows, not `display-message -t`: tmux 3.7b exits 0 on
+# an unknown window id there. The list is captured before grep because the
+# script runs under pipefail — grep -q's early exit would SIGPIPE tmux and
+# read a live window as dead.
+window_alive() {
+  local ids
+  ids="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null)" || return 1
+  grep -qx -- "$1" <<<"$ids"
+}
+
+cmd_wait() {
+  local win="${1:-}"
+  if [[ -z "$win" ]]; then
+    fail BAD_ARGS "usage: review.sh wait <window-id>"
+  fi
+  while window_alive "$win"; do
+    sleep 5
+  done
+  printf 'CLOSED:\t%s\n' "$win"
+  exit 0
+}
+
+cmd_notes() {
+  local worktree="${1:-}"
+  if [[ -z "$worktree" ]]; then
+    fail BAD_ARGS "usage: review.sh notes <worktree>"
+  fi
+  resolve_repo
+  if [[ ! -d "$worktree" ]]; then
+    fail NO_SUCH_WORKTREE "$worktree is not a directory — re-run discover"
+  fi
+  local head_branch
+  head_branch="$(git -C "$worktree" symbolic-ref --short HEAD 2>/dev/null || true)"
+  if [[ -z "$head_branch" ]]; then
+    fail NO_BRANCH "$worktree's HEAD names no branch — cannot derive the review-notes key"
+  fi
+  emit_notes_line "$(notes_path_for_branch "$head_branch")" || exit 1
+  exit 0
+}
+
 case "${1:-}" in
   discover) cmd_discover ;;
   open)     shift; cmd_open "$@" ;;
   probe)    shift; cmd_probe "$@" ;;
-  *)        fail BAD_ARGS "usage: review.sh discover | review.sh open <worktree> | review.sh probe <nvim|vscode>" ;;
+  wait)     shift; cmd_wait "$@" ;;
+  notes)    shift; cmd_notes "$@" ;;
+  *)        fail BAD_ARGS "usage: review.sh discover | review.sh open <worktree> | review.sh probe <nvim|vscode> | review.sh wait <window-id> | review.sh notes <worktree>" ;;
 esac

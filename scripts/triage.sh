@@ -28,6 +28,10 @@
 #         AGENTS:<TAB><json|absent>      same adjacency rule
 #       unlaunched -> spec.md carries no runId line: the run died before
 #       its workflow launched (not resumable).
+#   DONE:<TAB><run-dir>
+#       Finished feature runs: depth-1 spec.md WITH a sibling report.md.
+#       Emitted in directory order (timestamped names -> oldest first);
+#       consumed by orca:followup's run pick.
 #   BRIEF:<TAB><path>
 #       Queued briefs: .orca/feat-briefs/*.md, top level only (drafts/
 #       does not count).
@@ -80,11 +84,17 @@ cmd_discover() {
   local runid args value
 
   # --- feature runs: .orca/*/spec.md at depth 1, no sibling report.md ---
+  # A sibling report.md means the run finished; DONE: lines feed
+  # orca:followup's run pick, in directory order (timestamped names, so
+  # oldest first — the last line is the newest run).
   local spec dir run_ln
   for spec in "$orca"/*/spec.md; do
     [[ -f "$spec" ]] || continue
     dir="$(dirname "$spec")"
-    [[ -f "$dir/report.md" ]] && continue
+    if [[ -f "$dir/report.md" ]]; then
+      printf 'DONE:\t%s\n' "$dir"
+      continue
+    fi
     run_ln="$(last_run_line "$spec")"
     if [[ -z "$run_ln" ]]; then
       printf 'RUN:\t%s\tunlaunched\n' "$dir"

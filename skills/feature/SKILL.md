@@ -25,7 +25,7 @@ Discover everything waiting with one read-only script call:
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/triage.sh discover
 ```
 
-Each `RUN:` line is a feature run directory with no `report.md` yet, tagged `interrupted` — its workflow launched, and the `RUNID:`/`ARGS:` lines that follow carry the resume handle persisted in its `spec.md`, extracted byte-exact (plus legacy `REVIEWER:`/`AGENTS:` lines for runs recorded before the args line existed) — or `unlaunched` — it died before its workflow launched; not resumable, leave it alone. The same call emits check 2's `BRIEF:` lines, and `CASE:` lines that belong to orca:debug's triage — ignore those here. Empty output means nothing is waiting; nothing is read into context.
+Each `RUN:` line is a feature run directory with no `report.md` yet, tagged `interrupted` — its workflow launched, and the `RUNID:`/`ARGS:` lines that follow carry the resume handle persisted in its `spec.md`, extracted byte-exact (plus legacy `REVIEWER:`/`AGENTS:` lines for runs recorded before the args line existed) — or `unlaunched` — it died before its workflow launched; not resumable, leave it alone. The same call emits check 2's `BRIEF:` lines, plus `CASE:` lines that belong to orca:debug's triage and `DONE:` lines (finished runs) that belong to orca:followup's — ignore those here. Empty output means nothing is waiting; nothing is read into context.
 
 The on-disk predicate cannot tell an interrupted run from one still executing — `report.md` only appears at the end — so before offering, check the run is not live: if this session's task list or background tasks show its workflow still running, it is in flight, not interrupted — report that and fall through to the next check. If another session could plausibly be driving it (the user would know), ask rather than assume.
 
@@ -276,10 +276,10 @@ Write the run report to `<run-dir>/report.md` **first**, then relay its highligh
 
 ## Landing
 
-The deliverable is the `feature/<slug>` branch, built in the integration worktree. Walk the diff in your own editor first with `/orca:review`, then land it from your own worktree with `git merge --no-ff feature/<slug>`, then optionally push.
+The deliverable is the `feature/<slug>` branch, built in the integration worktree. Walk the diff in your own editor first with `/orca:review`, then land it from your own worktree with `git merge --no-ff feature/<slug>`, then optionally push. <When items are blocked or Follow-ups list deferred work: `/orca:followup` reads this report, verifies it against git, asks the decisions recorded above, and queues the follow-up brief.>
 ```
 
-After writing the file, give the user a short spoken summary — what shipped with commit hashes, anything `blocked` and the decision it waits on, the integration result feature by feature, any knowledge worth promoting (theirs to commit, not orca's), tokens spent, and the path to the full `report.md` — then the landing command. The report file is the authoritative version; the spoken summary just points at it.
+After writing the file, give the user a short spoken summary — what shipped with commit hashes, anything `blocked` and the decision it waits on, the integration result feature by feature, any knowledge worth promoting (theirs to commit, not orca's), tokens spent, and the path to the full `report.md` — then the landing command. When the run left blocked items or follow-ups, mention that `/orca:followup` turns them into the next run's brief. The report file is the authoritative version; the spoken summary just points at it.
 
 ## Guidelines
 

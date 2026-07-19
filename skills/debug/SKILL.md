@@ -25,7 +25,7 @@ Discover everything waiting with one read-only script call:
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/triage.sh discover
 ```
 
-Each `CASE:` line is an open case. `interrupted` means its `case.md` carries a launch whose run directory has no `report.md` — the `RUNID:`/`ARGS:` lines that follow are the last persisted `**Workflow run:**`/`**Workflow args:**` pair (lines from several launches accumulate; the last pair is the live one), extracted byte-exact. `ready` means never launched, or the run finished and left the case open deliberately — check 2's territory. The same call emits `RUN:`/`BRIEF:` lines that belong to orca:feature's triage — ignore those here.
+Each `CASE:` line is an open case. `interrupted` means its `case.md` carries a launch whose run directory has no `report.md` — the `RUNID:`/`ARGS:` lines that follow are the last persisted `**Workflow run:**`/`**Workflow args:**` pair (lines from several launches accumulate; the last pair is the live one), extracted byte-exact. `ready` means never launched, or the run finished and left the case open deliberately — check 2's territory. The same call emits `RUN:`/`BRIEF:` lines that belong to orca:feature's triage, and `DONE:` lines (finished runs) that belong to orca:followup's — ignore those here.
 
 The on-disk predicate cannot tell an interrupted run from one still executing — `report.md` only appears at the end — so before offering, check the run is not live: if this session's task list or background tasks show its workflow still running, it is in flight, not interrupted — report that and fall through. If another session could plausibly be driving it (the user would know), ask rather than assume.
 

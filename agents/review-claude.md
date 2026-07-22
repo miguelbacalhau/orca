@@ -21,10 +21,10 @@ That discipline is backed by a mechanical self-check, not trust:
 1. **Capture first.** As your first Bash action (after any `Status task:` line), record the worktree state — the porcelain status, a hash of the full diff, and a hash of every untracked file's contents (the diff does not cover untracked files and the status line for one does not change when its contents do, yet untracked files are part of the review subject):
 
    ```bash
-   git -C <worktree> status --porcelain | shasum ; git -C <worktree> diff HEAD | shasum ; git -C <worktree> ls-files --others --exclude-standard | git -C <worktree> hash-object --stdin-paths | shasum
+   h=$(command -v sha256sum || command -v shasum) ; git -C <worktree> status --porcelain | "$h" ; git -C <worktree> diff HEAD | "$h" ; git -C <worktree> ls-files --others --exclude-standard | git -C <worktree> hash-object --stdin-paths | "$h"
    ```
 
-   (`hash-object` without `-w` only reads — it writes nothing.)
+   (`sha256sum` on Linux, `shasum` on macOS — the `command -v` fallback covers both; `hash-object` without `-w` only reads — it writes nothing.)
 
 2. **Re-capture last.** Immediately before writing the artifact, run the same command again and compare all three hashes to the first capture.
 3. **On any mismatch**, the review contaminated the state it was reviewing. Write **nothing** to either artifact path and return `written: false` with a reason naming the contamination (which hash moved, and the command you suspect). This is detection, not prevention — it catches the actual harm regardless of which command caused it.

@@ -120,6 +120,43 @@ if (badRetryNotes.length)
 // the review mode is now passed explicitly.
 if (items.some(i => i.id === 'integration'))
   throw new Error('invalid work breakdown: "integration" is a reserved item id')
+
+// Grammar validation at the deterministic boundary: slug, item ids, the
+// integration branch, and file entries are interpolated into shell
+// commands, git refs, worktree paths, and prompts by every stage — a
+// malformed value must fail here with a typed error, not deep in the run.
+//
+// slug — worktree/branch path segment.
+//   valid:   "auth", "retry-2", "a1-b2-c3"
+//   invalid: "Auth", "a_b", "-x", "x-", "a--b" is valid, "a/b", "", "a."
+const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+if (!SLUG_RE.test(slug))
+  throw new Error(`args.slug must match ${SLUG_RE} (got ${JSON.stringify(slug)})`)
+// item ids — W-numbered from the Work Breakdown, or F-numbered for the
+// debug loop's synthesized fix item (its nested call lands here).
+//   valid:   "W1", "W12", "F2"
+//   invalid: "W0", "W01", "w1", "H1", "W1a", "integration"
+const ITEM_ID_RE = /^[WF][1-9][0-9]*$/
+const badIds = items.filter(i => !ITEM_ID_RE.test(i.id))
+if (badIds.length)
+  throw new Error(`invalid work breakdown: item ids must match ${ITEM_ID_RE}: ${badIds.map(i => JSON.stringify(i.id)).join(', ')}`)
+const badDepIds = items.flatMap(i => i.deps.filter(d => typeof d !== 'string' || !ITEM_ID_RE.test(d))
+  .map(d => `${i.id} depends on ${JSON.stringify(d)}`))
+if (badDepIds.length)
+  throw new Error(`invalid work breakdown: dependency ids must match ${ITEM_ID_RE}: ${badDepIds.join('; ')}`)
+// integrationBranch — conservative git ref class (mirrors review.sh's
+// notes-key character class plus '/'), rejecting the ref-syntax traps.
+//   valid:   "feature/auth", "fix/login-crash", "feature/v1.2"
+//   invalid: "-x", "a..b", "a//b", "/a", "a/", "a.lock", "a b", "a~1"
+const REF_RE = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/
+if (!REF_RE.test(integrationBranch) || integrationBranch.includes('..') ||
+    integrationBranch.split('/').some(seg => seg.startsWith('-') || seg.startsWith('.') || seg.endsWith('.lock')))
+  throw new Error(`args.integrationBranch is not a safe branch name (got ${JSON.stringify(integrationBranch)})`)
+// files — must be strings: an object here renders "[object Object]" into
+// every stage prompt and the owned-files contract silently dissolves.
+const badFiles = items.filter(i => i.files.some(f => typeof f !== 'string' || !f))
+if (badFiles.length)
+  throw new Error(`invalid work breakdown: items[].files entries must be non-empty strings: ${badFiles.map(i => `${i.id}: ${JSON.stringify(i.files)}`).join('; ')}`)
 const integrationWt = `${repoRoot}/orca-${slug}`
 
 // Which independent reviewer this run uses. Required and pre-resolved: the run

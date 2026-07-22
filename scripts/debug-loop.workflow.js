@@ -99,6 +99,16 @@ if (reviewer !== 'codex' && reviewer !== 'claude')
   throw new Error(`args.reviewer must be "codex" or "claude" (got ${JSON.stringify(reviewer)}) — the skill resolves it before launch`)
 if (fixTaskId !== undefined && (typeof fixTaskId !== 'string' || !fixTaskId))
   throw new Error(`args.fixTaskId, when present, must be a non-empty string (got ${JSON.stringify(fixTaskId)})`)
+// Grammar validation at the deterministic boundary (same posture as
+// work-loop): the slug is interpolated into worktree paths and the
+// bug/<slug>, fix/<slug> refs by every stage — a malformed one must fail
+// here, not deep in the run. Hypothesis (H<n>) and fix-item (F<n>) ids are
+// generated internally and need no launch grammar.
+//   valid:   "login-crash", "oom2"
+//   invalid: "Login", "a_b", "-x", "a/b", ""
+const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+if (!SLUG_RE.test(slug))
+  throw new Error(`args.slug must match ${SLUG_RE} (got ${JSON.stringify(slug)})`)
 // Secrets placement needs the plugin root to find secrets.sh; optional so a
 // resume of a launch that predates the arg still replays instead of failing.
 const pluginRoot = parsedArgs.pluginRoot

@@ -82,8 +82,11 @@ prior run directory — it is this brief's provenance.>
 
 ## Direction
 
-- <Build on the existing integration branch `feature/<slug>` — or, when the
-  audit found the deliverable already landed, on the trunk; state which and
+- <When the audit found the deliverable still an open integration branch,
+  set the exact field feature Step 3 reads — `**Base branch:** feature/<slug>`
+  — so the new run's integration worktree is based on its tip and contains
+  the feature being extended. When the deliverable already landed, omit the
+  field (the run bases on the trunk as usual). State which case applies and
   why.>
 - <The prior run's spec at <run-dir>/spec.md is a binding input: its
   Interfaces and its ## Decisions log carry forward; the new spec builds on

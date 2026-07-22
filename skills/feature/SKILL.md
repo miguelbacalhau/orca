@@ -165,14 +165,14 @@ Report the spec to the user — outcome, work items, dependency order, what will
 - **Opted out (the default):** this is a one-way status update. Proceed immediately; do not wait for or request approval — the Step 1 confirmation already authorized the run. If the user interjects on their own, incorporate it; never solicit it.
 - **Opted in:** this is the one authorized pause. Present the spec and breakdown and ask once for approval. Incorporate any changes they request: a **structural** revision — re-splitting items, reordering dependencies, reworking an interface — re-spawns the `orca:spec` agent with the current `spec.md` plus the requested changes (and the held `agents.spec.model` override from Step 2, when set), because it may need fresh codebase exploration; a **trivial** revision — wording, a renamed item, a tweaked assumption — edit inline. Then proceed. This is the final interactive moment of the run; after it, the run is autonomous and never waits on the user again.
 
-Set the spec status to `approved`. Create the integration worktree at the repo root, on a fresh branch based on the trunk tip:
+Set the spec status to `approved`. Create the integration worktree at the repo root, on a fresh branch. The base is the trunk tip — unless the brief's Direction section carries a `**Base branch:**` field (followup briefs over an unlanded deliverable set it): then the run must build on that branch, so the worktree contains the feature being extended. Verify a named base exists first (`git rev-parse --verify refs/heads/<base-branch>` against the bare repo); a `**Base branch:**` that names a missing branch is a hard stop — report it and let the user decide, never silently fall back to the trunk (the run would build against code that lacks the feature it extends).
 
 ```bash
-git worktree add <repo-root>/orca-<slug> -b feature/<slug> <trunk-branch>
+git worktree add <repo-root>/orca-<slug> -b feature/<slug> <base-branch, or the trunk when the brief names none>
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/secrets.sh place <repo-root>/orca-<slug>
 ```
 
-The branch is `feature/<slug>` — a neutral namespace that reads as ordinary dev work on GitHub and leaves no orca trace in git history; the slug keeps it collision-unlikely. `worktree add -b` fails loudly if `feature/<slug>` already exists, never silently reusing it — if it does, pick a different slug and retry rather than reusing the existing branch.
+The branch is `feature/<slug>` — a neutral namespace that reads as ordinary dev work on GitHub and leaves no orca trace in git history; the slug keeps it collision-unlikely. In the no-base case, `worktree add -b` fails loudly if `feature/<slug>` already exists, never silently reusing it — if it does, pick a different slug and retry rather than reusing the existing branch. (With a `**Base branch:**`, the new branch name must still be fresh — the same rule applies to it, not to the base.)
 
 The `place` call links the user's secrets (`<repo-root>/.orca/secrets/`, the mirror-tree convention — the README documents it) into the fresh worktree as relative symlinks, so integration builds and tests find their `.env`s. It is idempotent and best-effort: a missing or empty secrets tree is a clean `OK` no-op, and per-file problems are typed skips, never a reason to stop the run — relay any `UNIGNORED:` or `SKIPPED_EXISTS:` lines to the user as one-way status.
 

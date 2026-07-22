@@ -81,7 +81,7 @@ fail() { # <reason> <detail> — typed failure, exit 1
 journal_path() { printf '%s/.orca/init-convert-journal' "$root"; }
 journal_append() { printf '%s\0%s\0' "$1" "$2" >>"$(journal_path)"; }
 
-# shellcheck disable=SC2317  # invoked indirectly via trap
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via trap
 on_signal() { # <signal-name> — journal the interruption and die typed
   journal_append interrupted "$1"
   printf 'FAIL:\tINTERRUPTED\tconversion interrupted by SIG%s — run init-convert.sh recover from the repository root\n' "$1"

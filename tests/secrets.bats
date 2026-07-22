@@ -3,17 +3,10 @@
 
 load helpers
 
-# A bare-with-worktrees layout: repo root with .bare/.git pointer, a main
-# worktree, .orca/secrets seeded, and .env ignored (tracked .gitignore).
-make_bare_layout() { # <dir>
-  make_repo "$1"
-  ( cd "$1" &&
-    echo '.env' >.gitignore &&
-    git add .gitignore && git commit -qm gitignore &&
-    /usr/bin/mv .git .bare &&
-    git --git-dir=.bare config core.bare true &&
-    printf 'gitdir: ./.bare\n' >.git &&
-    git worktree add main main >/dev/null 2>&1 )
+# make_bare_layout comes from helpers.bash; these tests add the secrets
+# tree on top.
+make_secrets_layout() { # <dir>
+  make_bare_layout "$1"
   mkdir -p "$1/.orca/secrets"
 }
 
@@ -25,7 +18,7 @@ make_bare_layout() { # <dir>
 }
 
 @test "places a relative symlink for an ignored destination" {
-  make_bare_layout "$BATS_TEST_TMPDIR/r"
+  make_secrets_layout "$BATS_TEST_TMPDIR/r"
   echo 'SECRET=1' >"$BATS_TEST_TMPDIR/r/.orca/secrets/.env"
   run bash "$SCRIPTS/secrets.sh" place "$BATS_TEST_TMPDIR/r/main"
   [ "$status" -eq 0 ]
@@ -36,7 +29,7 @@ make_bare_layout() { # <dir>
 }
 
 @test "nested secret gets a depth-correct relative link" {
-  make_bare_layout "$BATS_TEST_TMPDIR/r"
+  make_secrets_layout "$BATS_TEST_TMPDIR/r"
   ( cd "$BATS_TEST_TMPDIR/r/main" &&
     mkdir -p apps/api && echo '.env' >apps/api/.gitignore &&
     git add apps/api/.gitignore && git commit -qm nested )
@@ -50,7 +43,7 @@ make_bare_layout() { # <dir>
 }
 
 @test "unignored destination never receives a secret" {
-  make_bare_layout "$BATS_TEST_TMPDIR/r"
+  make_secrets_layout "$BATS_TEST_TMPDIR/r"
   echo 'x' >"$BATS_TEST_TMPDIR/r/.orca/secrets/not-ignored.txt"
   run bash "$SCRIPTS/secrets.sh" place "$BATS_TEST_TMPDIR/r/main"
   [ "$status" -eq 0 ]
@@ -59,7 +52,7 @@ make_bare_layout() { # <dir>
 }
 
 @test "re-run over a placed worktree is idempotent OK" {
-  make_bare_layout "$BATS_TEST_TMPDIR/r"
+  make_secrets_layout "$BATS_TEST_TMPDIR/r"
   echo 'SECRET=1' >"$BATS_TEST_TMPDIR/r/.orca/secrets/.env"
   bash "$SCRIPTS/secrets.sh" place "$BATS_TEST_TMPDIR/r/main" >/dev/null
   run bash "$SCRIPTS/secrets.sh" place "$BATS_TEST_TMPDIR/r/main"
@@ -70,7 +63,7 @@ make_bare_layout() { # <dir>
 }
 
 @test "a real file at the destination is never overwritten" {
-  make_bare_layout "$BATS_TEST_TMPDIR/r"
+  make_secrets_layout "$BATS_TEST_TMPDIR/r"
   echo 'SECRET=1' >"$BATS_TEST_TMPDIR/r/.orca/secrets/.env"
   echo 'mine' >"$BATS_TEST_TMPDIR/r/main/.env"
   run bash "$SCRIPTS/secrets.sh" place "$BATS_TEST_TMPDIR/r/main"
@@ -80,7 +73,7 @@ make_bare_layout() { # <dir>
 }
 
 @test "a symlink inside secrets/ is skipped as irregular" {
-  make_bare_layout "$BATS_TEST_TMPDIR/r"
+  make_secrets_layout "$BATS_TEST_TMPDIR/r"
   ln -s /etc/hostname "$BATS_TEST_TMPDIR/r/.orca/secrets/.env"
   run bash "$SCRIPTS/secrets.sh" place "$BATS_TEST_TMPDIR/r/main"
   [ "$status" -eq 0 ]
@@ -89,7 +82,7 @@ make_bare_layout() { # <dir>
 }
 
 @test "dangling secrets link whose source is gone is swept" {
-  make_bare_layout "$BATS_TEST_TMPDIR/r"
+  make_secrets_layout "$BATS_TEST_TMPDIR/r"
   echo 'SECRET=1' >"$BATS_TEST_TMPDIR/r/.orca/secrets/.env"
   bash "$SCRIPTS/secrets.sh" place "$BATS_TEST_TMPDIR/r/main" >/dev/null
   rm "$BATS_TEST_TMPDIR/r/.orca/secrets/.env"
@@ -100,7 +93,7 @@ make_bare_layout() { # <dir>
 }
 
 @test "sweep leaves dangling links that are not secrets placements alone" {
-  make_bare_layout "$BATS_TEST_TMPDIR/r"
+  make_secrets_layout "$BATS_TEST_TMPDIR/r"
   ln -s /nonexistent-target "$BATS_TEST_TMPDIR/r/main/dead-link"
   run bash "$SCRIPTS/secrets.sh" place "$BATS_TEST_TMPDIR/r/main"
   [ "$status" -eq 0 ]
@@ -108,7 +101,7 @@ make_bare_layout() { # <dir>
 }
 
 @test "sweep does not descend into .git or .orca" {
-  make_bare_layout "$BATS_TEST_TMPDIR/r"
+  make_secrets_layout "$BATS_TEST_TMPDIR/r"
   # a conventional-layout repo whose root holds .orca — the prune must
   # protect links under it
   make_repo "$BATS_TEST_TMPDIR/c"

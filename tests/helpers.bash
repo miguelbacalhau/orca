@@ -26,6 +26,36 @@ make_repo() {
   git -C "$1" commit -qm seed
 }
 
+# make_bare_layout <dir> — the bare-with-worktrees layout orca:init
+# produces: .bare + .git pointer at the root, a main worktree, .orca/
+# beside them, and .env ignored via a tracked .gitignore.
+make_bare_layout() {
+  make_repo "$1"
+  ( cd "$1" &&
+    echo '.env' >.gitignore &&
+    git add .gitignore && git commit -qm gitignore &&
+    /usr/bin/mv .git .bare &&
+    git --git-dir=.bare config core.bare true &&
+    printf 'gitdir: ./.bare\n' >.git &&
+    git worktree add main main >/dev/null 2>&1 )
+  mkdir -p "$1/.orca"
+}
+
+# make_codex_stub <bindir> <version> <ok|denied> — a fake codex CLI whose
+# --version and `login status` behavior the test controls. Prepend
+# <bindir> to PATH; an empty version models a broken/absent binary.
+make_codex_stub() {
+  mkdir -p "$1"
+  cat >"$1/codex" <<EOF
+#!/usr/bin/env bash
+case "\$1" in
+  --version) echo "codex-cli $2" ;;
+  login)     [[ "$3" == ok ]] && exit 0 || exit 1 ;;
+esac
+EOF
+  chmod +x "$1/codex"
+}
+
 # has_line <fixed-string> — $output contains a line starting with it.
 # Typed contract lines are TAB-separated; write the TAB as $'\t' at the
 # call site: has_line $'MOVED:\t3'.

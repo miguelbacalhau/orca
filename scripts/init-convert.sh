@@ -5,9 +5,10 @@
 # presentation, every consent gate, failure translation); this script owns
 # the one data-loss step in the plugin — moving every untracked file,
 # ignored ones included, into the new worktree — NUL-safe throughout, so
-# filenames with spaces or newlines survive. The three subcommands are
+# filenames with spaces or newlines survive. The mutating subcommands are
 # consent-separated on purpose: the skill confirms before convert and again
-# before cleanup, exactly as the prose procedure did.
+# before cleanup, exactly as the prose procedure did; recover exists for
+# crashes and takes no new consent (it only completes what convert began).
 #
 # Usage:
 #   init-convert.sh check

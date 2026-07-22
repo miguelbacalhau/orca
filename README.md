@@ -49,7 +49,7 @@ Three design choices carry the whole system:
 
 **Independent review.** Claude implements; a separate reviewer attacks the result before anything is committed. The featured default is cross-model: [Codex](https://openai.com/codex/) reviews, through an MCP registration the plugin bundles for the global `codex` binary (`codex mcp-server`), driven adversarially over each item's diff by a dedicated courier agent — an independent second opinion from a different model family, one that does not share the implementer's blind spots. The review explicitly attacks the tests, since the same model family wrote the code and the tests. With `reviewer=claude` — the detected default wherever codex isn't installed, or an explicit pin via `/orca:config` — a dedicated Claude review agent performs the same adversarial review itself: it keeps fresh-context independence (a separate agent, only the artifacts and the diff), but it is same-model, so it may share the implementer's blind spots. That trade-off is stated wherever the choice is made; cross-model stays the stronger design.
 
-**A deterministic work loop.** The long autonomous middle of a run is one bundled script executed through Claude Code's Workflow tool, not conversational orchestration. Scheduling, retry bounds, review throttling, merge serialization, and the commit-attribution check are code, so the guarantees are structural rather than model discipline that decays over a long context. Judgment calls (plan reconciliation, escalation, review verdicts) stay in agents, but as schema'd calls whose reasons land in the run's artifacts. Every agent call is journaled, so an interrupted run resumes where it stopped.
+**A deterministic work loop.** The long autonomous middle of a run is one bundled script executed through Claude Code's Workflow tool, not conversational orchestration. Scheduling, retry bounds, review throttling, merge serialization, and the commit-attribution check are code, so the guarantees are structural rather than model discipline that decays over a long context. Judgment calls (plan reconciliation, escalation, review verdicts) stay in agents, but as schema'd calls whose reasons land in the run's artifacts. Every agent call is journaled, so an interrupted run resumes where it stopped. One honest caveat: the workflow sandbox has no shell, so even "deterministic" git plumbing runs through a small model relay — exit-status markers and marker-delimited output make mis-relay detectable-and-retryable rather than impossible, a probabilistic guarantee by design.
 
 State lives in files, never in conversation memory: the brief, the spec with its work breakdown and decision log, one plan per item, the raw review findings per round, and a final report — all under a per-run directory in `.orca/`.
 
@@ -62,10 +62,10 @@ State lives in files, never in conversation memory: the brief, the spec with its
 | Repository layout | Bare-repo-with-worktrees (`.bare/` + peer worktrees). `/orca:init` sets this up, including converting an existing conventional checkout in place. |
 | git | ≥ 2.31 (`rev-parse --path-format` — every orca script's repository resolution; older gits get a typed `OLD_GIT` failure naming the upgrade, never a misdiagnosis); ≥ 2.42 for `worktree add --orphan` when `/orca:init` creates a brand-new repository. |
 | python3 | On PATH — `config.sh`'s strict JSON handling and `secrets.sh`'s symlink-ownership resolution both use it; both fail typed (`NO_PYTHON3`) without it. |
-| `MCP_TOOL_TIMEOUT` | Codex-only, like the row above: set to `1200000` (~20 min) in a Claude Code settings `env` block, so Codex reviews are not killed at the default MCP tool timeout. A plugin cannot ship session env, so `/orca:doctor` writes it for you. |
+| `MCP_TOOL_TIMEOUT` | Codex-only, like the Codex CLI row: set to `1200000` (~20 min) in a Claude Code settings `env` block, so Codex reviews are not killed at the default MCP tool timeout. A plugin cannot ship session env, so `/orca:doctor` writes it for you. |
 | Permission mode | Runs need `bypassPermissions` for the session — see [Permissions and autonomy](#permissions-and-autonomy). |
 
-Everything else — the fourteen stage agents and the codex MCP server registration — ships inside the plugin itself; there is nothing to install per repository beyond the layout.
+Everything else — the seventeen stage agents and the codex MCP server registration — ships inside the plugin itself; there is nothing to install per repository beyond the layout.
 
 ## Installation
 
@@ -296,7 +296,7 @@ The durable state is the **case** at `.orca/bug-cases/<slug>/`: `case.md` (the s
    ├─ 1. Pre-flight + confirm   same gates as a feature run (codex gates serve
    │                            the fix tail); ONE confirmation of case + scope
    ├─ 2. Debug loop (Workflow)  deterministic script:
-   │       repro gate (hard) ──► hypothesize (3–8 ranked, ledger-aware)
+   │       repro gate (hard) ──► hypothesize (1–8 ranked, ledger-aware)
    │       ──► verify ∥ (adversarial, one throwaway worktree each)
    │       ──► diagnose (judge) ──► [diagnose-only: stop here]
    │       ──► fix: nested work loop over a synthesized one-item contract
@@ -410,7 +410,7 @@ The last four serve debug runs:
 | Stage | Role | Default model | Default effort |
 |---|---|---|---|
 | `reproduce` | Turns the case into a deterministic `repro.sh` under the bisect exit contract, plus captured evidence | sonnet | high |
-| `hypothesize` | Read-only exploration of codebase + case + ledger; writes 3–8 ranked, falsifiable root-cause candidates | opus | xhigh |
+| `hypothesize` | Read-only exploration of codebase + case + ledger; writes 1–8 ranked, falsifiable root-cause candidates (aims for 3+, never pads) | opus | xhigh |
 | `verify` | Attacks one hypothesis in its own throwaway worktree — instrument, bisect, refute; verdicts need evidence | sonnet | high |
 | `diagnose` | The judge: merges verdicts into a root-cause diagnosis and, in scope, the synthesized fix contract | opus | high |
 
@@ -468,7 +468,7 @@ A present `reviewer` key **pins** the choice; an absent key means each launch **
 
 ~20 minutes is deliberate: the workflow retries reviews at two levels, so this value multiplies into the per-item worst case (~80 minutes at this setting; an hour would balloon it to several). Settings env loads at **session start** — restart the session after writing it.
 
-**Bundled `.mcp.json`** — registers the codex MCP server as the global PATH binary, nothing else:
+**Bundled `.mcp.json`** — registers the codex MCP server as the global PATH binary, nothing else. Note what that means: the server runs **whatever `codex` is first on `$PATH`** in the session's environment — a shadowed or tampered binary there runs with the review's permissions, so treat PATH hygiene as part of the review trust story:
 
 ```json
 { "mcpServers": { "orca-codex": { "command": "codex", "args": ["mcp-server"] } } }
@@ -534,6 +534,9 @@ This repository previously shipped the same workflow as symlink-installed skills
 | `skills/feature/`, `skills/debug/`, `skills/review/`, `skills/retry/`, `skills/followup/`, `skills/status/`, `skills/init/`, `skills/doctor/`, `skills/config/` | The nine skills. |
 | `skills/feature/interview.md`, `skills/debug/interview.md` | The interview instructions, loaded only when a verb's triage lands on a new interview. |
 | `scripts/preflight.sh` | Read-only environment validation — the gate lines above. |
+| `scripts/config.sh` | Sole reader/writer of `.orca/config.json` — parse, validation, merge semantics, atomic canonical writes; the grep-readers in `preflight.sh` and `review.sh` lean on its sole-writer guarantee. |
+| `scripts/triage.sh` | Read-only discovery spine — interrupted/unlaunched runs with byte-exact resume handles, queued briefs, open cases (`discover`), and the git-footprint join for `/orca:status` (`status`). |
+| `scripts/init-convert.sh` | The mechanical core of `/orca:init`'s conventional-to-bare conversion — gates, NUL-safe untracked moves, crash journal with signal traps, `recover`, and the manifest-checked `cleanup`. |
 | `scripts/review.sh` | The deterministic spine of `/orca:review` — deliverable discovery, editor/terminal resolution, probes, and the launch; the skill converses, the script executes. |
 | `scripts/secrets.sh` | Links `.orca/secrets/` (the mirror-tree secrets convention) into a worktree as relative symlinks — run by the loops and skills after every `worktree add`, and runnable by hand on your own worktree. |
 | `scripts/work-loop.workflow.js` | The deterministic feature work loop, run through the Workflow tool — also nested by debug runs for the fix tail. |

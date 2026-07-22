@@ -433,6 +433,13 @@ const review = async (id, worktree, round, mode, ownedFiles = []) => {
     const r = reviewer === 'codex' ? await withReviewSlot(call) : await call()
     if (r === null || r === undefined) { lastReason = 'review agent was skipped or died'; continue }
     if (!r.written) { lastReason = r.reason || 'review agent reported written=false with no reason'; continue }
+    // An impossible combination is a mis-report, not data — retry it like a
+    // written=false: trusting {total: 0, criticalHigh: 2} would skip the fix
+    // loop with Critical findings on record.
+    if (r.criticalHigh > r.total) {
+      lastReason = `review reported criticalHigh (${r.criticalHigh}) > total (${r.total}) — an impossible count`
+      continue
+    }
     return { total: r.total, criticalOrHigh: r.criticalHigh }
   }
   throw new Error(`${reviewer} review did not complete: ${lastReason}`)
@@ -615,9 +622,11 @@ const buildItem = async item => {
   if (!impl.completed) throw specRooted(`implementation infeasible: ${impl.summary}`)
 
   // Review → fix → re-review, max 2 fix rounds, gate on Critical/High (SKILL: bounded loops).
-  // A first review with no findings at all has nothing to fix and skips the loop.
+  // A first review with no findings at all has nothing to fix and skips the
+  // loop. Keyed on BOTH counts: review() rejects criticalHigh > total as a
+  // mis-report, but the gate still refuses to lean on that invariant.
   const first = await review(item.id, wt, 0, 'item', item.files)
-  if (first.total > 0) {
+  if (first.total > 0 || first.criticalOrHigh > 0) {
     for (let round = 1; ; round++) {
       must(await agent(
         [`Worktree: ${wt}`, `Run directory: ${runDir}`, `Item: ${item.id} — ${item.title}`,
@@ -1032,7 +1041,7 @@ if (shipped.length) {
       await sh(`rm -f '${sq(runDir)}/reviews/integration-codex.json' '${sq(runDir)}/reviews/integration-claude.json'`,
         'integration-review-clean', 'Review')
       const first = await review('integration', integrationWt, 0, 'integration')
-      if (first.total === 0) reviewedClean = true
+      if (first.total === 0 && first.criticalOrHigh === 0) reviewedClean = true
       else {
         for (let round = 1; ; round++) {
           const fixed = must(await agent(

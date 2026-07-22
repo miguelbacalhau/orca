@@ -514,7 +514,10 @@ const planItem = (i, replanNote = '', labelTag = '') => agent(
 const archivePlan = async (i, tag) => {
   const p = sq(`${runDir}/plans/${i.id}`)
   try {
-    await sh(`for n in 0 1 2 3 ; do [ -e '${p}.round'$n'.md' ] || { mv '${p}.md' '${p}.round'$n'.md' ; break ; } ; done`,
+    // First free round<N> slot, unbounded: with a fixed 0-3 list, a fifth
+    // archive silently no-opped and left the superseded plan in place for
+    // the fresh planner to endorse.
+    await sh(`n=0 ; while [ -e '${p}.round'"$n"'.md' ] ; do n=$((n+1)) ; done ; mv '${p}.md' '${p}.round'"$n"'.md'`,
       `plan-archive:${i.id}${tag}`, 'Plan')
   } catch (e) { log(`${i.id}: superseded plan not archived (${String((e && e.message) || e)}) — replanning over it`) }
 }

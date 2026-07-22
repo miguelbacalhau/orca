@@ -333,12 +333,22 @@ const verifyOne = async (h, hypPath) => {
   // Every arrival gets secrets placement (idempotent), so the repro script
   // finds its `.env`s in the throwaway worktree at every commit it visits.
   const placeCmd = pluginRoot ? ` && bash "${pluginRoot}/scripts/secrets.sh" place "${wt}"` : ''
-  const wtOut = await sh(
+  const wtCmd =
     `if [ -d "${wt}" ]; then echo WORKTREE_REUSED; ` +
     `elif git -C "${baseWt}" rev-parse -q --verify "refs/heads/${branch}" >/dev/null; then ` +
     `git -C "${baseWt}" worktree prune && git -C "${baseWt}" worktree add "${wt}" "${branch}" && echo BRANCH_RESUMED; ` +
-    `else git -C "${baseWt}" worktree add "${wt}" -b "${branch}" "${baseBranch}"; fi${placeCmd}`,
-    `worktree:${h.id}`, 'Verify')
+    `else git -C "${baseWt}" worktree add "${wt}" -b "${branch}" "${baseBranch}"; fi${placeCmd}`
+  // Up to 8 hypothesis worktrees are added concurrently off one git dir; a
+  // sibling's ref update can hold index.lock at exactly the wrong moment.
+  // One retry before the hypothesis degrades to inconclusive.
+  let wtOut
+  try { wtOut = await sh(wtCmd, `worktree:${h.id}`, 'Verify') }
+  catch (err) {
+    const msg = String((err && err.message) || err)
+    if (!/\.lock|another git process/i.test(msg)) throw err
+    log(`${h.id}: worktree add hit a lock-shaped failure — retrying once`)
+    wtOut = await sh(wtCmd, `worktree:${h.id}~lockretry`, 'Verify')
+  }
   if (wtOut.includes('WORKTREE_REUSED')) log(`${h.id}: resuming the worktree left by an interrupted run`)
   for (const line of wtOut.split('\n').map(l => l.trim()))
     if (/^(UNIGNORED|SKIPPED_EXISTS|SKIPPED_ERROR):/.test(line))

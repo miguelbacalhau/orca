@@ -596,12 +596,22 @@ const buildItem = async item => {
   // Every arrival gets secrets placement — place is idempotent, so re-running
   // it over a resumed worktree's existing links is all-OK output.
   const placeCmd = pluginRoot ? ` && bash "${pluginRoot}/scripts/secrets.sh" place "${wt}"` : ''
-  const wtOut = await sh(
+  const wtCmd =
     `if [ -d "${wt}" ]; then echo WORKTREE_REUSED; ` +
     `elif git -C "${integrationWt}" rev-parse -q --verify "refs/heads/${branch}" >/dev/null; then ` +
     `git -C "${integrationWt}" worktree prune && git -C "${integrationWt}" worktree add "${wt}" "${branch}" && echo BRANCH_RESUMED; ` +
-    `else git -C "${integrationWt}" worktree add "${wt}" -b "${branch}" "${integrationBranch}"; fi${placeCmd}`,
-    `worktree:${item.id}`, 'Build')
+    `else git -C "${integrationWt}" worktree add "${wt}" -b "${branch}" "${integrationBranch}"; fi${placeCmd}`
+  // Parallel items share one git dir; a sibling's ref update can hold
+  // index.lock at exactly the wrong moment. One retry before the failure
+  // blocks the item and its whole dependent subtree.
+  let wtOut
+  try { wtOut = await sh(wtCmd, `worktree:${item.id}`, 'Build') }
+  catch (err) {
+    const msg = String((err && err.message) || err)
+    if (!/\.lock|another git process/i.test(msg)) throw err
+    log(`${item.id}: worktree add hit a lock-shaped failure — retrying once`)
+    wtOut = await sh(wtCmd, `worktree:${item.id}~lockretry`, 'Build')
+  }
   if (wtOut.includes('WORKTREE_REUSED')) log(`${item.id}: resuming the worktree left by a previous run`)
   else if (wtOut.includes('BRANCH_RESUMED')) log(`${item.id}: re-created the worktree for the branch left by a previous run`)
   // A secret that could not be placed fails exactly where it fails today —

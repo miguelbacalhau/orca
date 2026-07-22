@@ -340,6 +340,17 @@ const shMarked = async (cmd, label, ph) => {
 // Single-quote a value into a relayed shell command.
 const sq = s => s.replace(/'/g, `'\\''`)
 
+// Relay-read SHAs are interpolated into git reset/log commands — validate
+// them like debug-loop's fix-base guard: full 40-hex or the command never
+// runs. A garbled relay read must fail the item, never flow into
+// `git reset --soft <garbage>`.
+const SHA_RE = /^[0-9a-f]{40}$/
+const mustSha = (sha, label) => {
+  if (!SHA_RE.test(sha))
+    throw new Error(`${label}: relay returned something that is not a commit sha (${String(sha).slice(0, 80)})`)
+  return sha
+}
+
 // Codex reviews contend for one Codex auth — cap concurrency at 2 (SKILL:
 // review throttling). Codex-only: claude reviews have no shared auth to
 // contend for and ride the workflow's normal concurrency cap.
@@ -506,7 +517,8 @@ const tipAndSpan = async (wt, range, label) => {
   return { tip: out.split('@@SPAN@@')[0].trim(), clean: !banned.test(out) }
 }
 const commitItem = async (wt, id, title, extraLines = []) => {
-  const head = async tag => (await shMarked(`git -C "${wt}" rev-parse HEAD`, `head:${id}#${tag}`, 'Merge')).trim()
+  const head = async tag => mustSha(
+    (await shMarked(`git -C "${wt}" rev-parse HEAD`, `head:${id}#${tag}`, 'Merge')).trim(), `head:${id}#${tag}`)
   const base = await head('base')
   const status = statusLine(items.find(i => i.id === id), 'committing')
   for (let attempt = 1; attempt <= 2; attempt++) {
@@ -626,9 +638,9 @@ const buildItem = async item => {
     // leave the integration worktree in MERGING state for everyone after it.
     // One command with the tip read — this section is the run's serial
     // bottleneck, so every relay round-trip here is paid by every item.
-    const tipBefore = (await shMarked(
+    const tipBefore = mustSha((await shMarked(
       `git -C "${integrationWt}" merge --abort >/dev/null 2>&1 || true ; git -C "${integrationWt}" rev-parse HEAD`,
-      `merge-reset:${item.id}`, 'Merge')).trim()
+      `merge-reset:${item.id}`, 'Merge')).trim(), `merge-reset:${item.id}`)
     const m = must(await agent(
       [`Integration worktree: ${integrationWt}`, `Run directory: ${runDir}`,
        `Item: ${item.id} — ${item.title}`,

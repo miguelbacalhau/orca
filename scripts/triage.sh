@@ -8,10 +8,16 @@
 # own task list and background tasks. No bare-layout requirement: triage
 # runs before the preflight.
 #
+# The `status` subcommand adds the other half of the picture for
+# orca:status's dashboard: the runs' git footprint — feature/* branches and
+# orca-* worktrees — joined to their run directories by slug.
+#
 # Usage:
 #   triage.sh discover
+#   triage.sh status
 #
-# Output contract — one machine-readable line per fact, TAB-separated:
+# discover output contract — one machine-readable line per fact,
+# TAB-separated:
 #
 #   RUN:<TAB><run-dir><TAB>interrupted|unlaunched
 #       Feature runs: .orca/*/spec.md at depth 1 (feat-briefs/ has none;
@@ -50,6 +56,37 @@
 #
 #   Exit 0 always — empty output means nothing is waiting. The only typed
 #   failure: FAIL:<TAB>NOT_GIT<TAB><detail>, exit 1.
+#
+# status output contract — TAB-separated, one line per git fact. Only the
+# runs' own footprint is emitted — the feature/* branch namespace and
+# orca-* worktree directory names; the user's branches and worktrees never
+# appear. The last field of each line joins the fact to the newest .orca
+# run directory carrying its slug (run dirs, orca-<slug> worktree names,
+# and feature/<slug>[-<ID>] branch names all carry the slug by
+# construction); no surviving run directory reads `orphan`.
+#
+#   TRUNK:<TAB><branch>
+#       The bare repo HEAD's symbolic-ref — the same source preflight's
+#       TRUNK_CANDIDATE reads. Absent when HEAD is detached or unset;
+#       integration merged-ness then reports unknown, never a guessed
+#       trunk.
+#   BRANCH:<TAB>feature/<slug><TAB>merged|unmerged|unknown<TAB>ahead:<n|unknown><TAB><run-dir|orphan>
+#       Integration branches — feature/* with no -W<N>-shaped suffix —
+#       tested against the trunk. ahead:<n> counts the commits the trunk
+#       lacks, so "unmerged by one WIP commit" and "unmerged by the whole
+#       feature" read differently.
+#   ITEMBR:<TAB>feature/<slug>-<ID><TAB>merged|unmerged|unknown<TAB><run-dir|orphan>
+#       Item branches (-W<N>-shaped suffix), tested against their
+#       integration branch — or against the trunk when that branch is gone
+#       (landed and deleted), unknown when neither target exists. merged
+#       means a lossless prune; unmerged corroborates a kept blocked item.
+#   WORKTREE:<TAB><path><TAB><branch|detached><TAB><run-dir|orphan>
+#       orca-* worktree directories only: orca-<slug>[-W<N>] joins its
+#       feature run dir (*-feat-<slug>), orca-bug-<slug>[-H<N>] and
+#       orca-fix-<slug> join their debug run dir (*-bug-<slug>).
+#
+#   Read-only, exit 0 always — empty output (beyond TRUNK:) means git holds
+#   no orca footprint. Shares discover's only typed failure, FAIL: NOT_GIT.
 #
 # The ARGS payloads are the point: a resume must replay the launch args
 # byte-identical (any drift changes agent prompts and re-runs completed
@@ -175,7 +212,106 @@ cmd_discover() {
   exit 0
 }
 
+# git against the resolved repo regardless of CWD — status may be invoked
+# from any worktree or from the repo root, which in the bare layout is not
+# a working directory at all.
+g() { git --git-dir="$common_dir" "$@"; }
+
+# Newest .orca run dir whose basename ends in -<verb>-<slug>; `orphan` when
+# none survives. Timestamped names make directory order chronological, so
+# the last glob match is the newest (a rerun after a full cleanup joins its
+# own dir, older same-slug dirs render on their .orca facts alone). The
+# feat fallback without the verb marker covers pre-plugin run dirs, and
+# skips anything carrying either verb's marker so a bare suffix never
+# cross-joins another slug's run.
+run_join() { # <slug> <feat|bug>
+  local d match=""
+  for d in "$repo_root/.orca/"*"-$2-$1"; do
+    [[ -d "$d" ]] && match="$d"
+  done
+  if [[ -z "$match" && "$2" == feat ]]; then
+    for d in "$repo_root/.orca/"*"-$1"; do
+      [[ -d "$d" && "$(basename "$d")" != *"-feat-"* \
+        && "$(basename "$d")" != *"-bug-"* ]] && match="$d"
+    done
+  fi
+  printf '%s' "${match:-orphan}"
+}
+
+# merged|unmerged|unknown — an empty target means there is nothing to test
+# against (detached/unset trunk, or an item branch whose targets are gone).
+merged_state() { # <branch> <target>
+  [[ -n "$2" ]] || { echo unknown; return; }
+  if g merge-base --is-ancestor "$1" "$2" 2>/dev/null; then
+    echo merged
+  else
+    echo unmerged
+  fi
+}
+
+cmd_status() {
+  resolve_repo
+  local trunk
+  trunk="$(g symbolic-ref --short HEAD 2>/dev/null || true)"
+  [[ -n "$trunk" ]] && printf 'TRUNK:\t%s\n' "$trunk"
+
+  # --- feature/* branches: integration vs item by -W<N> shape ---
+  local ref slug base target state ahead
+  while IFS= read -r ref; do
+    [[ -n "$ref" ]] || continue
+    if [[ "$ref" =~ ^feature/(.+)-W[0-9]+$ ]]; then
+      slug="${BASH_REMATCH[1]}"
+      base="feature/$slug"
+      if g show-ref --verify --quiet "refs/heads/$base"; then
+        target="$base"
+      else
+        # Integration branch landed and deleted — the trunk inherits the
+        # test; empty when the trunk is unknown too.
+        target="$trunk"
+      fi
+      printf 'ITEMBR:\t%s\t%s\t%s\n' \
+        "$ref" "$(merged_state "$ref" "$target")" "$(run_join "$slug" feat)"
+    else
+      slug="${ref#feature/}"
+      state="$(merged_state "$ref" "$trunk")"
+      if [[ "$state" == unknown ]]; then
+        ahead="unknown"
+      else
+        ahead="$(g rev-list --count "$trunk..$ref" 2>/dev/null || echo unknown)"
+      fi
+      printf 'BRANCH:\t%s\t%s\tahead:%s\t%s\n' \
+        "$ref" "$state" "$ahead" "$(run_join "$slug" feat)"
+    fi
+  done < <(g for-each-ref --format='%(refname:short)' refs/heads/feature/)
+
+  # --- orca-* worktrees, joined by the slug their directory name carries ---
+  local line wt_path="" wt_branch="detached" name verb
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*)          wt_path="${line#worktree }"; wt_branch="detached" ;;
+      "branch refs/heads/"*) wt_branch="${line#branch refs/heads/}" ;;
+      "")
+        name="$(basename "${wt_path:-/}")"
+        if [[ -n "$wt_path" && "$name" == orca-* ]]; then
+          if   [[ "$name" =~ ^orca-bug-(.+)-H[0-9]+$ ]]; then slug="${BASH_REMATCH[1]}"; verb=bug
+          elif [[ "$name" =~ ^orca-bug-(.+)$ ]];         then slug="${BASH_REMATCH[1]}"; verb=bug
+          elif [[ "$name" =~ ^orca-fix-(.+)$ ]];         then slug="${BASH_REMATCH[1]}"; verb=bug
+          elif [[ "$name" =~ ^orca-(.+)-W[0-9]+$ ]];     then slug="${BASH_REMATCH[1]}"; verb=feat
+          else                                                slug="${name#orca-}";      verb=feat
+          fi
+          printf 'WORKTREE:\t%s\t%s\t%s\n' \
+            "$wt_path" "$wt_branch" "$(run_join "$slug" "$verb")"
+        fi
+        wt_path=""
+        ;;
+    esac
+  done < <(g worktree list --porcelain; printf '\n')
+
+  exit 0
+}
+
 case "${1:-}" in
   discover) cmd_discover ;;
-  *)        fail BAD_ARGS "usage: triage.sh discover" ;;
+  status)   cmd_status ;;
+  *)        fail BAD_ARGS "usage: triage.sh discover|status" ;;
 esac

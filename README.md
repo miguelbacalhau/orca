@@ -13,6 +13,8 @@ A [Claude Code](https://claude.com/claude-code) plugin for autonomous, multi-age
                          # git, resolve the blocked decisions with you, relaunch the work loop
 /orca:followup           # turn a finished run's optional follow-ups into the next brief
                          # for /orca:feature (new intent, not recovery)
+/orca:status             # read-only dashboard: .orca state joined with git ground truth,
+                         # grouped by next action, each state naming its skill
 /orca:init               # one-time repository layout setup      (interactive, consent per step)
 /orca:doctor             # one-time machine tooling setup        (interactive, consent per step)
 /orca:config             # optional per-repo reviewer & model/effort tuning
@@ -483,7 +485,7 @@ The tradeoff is real and `/orca:feature` states it before starting: bypass mode 
 
 ## Interruption, resume, and cleanup
 
-Recovery is a three-surface split, one per honest end state, and **recovery never creates a run — only new intent does**: an *interrupted* run (no `report.md` yet) resumes from its journal via its verb's triage; a *finished run with unmet items* is finished inside the same run by `/orca:retry`; a *finished run's optional follow-ups* become a new brief via `/orca:followup`.
+Recovery is a three-surface split, one per honest end state, and **recovery never creates a run — only new intent does**: an *interrupted* run (no `report.md` yet) resumes from its journal via its verb's triage; a *finished run with unmet items* is finished inside the same run by `/orca:retry`; a *finished run's optional follow-ups* become a new brief via `/orca:followup`. `/orca:status` is where "where was I?" gets answered before choosing: a strictly read-only dashboard that joins the `.orca/` state with git ground truth (unmerged deliverables, kept item branches, leftover `orca-*` worktrees, orphans) and names the owning skill per state — it prescribes cleanup commands where deletion is provably safe, but never runs them.
 
 Every agent call in the work loop is journaled, and the workflow `runId` is persisted the moment the workflow launches — precisely because the interruption that needs it, session death, also erases the conversation. Feature runs persist it to the end of `spec.md` (as `**Workflow run:** <runId>`, alongside the launch-time reviewer as `**Workflow reviewer:**` and the launch-time `agents` block when one was passed); debug runs persist `**Workflow run:**` plus the full launch args as `**Workflow args:**` to the open case's `case.md`. A resume replays those recorded values, never the current `.orca/config.json`.
 
@@ -526,7 +528,7 @@ This repository previously shipped the same workflow as symlink-installed skills
 |---|---|
 | `.claude-plugin/plugin.json` | The plugin manifest (`orca`). |
 | `.mcp.json` | Bundled codex MCP server registration — the global PATH `codex` binary, never npm. |
-| `skills/feature/`, `skills/debug/`, `skills/review/`, `skills/retry/`, `skills/followup/`, `skills/init/`, `skills/doctor/`, `skills/config/` | The eight skills. |
+| `skills/feature/`, `skills/debug/`, `skills/review/`, `skills/retry/`, `skills/followup/`, `skills/status/`, `skills/init/`, `skills/doctor/`, `skills/config/` | The nine skills. |
 | `skills/feature/interview.md`, `skills/debug/interview.md` | The interview instructions, loaded only when a verb's triage lands on a new interview. |
 | `scripts/preflight.sh` | Read-only environment validation — the gate lines above. |
 | `scripts/review.sh` | The deterministic spine of `/orca:review` — deliverable discovery, editor/terminal resolution, probes, and the launch; the skill converses, the script executes. |

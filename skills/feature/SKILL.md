@@ -248,6 +248,7 @@ Write the run report to `<run-dir>/report.md` **first**, then relay its highligh
 **Run:** <run-dir>
 **Completed:** <YYYY-MM-DD HH:MM>
 **Deliverable:** `feature/<slug>`
+**Integration worktree:** `<repo-root>/orca-<slug>` <the exact path the run used — the audit and retry skills read this field rather than reconstructing the naming convention>
 **Deliverable state:** <the returned `deliverableState`: verified | unverified | built — with `unverified`, one line naming why (verifier died, or fixes left uncommitted); the branch must never be described as verified or complete when the state says otherwise>
 
 ## Shipped

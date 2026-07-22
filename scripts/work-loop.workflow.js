@@ -938,18 +938,31 @@ await drained
 // ---------- integration verification (the tail of SKILL Step 4) ----------
 phase('Integrate')
 let integration = { features: [], fixesApplied: false, gaps: ['skipped: no items merged'] }
+// Terminal deliverable state (codex F-09) — exactly one per run:
+//   'verified'   the integrate agent completed and the branch tip is the
+//                tree it verified (fixes, if any, reviewed clean and
+//                committed)
+//   'unverified' merged work exists but the branch tip lacks a completed
+//                verification: the verifier died, or fixes it applied
+//                could not be reviewed clean and committed
+//   'built'      nothing merged this run — verification never ran
+// The report and the audit/retry skills read this instead of inferring
+// "completed deliverable" from the mere presence of a branch.
+let deliverableState = 'built'
 if (shipped.length) {
   try {
     integration = must(await agent(
       [`Integration worktree: ${integrationWt}`, `Run directory: ${runDir}`].join('\n'),
       tuned('integrate', { agentType: 'orca:integrate', label: 'integration-verify', schema: INTEGRATION })),
       'integration-verify')
+    deliverableState = 'verified'
   } catch (err) {
     // The run result must survive a dead verifier: hours of merged work stay
     // reported, and the missing verification lands as a gap — an uncaught
     // throw here would fail the workflow and lose {shipped, blocked} entirely.
     integration = { features: [], fixesApplied: false,
       gaps: [`integration verification did not complete: ${String((err && err.message) || err)}`] }
+    deliverableState = 'unverified'
   }
 
   if (integration.fixesApplied) {
@@ -984,8 +997,9 @@ if (shipped.length) {
           const verdict = await review('integration', integrationWt, round, 'integration')
           if (verdict.criticalOrHigh === 0) { reviewedClean = true; break }
           if (round === 2) {
-            log('integration fixes blocked: fix rounds exhausted with Critical/High findings remaining — left uncommitted')
+            log('integration fixes blocked: fix rounds exhausted with Critical/High findings remaining — left uncommitted, branch unverified')
             integration.gaps.push('integration fixes blocked after two fix rounds with Critical/High findings remaining — left uncommitted in the integration worktree')
+            deliverableState = 'unverified'
             break
           }
         }
@@ -994,6 +1008,7 @@ if (shipped.length) {
       const reason = String((err && err.message) || err)
       log(`integration review did not complete — fixes left uncommitted, branch unverified (${reason})`)
       integration.gaps.push(`integration fixes were NOT committed: their independent review did not complete (${reason}) — they remain uncommitted in the integration worktree`)
+      deliverableState = 'unverified'
     }
     // Persist the fixer's declines/escalations: with no plan file to carry
     // Deviations, an unpersisted return would be the only record — lost.
@@ -1018,6 +1033,8 @@ if (shipped.length) {
         }
       } catch (err) {
         integration.gaps.push(`integration fixes could not be committed: ${String((err && err.message) || err)}`)
+        // The verified tree was the fixed one; the branch tip is not it.
+        deliverableState = 'unverified'
       }
     }
   }
@@ -1048,4 +1065,4 @@ if (updateContext && shipped.length) {
   }
 }
 
-return { shipped, cut, blocked, integration, promotions, tokensSpent: budget.spent() }
+return { shipped, cut, blocked, integration, deliverableState, promotions, tokensSpent: budget.spent() }

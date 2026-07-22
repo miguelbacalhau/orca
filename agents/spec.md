@@ -34,7 +34,6 @@ Write `<run-dir>/spec.md` with exactly this structure:
 # Spec: <idea summary>
 
 **Created:** <YYYY-MM-DD HH:MM>
-**Status:** draft
 
 ## Outcome
 

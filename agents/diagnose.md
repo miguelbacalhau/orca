@@ -51,7 +51,6 @@ When the scope is `diagnose-and-fix` and you confirmed a root cause, also write 
 # Spec: fix — <case title>
 
 **Created:** <YYYY-MM-DD HH:MM>
-**Status:** approved
 
 ## Outcome
 

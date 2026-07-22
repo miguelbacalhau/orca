@@ -941,7 +941,21 @@ const runWave = async wave => {
     rec = must(await agent(reconcilePrompt(live.map(i => i.id)),
       { model: 'opus', effort: 'high', label: `reconcile#2:${tag}`, phase: 'Plan', schema: RECONCILE }),
       `reconcile#2:${tag}`)
-    if (!rec.clean) live.forEach(i => block(i.id, `unresolved after amendment: ${rec.issues.join('; ')}`))
+    if (!rec.clean) {
+      // Block only the items the unresolved issues actually name — a clean
+      // sibling in the same wave must not be collateral. An issue naming no
+      // live item cannot be attributed and keeps the conservative
+      // whole-wave block.
+      const mentioned = new Set()
+      let unattributed = false
+      for (const issue of rec.issues) {
+        const ids = (issue.match(/\b[WF][1-9][0-9]*\b/g) || []).filter(id => live.some(i => i.id === id))
+        if (ids.length) ids.forEach(id => mentioned.add(id))
+        else unattributed = true
+      }
+      const victims = unattributed ? live : live.filter(i => mentioned.has(i.id))
+      victims.forEach(i => block(i.id, `unresolved after amendment: ${rec.issues.join('; ')}`))
+    }
   })
 
   // No barrier from here: each survivor pipelines through build → merge on its

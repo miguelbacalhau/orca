@@ -42,9 +42,11 @@
 #   mv .bare .git, git config core.bare false, git worktree prune.
 #
 #   cleanup (mutating, destructive): refuses unless the default worktree
-#   exists and EVERY manifest file is present in it, then deletes what
-#   remains at the top level besides .bare, .git, <branch>, and .orca —
-#   exactly the old tracked content the worktree now owns. Emits one
+#   exists and EVERY manifest file is present in it, then deletes only
+#   entries it can prove are conversion leftovers: top-level names of
+#   tracked content at HEAD, or top-level parents of manifest entries.
+#   Registered worktrees are never deleted. Any other top-level entry is
+#   named in a typed FAIL: and nothing is deleted. Emits one
 #   REMOVED:<TAB><path> line per deleted entry and a final CLEANED:<TAB><n>,
 #   and consumes the manifest.
 #
@@ -254,10 +256,41 @@ cmd_cleanup() {
     fail MANIFEST_MISMATCH "$missing of $total moved files not found in $wt — refusing to delete"
   fi
 
-  # What remains besides .bare, .git, <branch>, .orca is exactly the old
-  # tracked content, now owned by the worktree.
-  local entry name removed=0
+  # Deletable means provably ours: a top-level name of tracked content at
+  # HEAD (the old checkout the worktree now owns) or the top-level parent of
+  # a manifest entry (emptied of its moved untracked files). Anything else —
+  # an orca-<slug> worktree, a stray file created after convert — is refused
+  # by name, and nothing is deleted.
+  local f
+  declare -A allowed=()
+  while IFS= read -r -d '' f; do
+    allowed["$f"]=1
+  done < <(git --git-dir="$common_dir" ls-tree --name-only -z HEAD)
+  while IFS= read -r -d '' f; do
+    allowed["${f%%/*}"]=1
+  done <"$manifest"
+
+  # Registered worktrees are never deletable, whatever the sets say.
+  local wt_line
+  declare -A worktrees=()
+  while IFS= read -r wt_line; do
+    [[ "$wt_line" == worktree\ * ]] || continue
+    worktrees["${wt_line#worktree }"]=1
+  done < <(git --git-dir="$common_dir" worktree list --porcelain)
+
+  local entry name removed=0 refused=""
   shopt -s dotglob nullglob
+  for entry in "$root"/*; do
+    name="${entry##*/}"
+    case "$name" in .bare | .git | .orca | "$branch") continue ;; esac
+    if [[ -n "${worktrees[$entry]:-}" || -z "${allowed[$name]:-}" ]]; then
+      refused="${refused:+$refused, }$entry"
+    fi
+  done
+  if [[ -n "$refused" ]]; then
+    shopt -u dotglob nullglob
+    fail PRECONDITION "unrecognized top-level entries (not manifest-covered, not tracked content, or a registered worktree) — move them aside and re-run; nothing was deleted: $refused"
+  fi
   for entry in "$root"/*; do
     name="${entry##*/}"
     case "$name" in .bare | .git | .orca | "$branch") continue ;; esac

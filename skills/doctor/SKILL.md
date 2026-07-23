@@ -14,14 +14,14 @@ Make the *machine* ready for orca runs. Repository layout is orca:init's job and
 **Inside a git repository**, run orca:feature's pre-flight from the project root — read-only, and its output is the work list:
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh preflight
 ```
 
 Report every gate in plain language: `BARE_REPO` (`PASS | FAIL`), the `REVIEWER:` line (which reviewer, pinned by `.orca/config` or detected from the machine), and `CODEX` (`PASS | FAIL | SKIPPED` — skipped means the resolved reviewer is claude and the codex checks deliberately did not run). A `REVIEWER: FAIL` means the config key is invalid — point at orca:config; nothing here edits that file.
 
 Whenever the resolved reviewer is codex, add the one probe the script cannot run — the **live MCP probe**, from this session: call ToolSearch with `select:mcp__plugin_orca_orca-codex__codex`. Missing while the codex gates pass means review agents cannot reach codex, and the cause is one of two. First check whether the project carries MCP config of its own — a `.mcp.json` at the repo root, or local-scope servers (`claude mcp list` shows both): a known harness bug (present as of Claude Code 2.1.202) loads none of a plugin's bundled MCP servers when any such config exists. A leftover `codex` registration is redundant — the plugin bundles the server — so prescribe removing it, never remove it yourself; if the project genuinely needs its own MCP servers, the workaround is pinning `reviewer=claude` via orca:config, trade-off stated. Otherwise the session predates the plugin's install or enablement. Both remedies end in a fresh session, so name that alongside the other restart caveats.
 
-**Outside a git repository**, run in machine-only mode: say up front that the layout gate and reviewer pinning are per-repo and unchecked here. Probe codex directly with the same checks the pre-flight runs — binary on PATH, `codex --version` against the minimum version the preflight names (read `codex_min_version` from `${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh` rather than reciting a remembered one), `codex login status`, and `MCP_TOOL_TIMEOUT` in a settings env block. Treat the resolved reviewer as detected-only, and offer the timeout write to `~/.claude/settings.json` only (there is no project settings file to offer).
+**Outside a git repository**, run in machine-only mode: say up front that the layout gate and reviewer pinning are per-repo and unchecked here. Probe codex directly with the same checks the pre-flight runs — binary on PATH, `codex --version` against the minimum version the preflight names (read `codex_min_version` from `${CLAUDE_PLUGIN_ROOT}/scripts/verbs/preflight.sh` rather than reciting a remembered one), `codex login status`, and `MCP_TOOL_TIMEOUT` in a settings env block. Treat the resolved reviewer as detected-only, and offer the timeout write to `~/.claude/settings.json` only (there is no project settings file to offer).
 
 ## Step 2: Route layout failures away
 

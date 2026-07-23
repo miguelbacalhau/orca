@@ -1,33 +1,24 @@
 #!/usr/bin/env bats
-# preflight.sh — gates, reviewer resolution, codex checks (stubbed CLI).
+# orca.sh preflight — gates, reviewer resolution, codex checks (stubbed CLI).
 
 load helpers
 
 # Run preflight with a controlled codex stub prepended to PATH.
 preflight_with_codex() { # <version> <ok|denied>
   make_codex_stub "$BATS_TEST_TMPDIR/stub" "$1" "$2"
-  PATH="$BATS_TEST_TMPDIR/stub:$PATH" run bash "$SCRIPTS/preflight.sh"
+  PATH="$BATS_TEST_TMPDIR/stub:$PATH" run bash "$SCRIPTS/orca.sh" preflight
 }
 
-@test "the plugin-shipped CLI beside preflight passes the PLUGIN_ROOT gate" {
+# The stranded-install test (a preflight copied away from orca.sh
+# failing typed NO_PLUGIN_ROOT) is gone with the fold: its failure
+# condition is unreachable through the only remaining entry point —
+# dispatch itself proves the dispatcher exists.
+@test "the plugin-shipped CLI passes the PLUGIN_ROOT gate" {
   make_bare_layout "$BATS_TEST_TMPDIR/r"
   cd "$BATS_TEST_TMPDIR/r"
   preflight_with_codex "" denied
   [ "$status" -eq 0 ]
   has_line 'PLUGIN_ROOT: PASS'
-}
-
-@test "a preflight stranded without the dispatcher fails typed NO_PLUGIN_ROOT" {
-  # a broken install: preflight.sh present, orca.sh missing beside it
-  mkdir -p "$BATS_TEST_TMPDIR/stranded"
-  cp "$SCRIPTS/preflight.sh" "$BATS_TEST_TMPDIR/stranded/"
-  make_bare_layout "$BATS_TEST_TMPDIR/r"
-  cd "$BATS_TEST_TMPDIR/r"
-  make_codex_stub "$BATS_TEST_TMPDIR/stub" "" denied
-  PATH="$BATS_TEST_TMPDIR/stub:$PATH" run bash "$BATS_TEST_TMPDIR/stranded/preflight.sh"
-  [ "$status" -eq 1 ]
-  has_line 'PLUGIN_ROOT: FAIL: NO_PLUGIN_ROOT'
-  has_line 'RESULT: FAIL'
 }
 
 @test "conventional checkout fails the bare gate" {

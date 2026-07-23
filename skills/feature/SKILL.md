@@ -64,7 +64,7 @@ The user's confirmation of the restated brief authorizes the run. If the brief o
 The run's mechanical prerequisites — the bare-repo layout and, when the reviewer is codex, the Codex tooling — are validated by one bundled script, which also resolves **which independent reviewer this run uses**. If the interview's early pre-flight already ran the script in this same invocation, reuse its output — gates and reviewer line alike — instead of re-running it; re-run only when it reported a `FAIL` the user has since fixed. Otherwise run it during this step, before the confirmation, from the project root:
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh preflight
 ```
 
 `${CLAUDE_PLUGIN_ROOT}` substitutes to this plugin's installed root, so the resulting path is already absolute. The script is read-only and prints one line per gate plus a final result:

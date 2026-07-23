@@ -49,7 +49,7 @@ Pacing follows the interview's rules: multi-round, at most 2–3 open questions 
 
 ## Step 3: Early pre-flight (optional, never blocking)
 
-Same as the interview's: run `bash ${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh` from the project root. A `FAIL` is something to fix before the run, at leisure — it never blocks writing the brief; point at `/orca:init` for the layout gate and `/orca:doctor` for machine gates, then continue. If the brief runs now, the run's own pre-flight reuses this output.
+Same as the interview's: run `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh preflight` from the project root. A `FAIL` is something to fix before the run, at leisure — it never blocks writing the brief; point at `/orca:init` for the layout gate and `/orca:doctor` for machine gates, then continue. If the brief runs now, the run's own pre-flight reuses this output.
 
 ## Step 4: Write the brief
 

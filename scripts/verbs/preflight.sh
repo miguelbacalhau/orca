@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+# shellcheck shell=bash disable=SC2154
 #
 # orca pre-flight — read-only environment validation, run once during
 # Step 1 before the brief is confirmed. Config and settings paths are
@@ -25,8 +25,11 @@
 # and stays a conversational gate in SKILL.md.
 #
 # Exit 0 iff every gate passes; non-zero if any gate fails. No side effects.
-
-set -uo pipefail
+#
+# Sourced by orca.sh (orca.sh preflight); the lib is loaded but unused
+# here — this verb keeps its own internal helpers. The fail below is a
+# VARIABLE, distinct from lib.sh's fail() function (bash separates the
+# two namespaces).
 
 fail=0
 
@@ -53,20 +56,18 @@ else
   echo "TRUNK_CANDIDATE: ${trunk:-unknown}"
 fi
 
-# --- PLUGIN_ROOT: the plugin-shipped CLI must exist beside this script ---
+# --- PLUGIN_ROOT: the plugin-shipped CLI must exist at the dispatcher's own location ---
 # The work loop's worktree/commit/merge rituals run through scripts/orca.sh;
 # a missing dispatcher means "can't commit anything", discovered at minute
-# forty — refuse at minute zero instead (typed NO_PLUGIN_ROOT). Self-derived
-# via BASH_SOURCE: no PLUGIN_ROOT variable exists in here — callers expand
-# ${CLAUDE_PLUGIN_ROOT} in their own shell, and under set -u referencing an
-# unset variable would die unbound and untyped, the exact failure shape this
-# check exists to prevent. test -f, not -x: every invocation is
-# `bash .../orca.sh`, so the exec bit is never needed and must not be relied
-# on to survive plugin installation. The workflow's own non-empty-argument
-# assert covers the other failure mode (the launcher never passed
-# pluginRoot); the two are complementary, not redundant.
-plugin_scripts_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "$plugin_scripts_dir/orca.sh" ]]; then
+# forty — refuse at minute zero instead (typed NO_PLUGIN_ROOT). Run through
+# the dispatcher the check is tautological — orca.sh is what is running —
+# but both branches stay: they cost nothing and stay honest if the layout
+# ever changes. test -f, not -x: every invocation is `bash .../orca.sh`, so
+# the exec bit is never needed and must not be relied on to survive plugin
+# installation. The workflow's own non-empty-argument assert covers the
+# other failure mode (the launcher never passed pluginRoot); the two are
+# complementary, not redundant.
+if [[ -f "$orca_scripts_dir/orca.sh" ]]; then
   echo "PLUGIN_ROOT: PASS"
 else
   echo "PLUGIN_ROOT: FAIL: NO_PLUGIN_ROOT — scripts/orca.sh is not beside preflight.sh; reinstall the orca plugin"

@@ -62,7 +62,7 @@ Stay at intent level in what you *write down*: direction decisions with their ra
 Run the run's environment pre-flight now, from the project root — it ships in this plugin:
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh preflight
 ```
 
 This is an early warning, not a gate: a `FAIL` here is something to fix before the *run*, at leisure — it never blocks writing the brief. It also spares a second run: if the brief runs now, the run's own environment pre-flight reuses this output rather than re-running the script. Report any failing gate and point at the right fixer — orca:init for the layout gate (`BARE_REPO`), orca:doctor for the machine gates (`CODEX`, an invalid `REVIEWER`) — then continue. A `CODEX: SKIPPED` line just means the run will use the Claude reviewer; nothing to fix.

@@ -52,7 +52,7 @@ The case file is the only place the bug's description was captured — once this
 Run the bundled read-only pre-flight from the project root (reusing the interview's early pre-flight output if it ran in this same invocation; re-run only after a `FAIL` the user has since fixed):
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh preflight
 ```
 
 The gates read exactly as they do for a feature run — `BARE_REPO`, `TRUNK_CANDIDATE` (confirm the trunk with the user; the case and fix branches are created from its tip), `REVIEWER` (hold the resolved value — it governs the fix tail's independent review exactly as it governs a feature run's), `CODEX`, `RESULT` — with one scope-sensitive reading: the codex machine gates exist for the **fix tail's** review, so on a `CODEX: FAIL` under scope `diagnose-and-fix`, stop and route to orca:doctor as usual; under `diagnose-only` — a run with no review stage anywhere — report the failure as a warning for future fixing runs and proceed. A `BARE_REPO: FAIL` always stops (route to orca:init), and a `REVIEWER: FAIL` always stops (route to orca:config).

@@ -51,7 +51,7 @@
 //                     verb runs after every worktree add — a missing plugin
 //                     root means "can't commit anything", so the launch
 //                     refuses typed (NO_PLUGIN_ROOT) instead of failing at
-//                     minute forty. preflight.sh verifies the dispatcher
+//                     minute forty. the preflight verb verifies the dispatcher
 //                     file exists launcher-side; this script can only
 //                     assert the argument's shape (no filesystem here) —
 //                     the two checks are complementary, not redundant

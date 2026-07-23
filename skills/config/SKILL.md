@@ -33,7 +33,7 @@ One typed TAB-separated line per fact: `REVIEWER:` (the pinned value, or `absent
 
 If a legacy `<repo-root>/.orca/config.json` exists, mention that it is obsolete — nothing has read it since the flat-file migration (the preflight emits a `CONFIG: OBSOLETE:` signpost while it lingers) — and offer to delete it. Never parse or migrate it: the values are retyped in seconds with `set`.
 
-To resolve the **effective** reviewer when the key is absent, run the bundled preflight (`bash ${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh`) and read its `REVIEWER:` line — the config script never detects; compose the two outputs.
+To resolve the **effective** reviewer when the key is absent, run the bundled preflight (`bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh preflight`) and read its `REVIEWER:` line — the config script never detects; compose the two outputs.
 
 ## Step 2: Show the state
 

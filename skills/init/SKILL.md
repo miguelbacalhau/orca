@@ -18,7 +18,7 @@ Layout only: machine and session tooling — the Codex CLI, the MCP tool timeout
 If inside a git repository, run orca:feature's pre-flight first — it is read-only:
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh preflight
 ```
 
 The layout gate — `BARE_REPO` — is this skill's work list; fix it with Step 2 below. The machine lines (`REVIEWER`, `CODEX` — `PASS | FAIL | SKIPPED`) are reported but not fixed here: on a machine-gate `FAIL`, point at **orca:doctor**. If `BARE_REPO` already passes, say so and stop — anything else the pre-flight flagged is doctor's, not this skill's.

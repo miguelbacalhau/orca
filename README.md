@@ -250,7 +250,7 @@ Valid stage values — models `haiku` | `sonnet` | `opus` | `fable`, efforts `lo
    │
    ├─ 0. Triage                     resume an interrupted run · run a queued brief
    │                                · or interview → brief, then run now or queue
-   ├─ 1. Pre-flight + confirm       preflight.sh gates, Workflow tool, live MCP
+   ├─ 1. Pre-flight + confirm       orca.sh preflight gates, Workflow tool, live MCP
    │                                check, bypassPermissions; ONE user confirmation
    ├─ 2. Spec (orca:spec)           read-only codebase exploration → spec.md with
    │                                Interfaces + a 2–8 item dependency-ordered
@@ -267,7 +267,7 @@ Valid stage values — models `haiku` | `sonnet` | `opus` | `fable`, efforts `lo
                                     knowledge worth promoting, landing
 ```
 
-**Pre-flight** (`scripts/preflight.sh`, read-only, also run early during the interview) prints one machine-readable line per gate: `BARE_REPO`, a `REVIEWER: codex|claude (pinned|detected)` line resolving which reviewer the run uses, `CODEX` (binary ≥ 0.142.5, authenticated, `MCP_TOOL_TIMEOUT` set — checked only when the resolved reviewer is codex, `SKIPPED` otherwise), an informational `TRUNK_CANDIDATE`, and a final `RESULT` mirrored by the exit code. On any `FAIL` the run does not start; remediation goes through `/orca:init` for the layout gate and `/orca:doctor` for the machine gates.
+**Pre-flight** (`scripts/orca.sh preflight`, read-only, also run early during the interview) prints one machine-readable line per gate: `BARE_REPO`, a `REVIEWER: codex|claude (pinned|detected)` line resolving which reviewer the run uses, `CODEX` (binary ≥ 0.142.5, authenticated, `MCP_TOOL_TIMEOUT` set — checked only when the resolved reviewer is codex, `SKIPPED` otherwise), an informational `TRUNK_CANDIDATE`, and a final `RESULT` mirrored by the exit code. On any `FAIL` the run does not start; remediation goes through `/orca:init` for the layout gate and `/orca:doctor` for the machine gates.
 
 **Spec** is written once, by a dedicated read-only agent, from the confirmed brief. Its two load-bearing sections: **Interfaces Between Work Items** — the contracts (type shapes, signatures, file ownership, naming) that let items build in parallel without inventing incompatible seams — and the **Work Breakdown**, which becomes the workflow's item list verbatim, each item carrying a one-line acceptance criterion checkable from the integration worktree. If the requested scope cannot be split cleanly against the codebase, the run surfaces that and stops rather than launching against a spec known to be wrong.
 
@@ -530,8 +530,8 @@ This repository previously shipped the same workflow as symlink-installed skills
 | `.mcp.json` | Bundled codex MCP server registration — the global PATH `codex` binary, never npm. |
 | `skills/feature/`, `skills/debug/`, `skills/review/`, `skills/retry/`, `skills/followup/`, `skills/status/`, `skills/init/`, `skills/doctor/`, `skills/config/` | The nine skills. |
 | `skills/feature/interview.md`, `skills/debug/interview.md` | The interview instructions, loaded only when a verb's triage lands on a new interview. |
-| `scripts/preflight.sh` | Read-only environment validation — the gate lines above. |
-| `scripts/orca.sh config` | Sole reader/writer of `.orca/config` — parse, validation, merge semantics, atomic canonical writes (over `lib.sh`'s shared machinery); the grep-readers in `preflight.sh` and `review.sh` lean on its sole-writer guarantee. |
+| `scripts/orca.sh preflight` | Read-only environment validation — the gate lines above. |
+| `scripts/orca.sh config` | Sole reader/writer of `.orca/config` — parse, validation, merge semantics, atomic canonical writes (over `lib.sh`'s shared machinery); the grep-readers in the preflight verb and `review.sh` lean on its sole-writer guarantee. |
 | `scripts/triage.sh` | Read-only discovery spine — interrupted/unlaunched runs with byte-exact resume handles, queued briefs, open cases (`discover`), and the git-footprint join for `/orca:status` (`status`). |
 | `scripts/init-convert.sh` | The mechanical core of `/orca:init`'s conventional-to-bare conversion — gates, NUL-safe untracked moves, crash journal with signal traps, `recover`, and the manifest-checked `cleanup`. |
 | `scripts/review.sh` | The deterministic spine of `/orca:review` — deliverable discovery, editor/terminal resolution, probes, and the launch; the skill converses, the script executes. |

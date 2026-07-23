@@ -4,13 +4,13 @@
 # The orca:config skill stays the conversational shell (presentation,
 # advice, failure translation); this script owns the parse, the
 # validation, the merge/removal semantics, and the canonical write.
-# preflight.sh and review.sh read the file with grep, justified by the
+# the preflight verb and review.sh read the file with grep, justified by the
 # guarantee that lives HERE (via lib.sh): this script is the only
 # writer, and it only ever writes the canonical shape below.
 #
 # The file is flat dotted key=value (see lib.sh's config section for
 # the grammar); the legacy .orca/config.json is no longer read by
-# anything — preflight.sh emits an informational CONFIG: OBSOLETE line
+# anything — the preflight verb emits an informational CONFIG: OBSOLETE line
 # while one exists, and orca:config offers to delete it.
 #
 # Usage:
@@ -31,7 +31,7 @@
 #       agents/<stage>.md frontmatter, stages in vocabulary order. The review
 #       stage appears twice, as review-codex AND review-claude — the caller
 #       renders the row for the effective reviewer, which this script never
-#       resolves: detection is preflight.sh's job (its REVIEWER: line), and
+#       resolves: detection is the preflight verb's job (its REVIEWER: line), and
 #       the caller composes the two outputs.
 #
 #   validate (read-only):
@@ -65,7 +65,7 @@
 #                UNKNOWN_REVIEWER UNKNOWN_EDITOR UNKNOWN_TERMINAL
 #                WRITE_ERROR
 #
-# Canonical write shape — the contract the grep-readers in preflight.sh and
+# Canonical write shape — the contract the grep-readers in the preflight verb and
 # review.sh assume (they stay grep-only BECAUSE this script is the sole
 # writer): one key=value per line, fixed order (reviewer, editor, terminal,
 # then stages in vocabulary order, model before effort), cleared keys

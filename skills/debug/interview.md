@@ -31,7 +31,7 @@ If the machine-local project context exists — `<repo-root>/.orca/decisions.md`
 Run the run's environment pre-flight now, from the project root:
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh preflight
 ```
 
 An early warning, not a gate: a `FAIL` is something to fix before the *run*, at leisure — it never blocks writing the case. If the case runs now, the run's own pre-flight reuses this output. Report failing gates and point at the right fixer — orca:init for `BARE_REPO`, orca:doctor for the codex machine gates (which matter to the fix tail; under a diagnose-only scope they are only a warning), orca:config for an invalid `REVIEWER` — then continue.

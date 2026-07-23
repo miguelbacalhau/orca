@@ -86,7 +86,7 @@ secrets_dir="$repo_root/.orca/secrets"
 # Conventional checkout only (the bare layout's .orca/ sits outside every
 # worktree): make sure the per-clone ignore file excludes .orca/ before any
 # placement, so a checkout that never ran `orca:config set` still cannot
-# `git add -A` its .orca/secrets tree. Mirrors config.sh's ensure_exclude —
+# `git add -A` its .orca/secrets tree. Mirrors the config verb's ensure_exclude —
 # the two must stay behaviorally identical. Idempotent, best-effort.
 is_bare="$(git --git-dir="$common_dir" rev-parse --is-bare-repository 2>/dev/null || true)"
 ensure_exclude() {

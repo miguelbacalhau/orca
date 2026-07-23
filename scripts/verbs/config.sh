@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+# shellcheck shell=bash disable=SC2154
 #
 # orca config — the sole reader/writer of <repo-root>/.orca/config.
 # The orca:config skill stays the conversational shell (presentation,
@@ -14,11 +14,11 @@
 # while one exists, and orca:config offers to delete it.
 #
 # Usage:
-#   config.sh show
-#   config.sh validate
-#   config.sh set <field>=<value> [...]     # plan.model=sonnet reviewer=claude
-#   config.sh clear <field> [...]           # plan.model reviewer
-#   config.sh reset [stage]
+#   orca.sh config show
+#   orca.sh config validate
+#   orca.sh config set <field>=<value> [...]     # plan.model=sonnet reviewer=claude
+#   orca.sh config clear <field> [...]           # plan.model reviewer
+#   orca.sh config reset [stage]
 #
 # Output contract — one machine-readable line per fact, fields TAB-separated:
 #
@@ -78,16 +78,12 @@
 # script writes there it also ensures `.orca/` is listed in
 # <git-common-dir>/info/exclude (the per-clone ignore file), keeping a stray
 # `git add -A` from committing per-machine preferences.
+#
+# Sourced by orca.sh with the verb arguments in place; lib.sh (fail(),
+# the vocabulary tables, and the config parser/writer) is already
+# loaded, and $orca_scripts_dir is the dispatcher's own directory.
 
-set -uo pipefail
-
-# fail(), the vocabulary tables, and the config parser/writer come from
-# the shared lib.
-# shellcheck source=lib.sh disable=SC1091
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
-
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-agents_dir="$script_dir/../agents"
+agents_dir="$orca_scripts_dir/../agents"
 
 # Reject-all-or-write-nothing needs every bad assignment reported, not
 # just the first — errors accumulate here and bail together.

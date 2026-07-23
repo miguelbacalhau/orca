@@ -1,9 +1,9 @@
 #!/usr/bin/env bats
-# config.sh — flat-file parse, validation, canonical writes, recovery.
+# orca.sh config — flat-file parse, validation, canonical writes, recovery.
 
 load helpers
 
-cfg() { bash "$SCRIPTS/config.sh" "$@"; }
+cfg() { bash "$SCRIPTS/orca.sh" config "$@"; }
 
 @test "show with no config file reports absent plus defaults" {
   make_repo "$BATS_TEST_TMPDIR/r"

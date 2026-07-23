@@ -120,7 +120,7 @@ if (typeof pluginRoot !== 'string' || !pluginRoot.startsWith('/'))
 
 // Per-stage model/effort overrides (args.agents). The stage vocabulary is the
 // ONE shared 12-key list — feature's stages plus debug's — kept in lockstep
-// across scripts/lib.sh (config.sh's write path, and the run skills' launch validation
+// across scripts/lib.sh (the config verb's write path, and the run skills' launch validation
 // via its validate subcommand), work-loop.workflow.js, and this script: the
 // config file has a single agents block, and a key accepted by any validator
 // must be accepted by all three, or a written override bricks the other

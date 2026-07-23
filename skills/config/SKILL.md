@@ -26,10 +26,10 @@ The workflow's internal helper agents — the shell relay, reconciliation, escal
 The bundled script is the sole reader and writer of `<repo-root>/.orca/config` — never read, author, or repair the file directly:
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/config.sh show
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh config show
 ```
 
-One typed TAB-separated line per fact: `REVIEWER:` (the pinned value, or `absent`), `EDITOR:` and `TERMINAL:` (value or `absent`), one `OVERRIDE:` line per set stage field, and one `DEFAULT: <stage> <model> <effort>` line per stage — read fresh from the plugin's own agent definitions, so they track the installed plugin version. The review stage appears twice, as `review-codex` and `review-claude`; render the row for the effective reviewer. A `FAIL:` line names what is wrong — translate it: `NOT_GIT` means the config is per-repository, so explain that and stop; a mangled file (`PARSE_ERROR`, `DUPLICATE_KEY`, an unknown key or value) is fixed by a targeted `set`/`clear`, or by `config.sh reset` — the full reset is the recovery path and works even when the file cannot be parsed.
+One typed TAB-separated line per fact: `REVIEWER:` (the pinned value, or `absent`), `EDITOR:` and `TERMINAL:` (value or `absent`), one `OVERRIDE:` line per set stage field, and one `DEFAULT: <stage> <model> <effort>` line per stage — read fresh from the plugin's own agent definitions, so they track the installed plugin version. The review stage appears twice, as `review-codex` and `review-claude`; render the row for the effective reviewer. A `FAIL:` line names what is wrong — translate it: `NOT_GIT` means the config is per-repository, so explain that and stop; a mangled file (`PARSE_ERROR`, `DUPLICATE_KEY`, an unknown key or value) is fixed by a targeted `set`/`clear`, or by `orca.sh config reset` — the full reset is the recovery path and works even when the file cannot be parsed.
 
 If a legacy `<repo-root>/.orca/config.json` exists, mention that it is obsolete — nothing has read it since the flat-file migration (the preflight emits a `CONFIG: OBSOLETE:` signpost while it lingers) — and offer to delete it. Never parse or migrate it: the values are retyped in seconds with `set`.
 
@@ -52,7 +52,7 @@ One line per stage, role in a few words (spec: writes the spec and breakdown; pl
 
 Arguments like `plan.model=sonnet review.effort=high reviewer=claude editor=none` apply directly. `reset` clears every override — the reviewer, editor, and terminal keys included; `reset <stage>` clears one stage; the value `default` clears a single field (`plan.model=default`, `reviewer=default`, `editor=default`, `terminal=default` — for the top-level keys, back to detection). With no arguments, show the state and ask what to change in plain conversation — do not march through all twelve stages unless asked.
 
-Validation is the script's, not yours: it checks every assignment against the same stage/model/effort/reviewer/editor/terminal vocabulary the workflow scripts enforce at launch (the literal lists live in `config.sh` beside the workflow scripts' copies, under one lockstep comment), rejects a bad batch whole — one typed `FAIL:` line per bad assignment, nothing written. Your job is translation and advice, not re-checking: relay what each `FAIL:` line names, and add the one warning the script cannot know — `fable` is accepted but only works on plans whose harness offers it, and it is the *default* for `spec` and `plan`: a harness whose plan does not offer fable must pin them back with `spec.model=opus plan.model=opus`. Volunteer that remedy whenever you are relaying a fable-related spawn failure — a default failing looks like a bug to the user, not a configuration choice.
+Validation is the script's, not yours: it checks every assignment against the same stage/model/effort/reviewer/editor/terminal vocabulary the workflow scripts enforce at launch (the literal lists live in the config verb beside the workflow scripts' copies, under one lockstep comment), rejects a bad batch whole — one typed `FAIL:` line per bad assignment, nothing written. Your job is translation and advice, not re-checking: relay what each `FAIL:` line names, and add the one warning the script cannot know — `fable` is accepted but only works on plans whose harness offers it, and it is the *default* for `spec` and `plan`: a harness whose plan does not offer fable must pin them back with `spec.model=opus plan.model=opus`. Volunteer that remedy whenever you are relaying a fable-related spawn failure — a default failing looks like a bug to the user, not a configuration choice.
 
 On `reviewer=claude`, state the trade-off in one sentence: the Claude reviewer keeps fresh-context independence (a separate agent, only the artifacts and the diff, an adversarial contract) but is same-model — cross-model codex review does not share the implementer's blind spots. On `reviewer=codex`, note that the codex machine gates (binary, auth, `MCP_TOOL_TIMEOUT`) must pass at run time — run the preflight to check, and point at orca:doctor if they currently fail.
 
@@ -63,9 +63,9 @@ An override equal to today's default is still meaningful — it pins the stage a
 Apply the changes with one script call — a batch is all-or-nothing, so a partial write can never happen:
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/config.sh set plan.model=sonnet reviewer=claude editor=default
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/config.sh clear review.effort     # same as review.effort=default
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/config.sh reset [stage]
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh config set plan.model=sonnet reviewer=claude editor=default
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh config clear review.effort     # same as review.effort=default
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh config reset [stage]
 ```
 
 The mechanics are the script's: merge into the existing file rather than overwriting unrelated keys, store only overridden fields in a canonical compact shape, remove cleared fields, empty stage objects, and an empty `agents` block (never writing `null` or `"default"`), delete a file left empty, and — in a conventional checkout, where `<repo-root>` **is** the working tree — keep `.orca/` listed in `<git-common-dir>/info/exclude` (the per-clone ignore file) so a stray `git add -A` never commits per-machine model preferences; the repo's tracked `.gitignore` stays untouched. On success it emits the resulting state (the same typed lines as `show`) plus a `WROTE:` or `DELETED:` line.
@@ -74,6 +74,6 @@ Render that resulting state back to the user as Step 2 does, and state when it t
 
 ## Guidelines
 
-- Never edit `${CLAUDE_PLUGIN_ROOT}/agents/*.md` — plugin files are replaced on update, and the defaults are the plugin's to set. Overrides live only in the repo's `.orca/config`, and every read and write of that file goes through `config.sh` — the canonical shape it guarantees is what lets the preflight and orca:review scripts read the file with grep.
+- Never edit `${CLAUDE_PLUGIN_ROOT}/agents/*.md` — plugin files are replaced on update, and the defaults are the plugin's to set. Overrides live only in the repo's `.orca/config`, and every read and write of that file goes through `orca.sh config` — the canonical shape it guarantees is what lets the preflight and orca:review scripts read the file with grep.
 - This skill configures the reviewer choice, the orca:review `editor`/`terminal` keys, and models/effort only. The codex machine setup (binary, auth, MCP timeout) and the orca.nvim / orca.vscode installs belong to orca:doctor; repository layout belongs to orca:init; run behavior belongs to orca:feature and orca:debug; opening the review itself belongs to orca:review.
 - Advise, don't moralize: if an override looks self-defeating (haiku for plan or merge, where judgment failures cost whole items; max effort on commit, which formats a message), say so in one sentence and write what the user chose.

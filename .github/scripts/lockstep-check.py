@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Lockstep check for the contract vocabulary duplicated across the
 config validators: scripts/lib.sh (the sole write path, used by
-config.sh), and the sandboxed workflow scripts that carry literal
+the config verb), and the sandboxed workflow scripts that carry literal
 copies because they cannot read files (scripts/work-loop.workflow.js,
 scripts/debug-loop.workflow.js, and — MODELS/EFFORTS only —
 scripts/spec.workflow.js, which validates the spec spawn's overrides

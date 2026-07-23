@@ -26,7 +26,7 @@ verb="${1:-}"
 [ $# -gt 0 ] && shift
 
 case "$verb" in
-  commit-verify|merge-finalize|worktree-item|secrets)
+  commit-verify|merge-finalize|worktree-item|secrets|config)
     # shellcheck disable=SC1090
     source "$orca_scripts_dir/verbs/$verb.sh"
     ;;
@@ -36,6 +36,6 @@ case "$verb" in
     emit_frame rc=0 verb=self-test "probe.b64=$(b64_encode_str 'orca self-test')"
     ;;
   *)
-    fail UNKNOWN_VERB "unknown verb '${verb}' — usage: orca.sh <verb> [args...]; verbs: commit-verify, merge-finalize, worktree-item, secrets, self-test"
+    fail UNKNOWN_VERB "unknown verb '${verb}' — usage: orca.sh <verb> [args...]; verbs: commit-verify, merge-finalize, worktree-item, secrets, config, self-test"
     ;;
 esac

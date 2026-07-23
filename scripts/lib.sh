@@ -145,7 +145,7 @@ canonicalize() { # <path> -> canonical absolute path on stdout
 # type confusion, and each line validates independently.
 #
 # One shared validation vocabulary kept in lockstep across four code
-# validators: this file (config.sh's parse and the run skills' launch
+# validators: this file (the config verb's parse and the run skills' launch
 # validation via its validate subcommand), work-loop.workflow.js,
 # debug-loop.workflow.js, and — MODELS/EFFORTS only — spec.workflow.js.
 # The workflow scripts run sandboxed with no filesystem access, so they
@@ -217,7 +217,7 @@ config_parse() {
       ''|'#'*) continue ;;
     esac
     if ! [[ $line =~ ^[a-z][a-z.]*=[a-z]+$ ]]; then
-      errs="$errs$(printf 'FAIL:\t%s\t%s' PARSE_ERROR "invalid line in $file: \"$line\" — a line is blank, a # comment, or lowercase key=value; fix by hand or config.sh reset")
+      errs="$errs$(printf 'FAIL:\t%s\t%s' PARSE_ERROR "invalid line in $file: \"$line\" — a line is blank, a # comment, or lowercase key=value; fix by hand or orca.sh config reset")
 "
       continue
     fi
@@ -229,7 +229,7 @@ config_parse() {
       continue
     fi
     if in_list "$key" "$seen"; then
-      errs="$errs$(printf 'FAIL:\t%s\t%s' DUPLICATE_KEY "duplicate key \"$key\" in $file — fix by hand or config.sh reset")
+      errs="$errs$(printf 'FAIL:\t%s\t%s' DUPLICATE_KEY "duplicate key \"$key\" in $file — fix by hand or orca.sh config reset")
 "
       continue
     fi

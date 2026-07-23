@@ -209,7 +209,7 @@ const TUNABLE = ['plan', 'implement', 'review', 'fix', 'commit', 'merge', 'integ
 // launch failure.
 const STAGES = ['spec', ...TUNABLE, 'reproduce', 'hypothesize', 'verify', 'diagnose']
 // The stage vocabulary is one shared 12-key list kept in lockstep across
-// three code validators — scripts/lib.sh (config.sh's write path, and the run skills'
+// three code validators — scripts/lib.sh (the config verb's write path, and the run skills'
 // launch validation via its validate subcommand), this script, and
 // debug-loop.workflow.js — a value accepted anywhere but rejected here bricks
 // every launch until the config file is hand-edited. MODELS/EFFORTS are part

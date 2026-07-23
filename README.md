@@ -531,7 +531,7 @@ This repository previously shipped the same workflow as symlink-installed skills
 | `skills/feature/`, `skills/debug/`, `skills/review/`, `skills/retry/`, `skills/followup/`, `skills/status/`, `skills/init/`, `skills/doctor/`, `skills/config/` | The nine skills. |
 | `skills/feature/interview.md`, `skills/debug/interview.md` | The interview instructions, loaded only when a verb's triage lands on a new interview. |
 | `scripts/preflight.sh` | Read-only environment validation — the gate lines above. |
-| `scripts/config.sh` | Sole reader/writer of `.orca/config` — parse, validation, merge semantics, atomic canonical writes (over `lib.sh`'s shared machinery); the grep-readers in `preflight.sh` and `review.sh` lean on its sole-writer guarantee. |
+| `scripts/orca.sh config` | Sole reader/writer of `.orca/config` — parse, validation, merge semantics, atomic canonical writes (over `lib.sh`'s shared machinery); the grep-readers in `preflight.sh` and `review.sh` lean on its sole-writer guarantee. |
 | `scripts/triage.sh` | Read-only discovery spine — interrupted/unlaunched runs with byte-exact resume handles, queued briefs, open cases (`discover`), and the git-footprint join for `/orca:status` (`status`). |
 | `scripts/init-convert.sh` | The mechanical core of `/orca:init`'s conventional-to-bare conversion — gates, NUL-safe untracked moves, crash journal with signal traps, `recover`, and the manifest-checked `cleanup`. |
 | `scripts/review.sh` | The deterministic spine of `/orca:review` — deliverable discovery, editor/terminal resolution, probes, and the launch; the skill converses, the script executes. |

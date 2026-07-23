@@ -25,7 +25,9 @@ jobs:
         run: command -v shellcheck >/dev/null || brew install shellcheck
 
       - name: shellcheck
-        run: shellcheck scripts/*.sh .github/scripts/*.sh
+        # find-based so the layout can grow (scripts/verbs/*.sh) without
+        # the check rotting on a glob that never matched them.
+        run: find scripts .github/scripts -name '*.sh' -exec shellcheck {} +
 
       - name: Validate JSON manifests
         run: |

@@ -104,6 +104,28 @@ agents.implement.model=opus' ]
   refute_line $'OVERRIDE:\tspec'
 }
 
+@test "research is an ordinary override: set, shown, validated, first in vocabulary order" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  run cfg set research.model=sonnet research.effort=medium plan.model=opus
+  [ "$status" -eq 0 ]
+  has_line $'OVERRIDE:\tresearch\tmodel\tsonnet'
+  has_line $'OVERRIDE:\tresearch\teffort\tmedium'
+  has_line $'DEFAULT:\tresearch'
+  # research is the interview's stage and runs first — it leads the
+  # canonical vocabulary order
+  [ "$(cat .orca/config)" = 'agents.research.model=sonnet
+agents.research.effort=medium
+agents.plan.model=opus' ]
+  run cfg validate
+  [ "$status" -eq 0 ]
+  has_line $'VALID:\t{"agents":{"research":{"model":"sonnet","effort":"medium"},"plan":{"model":"opus"}}}'
+  run cfg reset research
+  [ "$status" -eq 0 ]
+  refute_line $'OVERRIDE:\tresearch'
+  has_line $'OVERRIDE:\tplan\tmodel\topus'
+}
+
 @test "a malformed line fails typed on show, validate, and set" {
   make_repo "$BATS_TEST_TMPDIR/r"
   cd "$BATS_TEST_TMPDIR/r"

@@ -3,8 +3,9 @@
 config validators: scripts/lib.sh (the sole write path, used by
 the config verb), and the sandboxed workflow scripts that carry literal
 copies because they cannot read files (scripts/work-loop.workflow.js,
-scripts/debug-loop.workflow.js, and — MODELS/EFFORTS only —
-scripts/spec.workflow.js, which validates the spec spawn's overrides
+scripts/debug-loop.workflow.js, and — MODELS/EFFORTS only — the
+one-agent workflows scripts/spec.workflow.js and
+scripts/research.workflow.js, which validate their spawn's overrides
 at launch). A value accepted by one validator but rejected by another
 bricks launches until the config file is hand-edited — so CI fails
 when the lists drift.
@@ -20,6 +21,7 @@ FILES = {
     'work-loop': ('scripts/work-loop.workflow.js', ALL),
     'debug-loop': ('scripts/debug-loop.workflow.js', ALL),
     'spec': ('scripts/spec.workflow.js', MODELS_ONLY),
+    'research': ('scripts/research.workflow.js', MODELS_ONLY),
 }
 
 

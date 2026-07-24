@@ -119,20 +119,21 @@ if (typeof pluginRoot !== 'string' || !pluginRoot.startsWith('/'))
   throw new Error(`NO_PLUGIN_ROOT: args.pluginRoot must be the installed plugin's absolute path (got ${JSON.stringify(pluginRoot)}) — the launching skill substitutes \${CLAUDE_PLUGIN_ROOT}`)
 
 // Per-stage model/effort overrides (args.agents). The stage vocabulary is the
-// ONE shared 12-key list — feature's stages plus debug's — kept in lockstep
+// ONE shared 13-key list — feature's stages plus debug's — kept in lockstep
 // across scripts/lib.sh (the config verb's write path, and the run skills' launch validation
 // via its validate subcommand), work-loop.workflow.js, and this script: the
 // config file has a single agents block, and a key accepted by any validator
 // must be accepted by all three, or a written override bricks the other
-// verb's launches. MODELS/EFFORTS have a FOURTH holder: spec.workflow.js
-// carries its own literal copies for the spec spawn's model/effort
-// validation. This script applies
+// verb's launches. MODELS/EFFORTS have a FOURTH and FIFTH holder:
+// spec.workflow.js and research.workflow.js carry their own literal copies
+// for their one-agent spawns' model/effort validation. This script applies
 // only the debug stages; the rest are validated here and applied by the
-// nested work loop, which receives the block verbatim — except agents.spec,
-// which the nested loop also only validates: debug runs never spawn a spec
-// agent (the diagnose agent writes the fix contract).
+// nested work loop, which receives the block verbatim — except agents.spec
+// and agents.research, which the nested loop also only validates: debug runs
+// never spawn a spec agent (the diagnose agent writes the fix contract), and
+// research is spawned by the feature interview, before any run exists.
 const DEBUG_TUNABLE = ['reproduce', 'hypothesize', 'verify', 'diagnose']
-const STAGES = ['spec', 'plan', 'implement', 'review', 'fix', 'commit', 'merge', 'integrate', ...DEBUG_TUNABLE]
+const STAGES = ['research', 'spec', 'plan', 'implement', 'review', 'fix', 'commit', 'merge', 'integrate', ...DEBUG_TUNABLE]
 const MODELS = ['haiku', 'sonnet', 'opus', 'fable']
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 let agentCfg = parsedArgs.agents ?? {}

@@ -200,21 +200,23 @@ const contextLine = `Project context: ${repoRoot}/.orca/map.md (codebase map) an
 // launch like the rest of args: a typo'd stage or model must fail here, not
 // surface mid-run as a dead agent call.
 const TUNABLE = ['plan', 'implement', 'review', 'fix', 'commit', 'merge', 'integrate']
-// 'spec' is a valid config key — the run skill passes the config block
-// verbatim — but it is applied by spec.workflow.js at spec-spawn time, before
-// this workflow exists; here it is validated and otherwise ignored. The debug
-// verb's stages get the same treatment: the config file has ONE agents block
-// shared by both verbs (orca:debug passes it verbatim into its nested call to
-// this script), so a debug override must be valid-and-ignored here, never a
-// launch failure.
-const STAGES = ['spec', ...TUNABLE, 'reproduce', 'hypothesize', 'verify', 'diagnose']
-// The stage vocabulary is one shared 12-key list kept in lockstep across
+// 'spec' and 'research' are valid config keys — the run skill passes the
+// config block verbatim — but they are applied by their own one-agent
+// workflows (spec.workflow.js at spec-spawn time, research.workflow.js at the
+// interview's research spawn), before this workflow exists; here they are
+// validated and otherwise ignored. The debug verb's stages get the same
+// treatment: the config file has ONE agents block shared by both verbs
+// (orca:debug passes it verbatim into its nested call to this script), so a
+// debug override must be valid-and-ignored here, never a launch failure.
+const STAGES = ['research', 'spec', ...TUNABLE, 'reproduce', 'hypothesize', 'verify', 'diagnose']
+// The stage vocabulary is one shared 13-key list kept in lockstep across
 // three code validators — scripts/lib.sh (the config verb's write path, and the run skills'
 // launch validation via its validate subcommand), this script, and
 // debug-loop.workflow.js — a value accepted anywhere but rejected here bricks
 // every launch until the config file is hand-edited. MODELS/EFFORTS are part
-// of the same lockstep, with a FOURTH holder: spec.workflow.js carries its
-// own literal copies for the spec spawn's model/effort validation. Workflow
+// of the same lockstep, with a FOURTH and FIFTH holder: spec.workflow.js and
+// research.workflow.js carry their own literal copies for their one-agent
+// spawns' model/effort validation. Workflow
 // scripts run sandboxed with no filesystem access, so they cannot read a
 // shared vocab file — the literal copies are the design.
 const MODELS = ['haiku', 'sonnet', 'opus', 'fable']

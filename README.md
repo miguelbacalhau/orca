@@ -425,7 +425,7 @@ And one serves `/orca:review`'s comment round trip, spawned conversationally by 
 |---|---|---|---|
 | `address` | Converts the user's open review comments into fixes and answers in the integration worktree; writes resolutions back into the notes file | opus | high |
 
-And one serves the feature interview's research step, spawned conversationally before any run exists:
+And one serves the feature interview's research step, spawned through its own one-agent workflow before any run exists:
 
 | Stage | Role | Default model | Default effort |
 |---|---|---|---|
@@ -439,11 +439,11 @@ And one serves `/orca:retry` and `/orca:followup`, spawned conversationally over
 
 A run uses exactly one of `review-codex` / `review-claude`, chosen by the resolved reviewer at launch. The `/orca:config` stage key for both is `review` — the overrides apply to whichever reviewer agent is active.
 
-Override any of these per repository with [`/orca:config`](#orcaconfig-assignments--reset) — except `context`, `address`, and `research`, which, like the workflow's internal helper agents (reconciliation, escalation), are not configurable: their cost/judgment profiles are part of the design.
+Override any of these per repository with [`/orca:config`](#orcaconfig-assignments--reset) — except `context`, `address`, and `audit`, which, like the workflow's internal helper agents (reconciliation, escalation), are not configurable: their cost/judgment profiles are part of the design. The `research` key is configurable and applies at the next feature interview rather than a run launch — the interview reads it fresh at each research spawn.
 
 ## Configuration
 
-**`.orca/config`** (repo root, written by `/orca:config`) — the reviewer choice and per-stage model/effort overrides, applied at the next run launch, plus the `/orca:review` keys, read fresh on each invocation. Flat dotted `key=value`, a closed lowercase-token vocabulary (a legacy `.orca/config.json` is no longer read — the pre-flight emits a `CONFIG: OBSOLETE:` signpost while one lingers, and `/orca:config` offers to delete it):
+**`.orca/config`** (repo root, written by `/orca:config`) — the reviewer choice and per-stage model/effort overrides, applied at the next run launch (`agents.research` at the next feature interview), plus the `/orca:review` keys, read fresh on each invocation. Flat dotted `key=value`, a closed lowercase-token vocabulary (a legacy `.orca/config.json` is no longer read — the pre-flight emits a `CONFIG: OBSOLETE:` signpost while one lingers, and `/orca:config` offers to delete it):
 
 ```
 reviewer=claude
@@ -453,7 +453,7 @@ agents.plan.effort=high
 agents.implement.model=opus
 ```
 
-A present `reviewer` key **pins** the choice; an absent key means each launch **detects** (codex on PATH at the minimum version → codex, else claude). `editor` (`nvim`|`vscode`|`none`) and `terminal` (`tmux`|`none`) carry the identical contract for `/orca:review` — absent detects (orca.nvim probe first, then orca.vscode's; `$TMUX`), a pin turns a missing dependency into a loud failure, `none` opts out to a printed command. They are machine preferences in a repo file — a deliberate trade: `.orca/` sits outside every worktree (effectively personal), detection means most users never set them, and one config surface beats a user-level layer for two keys. The `agents` overrides sit on top of the agent defaults. One block serves both verbs — the feature stages and the debug stages (`reproduce`, `hypothesize`, `verify`, `diagnose`) live side by side, and each run applies its own verb's keys while validating and ignoring the other's.
+A present `reviewer` key **pins** the choice; an absent key means each launch **detects** (codex on PATH at the minimum version → codex, else claude). `editor` (`nvim`|`vscode`|`none`) and `terminal` (`tmux`|`none`) carry the identical contract for `/orca:review` — absent detects (orca.nvim probe first, then orca.vscode's; `$TMUX`), a pin turns a missing dependency into a loud failure, `none` opts out to a printed command. They are machine preferences in a repo file — a deliberate trade: `.orca/` sits outside every worktree (effectively personal), detection means most users never set them, and one config surface beats a user-level layer for two keys. The `agents` overrides sit on top of the agent defaults. One block serves both verbs — the feature stages and the debug stages (`reproduce`, `hypothesize`, `verify`, `diagnose`) live side by side, and each run applies its own verb's keys while validating and ignoring the other's. The `research` key is the interview's: applied when the feature interview spawns its research agent, validated and ignored by both runs.
 
 **`MCP_TOOL_TIMEOUT`** — codex-only: client-side session env governing MCP tool-call timeouts; a plugin cannot ship it, so `/orca:doctor` writes it into the `env` block of `.claude/settings.local.json` (or `~/.claude/settings.json`):
 

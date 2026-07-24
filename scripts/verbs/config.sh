@@ -112,7 +112,7 @@ resolve_config_repo() {
 # recited, so a plugin update moves these lines with it.
 emit_defaults() {
   local stage file model effort
-  for stage in spec plan implement review-codex review-claude fix commit merge integrate reproduce hypothesize verify diagnose; do
+  for stage in research spec plan implement review-codex review-claude fix commit merge integrate reproduce hypothesize verify diagnose; do
     file="$agents_dir/$stage.md"
     [[ -f "$file" ]] || continue
     model="$(awk '/^---$/{n++; next} n==1 && sub(/^model:[ \t]*/,""){print; exit}' "$file")"

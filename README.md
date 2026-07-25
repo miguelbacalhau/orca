@@ -241,7 +241,7 @@ Optional per-repository overrides, written to `.orca/config` and applied by the 
 
 `reviewer` is `codex` or `claude`; when the key is **absent**, each run launch detects — codex binary on PATH at the minimum version → codex, else claude — and a written key pins the choice (pinning `codex` turns a future broken codex into a loud pre-flight `FAIL` instead of a silent claude run). On `reviewer=claude` the skill states the independence trade-off; on `reviewer=codex` it checks that the codex machine gates pass and points at `/orca:doctor` if they don't.
 
-Valid stage values — models `haiku` | `sonnet` | `opus` | `fable`, efforts `low` | `medium` | `high` | `xhigh` | `max`. One caveat: what configuring `review` means depends on the reviewer — with codex it changes the cost of the *courier* that drives Codex, never Codex's review quality; with claude it tunes the actual reviewer (default opus/high). Note that `fable` only works on plans whose harness offers it — and it is the default for `spec` and `plan`, so on a plan without fable access pin them back with `/orca:config spec.model=opus plan.model=opus`. Overrides survive plugin updates; the plugin's own agent definitions are never edited.
+Valid stage values — models `haiku` | `sonnet` | `opus` | `fable`, efforts `low` | `medium` | `high` | `xhigh` | `max`. One caveat: what configuring `review` means depends on the reviewer — with codex it changes the cost of the *courier* that drives Codex, never Codex's review quality; with claude it tunes the actual reviewer (default opus/high). Note that `fable` only works on plans whose harness offers it — and it is the default for `spec` and `research`, so on a plan without fable access pin them back with `/orca:config spec.model=opus research.model=opus`. Overrides survive plugin updates; the plugin's own agent definitions are never edited.
 
 ## Anatomy of a run
 
@@ -395,13 +395,13 @@ The first nine serve feature runs — and, `spec` excepted (the diagnose agent w
 | Stage | Role | Default model | Default effort |
 |---|---|---|---|
 | `spec` | Explores the codebase; writes the spec and work breakdown (once, at the start) | fable | high |
-| `plan` | Read-only planner for one item; writes a plan a cheaper implementer can follow | fable | high |
+| `plan` | Read-only planner for one item; writes a plan a cheaper implementer can follow | opus | high |
 | `implement` | Builds one item in its worktree, checking off and amending its plan | sonnet | high |
 | `review-codex` | Courier that drives the Codex review via MCP and files the findings verbatim | sonnet | medium |
 | `review-claude` | Performs the independent review itself — same adversarial contract and artifact schema as the Codex path | opus | high |
 | `fix` | Applies review findings; escalates findings rooted in the plan, spec, or other items | opus | high |
 | `commit` | One Conventional Commit per item, staged by name, no attribution | haiku | low |
-| `merge` | Serialized merge into the integration branch; resolves conflicts with both plans in hand; verifies the merged result | opus | high |
+| `merge` | Serialized merge into the integration branch; resolves conflicts with both plans in hand; verifies the merged result | sonnet | high |
 | `integrate` | Verifies the assembled feature end to end against the spec | opus | high |
 
 The last four serve debug runs:
@@ -429,7 +429,7 @@ And one serves the feature interview's research step, spawned through its own on
 
 | Stage | Role | Default model | Default effort |
 |---|---|---|---|
-| `research` | Read-only analytical exploration of the subsystems a rough idea touches; reports current behavior, touched decisions, tensions, and unknowns to the interviewer | opus | high |
+| `research` | Read-only analytical exploration of the subsystems a rough idea touches; reports current behavior, touched decisions, tensions, and unknowns to the interviewer | fable | high |
 
 And one serves `/orca:retry` and `/orca:followup`, spawned conversationally over a finished run:
 

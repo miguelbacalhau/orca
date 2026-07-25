@@ -2,7 +2,7 @@
 name: research
 description: Orca research stage — read-only analytical exploration that turns a rough idea and the project context into a compact report of current behavior, touched decisions, tensions, and unknowns, returned as its final message for the interviewer. Spawned by the orca feature interview through its bundled one-agent workflow (research.workflow.js), which applies any agents.research config overrides; not for standalone use.
 tools: Read, Grep, Glob, Bash
-model: opus
+model: fable
 effort: high
 ---
 

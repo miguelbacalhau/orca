@@ -655,7 +655,12 @@ const archivePlan = async (i, tag) => {
 // from worktree-item's frame, the integration-fixes path from the extended
 // dirty-check probe — the verb can never read it itself, the agent has
 // already run by then. The title crosses the relay base64-encoded, so a
-// title containing "Claude" never appears literally in the relayed command.
+// title containing "Claude" never appears literally in the relayed command,
+// and single-quoted: a long opaque token is the worst case for verbatim
+// transcription, and an observed relay corruption injected a ` | ` into one
+// (splitting the command, so the next flag landed in command position and a
+// finished item was reported blocked). Inside quotes the same corruption is
+// inert data — the verb's own b64 decode check rejects it by name.
 const commitItem = async (wt, id, title, base, extraLines = []) => {
   const status = statusLine(items.find(i => i.id === id), 'committing')
   const titleB64 = b64encode(title)
@@ -668,7 +673,7 @@ const commitItem = async (wt, id, title, base, extraLines = []) => {
       tuned('commit', { agentType: 'orca:commit', label: `commit:${id}#${attempt}`, phase: 'Merge' })),
       `commit:${id}#${attempt}`)
     const { frame } = await verb(
-      `commit-verify "${wt}" ${base} ${id} --branch "${integrationBranch}" --title-b64 ${titleB64}` +
+      `commit-verify "${wt}" ${base} ${id} --branch "${integrationBranch}" --title-b64 '${titleB64}'` +
       (attempt === 2 ? ' --final' : ''),
       COMMIT_VERIFY_KEYS, `commit-verify:${id}#${attempt}`, 'Merge')
     switch (frame.action) {
@@ -786,12 +791,14 @@ const buildItem = async item => {
     // and the verb preserves cleanup's non-fatality (a failed cleanup is
     // reported in the frame with rc=0 and the merged outcome intact —
     // a stray build artifact must never demote a merged item to blocked).
-    // The title rides the relay base64-encoded; the verb composes the safe
-    // subject itself (it needs the banned regex, whose one holder is lib.sh).
+    // The title rides the relay base64-encoded and single-quoted (see
+    // commitItem — a mis-transcribed blob must stay data, never syntax); the
+    // verb composes the safe subject itself (it needs the banned regex,
+    // whose one holder is lib.sh).
     if (m.merged) {
       const fin = await verb(
         `merge-finalize "${integrationWt}" ${tipBefore} ${item.id} ` +
-        `--title-b64 ${b64encode(item.title)} --wt "${wt}" --branch "${branch}"`,
+        `--title-b64 '${b64encode(item.title)}' --wt "${wt}" --branch "${branch}"`,
         MERGE_FINALIZE_KEYS, `merge-finalize:${item.id}`, 'Merge')
       if (fin.frame.subject === 'amended' || fin.frame.subject === 'squashed')
         log(`${item.id}: merge subject rewritten to carry the required "merge ${item.id}:" prefix`)

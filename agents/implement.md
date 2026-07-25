@@ -2,7 +2,7 @@
 name: implement
 description: Orca implement stage — implements one work item from its plan inside its worktree. Spawned by the orca work loop; not for standalone use.
 tools: Read, Write, Edit, Bash, Grep, Glob, TaskUpdate
-model: sonnet
+model: opus
 effort: high
 ---
 

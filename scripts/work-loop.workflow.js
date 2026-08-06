@@ -196,8 +196,10 @@ const contextLine = `Project context: ${repoRoot}/.orca/map.md (codebase map) an
 // Per-stage model/effort overrides (args.agents). Only the seven stages this
 // workflow spawns are tunable here — spec is spawned by spec.workflow.js
 // before this workflow launches — and the internal helpers (the sh relay,
-// reconcile, escalate) keep their fixed models: their cost/judgment profile
-// is part of the loop's design, not a per-repo preference. Validated at
+// reconcile) keep their fixed models: their cost/judgment profile is part
+// of the loop's design, not a per-repo preference. Escalation is the one
+// derived model (see escalateModel below): not independently tunable, but
+// never allowed to sit below the planners it overrules. Validated at
 // launch like the rest of args: a typo'd stage or model must fail here, not
 // surface mid-run as a dead agent call.
 const TUNABLE = ['plan', 'implement', 'review', 'fix', 'commit', 'merge', 'integrate']
@@ -251,6 +253,16 @@ const tuned = (stage, opts) => {
   if (cfg.effort) out.effort = cfg.effort
   return out
 }
+
+// The escalation judge (wave and mid-build) must never sit below the planners
+// it overrules: its amendments rewrite the contract (spec.md Interfaces) that
+// replanning agents are then bound by, so it follows the plan stage's
+// effective model — the config override when set, else the plan agent's
+// default ('fable', in lockstep with agents/plan.md frontmatter). A harness
+// without fable pins it back for free via plan.model. Reconcile stays opus:
+// pure cross-document consistency detection on every wave's serialized
+// critical path, where verification is genuinely easier than generation.
+const escalateModel = agentCfg.plan?.model ?? 'fable'
 
 // ---------- structured-output schemas ----------
 const MERGE ={ type: 'object', additionalProperties: false, required: ['merged', 'detail'],
@@ -957,7 +969,7 @@ const runWave = async wave => {
     // Escalation, SKILL rules: amend when the fix changes only *how* (edit spec.md, replan);
     // block when any fix would change *what* the brief promised.
     const esc = must(await agent(escalatePrompt(rec.issues),
-      { model: 'opus', effort: 'high', label: `escalate:${tag}`, phase: 'Plan', schema: ESCALATE }),
+      { model: escalateModel, effort: 'high', label: `escalate:${tag}`, phase: 'Plan', schema: ESCALATE }),
       `escalate:${tag}`)
     // Only ids actually in this wave — the schema cannot stop the model from
     // naming an item it was never asked about, and a stray id would corrupt
@@ -1071,7 +1083,7 @@ const runItem = async item => {
       try {
         // Escalation edits spec.md — same serialized section as wave reconciliation.
         esc = await serializedSpec(() => agent(buildEscalatePrompt(item, reason),
-          { model: 'opus', effort: 'high', label: `escalate:${item.id}`, phase: 'Build', schema: BUILD_ESCALATE }))
+          { model: escalateModel, effort: 'high', label: `escalate:${item.id}`, phase: 'Build', schema: BUILD_ESCALATE }))
       } catch (e) { /* fall through: a dead escalation agent means block */ }
       if (!esc || esc.action === 'block') { await salvageWorktree(item); return block(item.id, (esc && esc.reason) || reason) }
       // A cut is terminal like a block: the same salvage (WIP commit on the

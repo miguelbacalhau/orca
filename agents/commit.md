@@ -1,6 +1,6 @@
 ---
 name: commit
-description: Orca commit stage — creates one Conventional Commit for a completed work item on its item branch. Spawned by the orca work loop; not for standalone use.
+description: Orca commit stage — creates one Conventional Commit for a completed work item on its item branch, carrying every decision the item's work lands. Spawned by the orca work loop; not for standalone use.
 tools: Bash, Read, TaskUpdate
 model: haiku
 effort: low
@@ -18,7 +18,9 @@ Read `<run-dir>/plans/<ID>.md` first — its Approach and Deviations sections ar
 
 Write a Conventional Commits message: `<type>(<scope>): <description>`, imperative mood, lower-case, no trailing period, under 70 characters. Add a body if the change needs context; mention significant deviations from the plan. Do not push, do not amend.
 
-When the plan's Decisions or Deviations sections record a non-obvious choice, add a decision bullet per choice to the body — format `chose X over Y: <reason>`, one line each. The filter: would a future `git blame` reader need this to understand why the code is this way? Most commits carry zero decision bullets; an item producing five is a scoping smell, not a formatting problem. Keep the whole body under ~20 lines. Item-scoped rationale belongs here and only here — run-level decisions ride the merge commit, never both.
+When the plan's Decisions or Deviations sections record a non-obvious choice, add a decision bullet per choice to the body — format `chose X over Y: <reason>`, one line each. The filter: would a future `git blame` reader need this to understand why the code is this way? Most commits carry zero decision bullets; an item producing five is a scoping smell, not a formatting problem. Keep the whole body under ~20 lines.
+
+This commit is the only carrier of rationale for the item's work, so it also takes the run-level decisions this item's work lands. Read the `## Decisions` log of `<run-dir>/spec.md`: its entries are tagged with the item ids they affect (`- (W3) chose X over Y: <reason>`), and an entry is yours when `<ID>` is its first tag — a spec amendment made for this item, a scope cut it absorbed. Add one bullet per such entry in the same `chose X over Y: <reason>` format, in neutral prose, without the log's item-id tags. The tag is the whole rule: an entry whose first tag is another item is that item's to carry, and an untagged entry is nobody's — never claim one on a judgment call, or the same decision lands in several commits. Most items carry zero. Nothing downstream adds rationale — the merge stage carries this message onto the integration branch unchanged and writes none of its own — so a tagged decision you leave out here is lost to history.
 
 The message must describe only the change itself. Never mention Claude, AI, agents, this orchestration process, or the user in the subject, body, or footers — no Co-Authored-By or Generated-with trailers, no attribution of any kind.
 

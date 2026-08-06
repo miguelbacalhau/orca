@@ -9,12 +9,13 @@
 // waits for an unrelated sibling), the 2-round fix cap, the commit-attribution
 // check verified against `git log` itself, the 2-slot review throttle (codex
 // reviews only — they contend for one codex auth; claude reviews ride the
-// normal concurrency cap), and the serialized merge queue with a merge-abort
-// safety net. Resume comes from the workflow journal (`resumeFromRunId`); the
+// normal concurrency cap), and the serialized merge queue with its
+// wedged-worktree safety net. Resume comes from the workflow journal (`resumeFromRunId`); the
 // token ceiling comes from `budget`.
 //
 // args: {
-//   runDir            .orca/<timestamp>-feat-<slug> — spec.md, plans/, reviews/ (absolute)
+//   runDir            .orca/<timestamp>-feat-<slug> — spec.md, plans/, reviews/,
+//                     and merged.tsv, the id->sha rows audit joins on (absolute)
 //   repoRoot          parent of the bare repo; all worktrees live here (absolute)
 //   slug              run slug; integration worktree is <repoRoot>/orca-<slug>
 //   integrationBranch feature/<slug> — item branches derive from it (${integrationBranch}-${id})
@@ -473,7 +474,7 @@ const verb = async (argline, keys, label, ph) => {
 }
 const WORKTREE_KEYS = ['rc', 'arrival', 'head']
 const COMMIT_VERIFY_KEYS = ['rc', 'action', 'hash', 'message.b64']
-const MERGE_FINALIZE_KEYS = ['rc', 'tip', 'attribution', 'subject', 'cleanup']
+const MERGE_FINALIZE_KEYS = ['rc', 'tip', 'commit', 'attribution', 'ledger', 'cleanup']
 
 // Codex reviews contend for one Codex auth — cap concurrency at 2 (SKILL:
 // review throttling). Codex-only: claude reviews have no shared auth to
@@ -766,10 +767,19 @@ const buildItem = async item => {
   const merge = await serializedMerge(async () => {
     // Self-heal before merging: a predecessor that died mid-conflict must not
     // leave the integration worktree in MERGING state for everyone after it.
+    // `merge --abort` alone cannot do it — a conflicted `git merge --squash`
+    // records no MERGE_HEAD, so the abort fails with "no merge to abort" and
+    // leaves the conflict markers in the index for the next item to inherit.
+    // The reset is the fallback, and it is safe precisely here: merges are
+    // serialized and each ends in a commit, so anything uncommitted in the
+    // integration worktree at the head of a section is a dead predecessor's
+    // debris — the work itself is never lost, it lives on the item branch.
     // One command with the tip read — this section is the run's serial
     // bottleneck, so every relay round-trip here is paid by every item.
     const tipBefore = mustSha((await shMarked(
-      `git -C "${integrationWt}" merge --abort >/dev/null 2>&1 || true ; git -C "${integrationWt}" rev-parse HEAD`,
+      `git -C "${integrationWt}" merge --abort >/dev/null 2>&1 || ` +
+      `git -C "${integrationWt}" reset --hard HEAD >/dev/null 2>&1 || true ; ` +
+      `git -C "${integrationWt}" rev-parse HEAD`,
       `merge-reset:${item.id}`, 'Merge')).trim(), `merge-reset:${item.id}`)
     const m = must(await agent(
       [`Integration worktree: ${integrationWt}`, `Run directory: ${runDir}`,
@@ -781,27 +791,39 @@ const buildItem = async item => {
         .filter(Boolean).join('\n'),
       tuned('merge', { agentType: 'orca:merge', label: `merge:${item.id}`, phase: 'Merge', schema: MERGE })),
       `merge:${item.id}`)
-    // The merge agent's commit message is repo state its schema never
-    // returns — one merge-finalize relay call applies the same attribution
-    // backstop as commit-verify (first-parent only: the item-branch commits
-    // merged in were already checked and cannot be rewritten from here),
-    // enforces the structural `merge <ID>:` join-key prefix audit relies
-    // on, and absorbs the worktree/branch cleanup — which thereby runs
-    // inside the serialized section: acceptable, it is fast git plumbing,
-    // and the verb preserves cleanup's non-fatality (a failed cleanup is
-    // reported in the frame with rc=0 and the merged outcome intact —
-    // a stray build artifact must never demote a merged item to blocked).
-    // The title rides the relay base64-encoded and single-quoted (see
-    // commitItem — a mis-transcribed blob must stay data, never syntax); the
-    // verb composes the safe subject itself (it needs the banned regex,
-    // whose one holder is lib.sh).
+    // What the merge left in the repository is state the agent's schema
+    // never returns — one merge-finalize relay call reads it and converges:
+    // it finishes a squash the agent staged but never committed, applies the
+    // same attribution backstop as commit-verify (first-parent only: a stray
+    // merge's second parent came off an item branch already checked and
+    // cannot be rewritten from here), records the id->sha row audit joins on
+    // now that no merge commit carries the item id, and absorbs the
+    // worktree/branch cleanup — which thereby runs inside the serialized
+    // section: acceptable, it is fast git plumbing, and the verb preserves
+    // cleanup's non-fatality (a failed cleanup is reported in the frame with
+    // rc=0 and the merged outcome intact — a stray build artifact must never
+    // demote a merged item to blocked). The title rides the relay
+    // base64-encoded and single-quoted (see commitItem — a mis-transcribed
+    // blob must stay data, never syntax); the verb composes the safe message
+    // itself (it needs the banned regex, whose one holder is lib.sh).
     if (m.merged) {
       const fin = await verb(
         `merge-finalize "${integrationWt}" ${tipBefore} ${item.id} ` +
-        `--title-b64 '${b64encode(item.title)}' --wt "${wt}" --branch "${branch}"`,
+        `--title-b64 '${b64encode(item.title)}' --wt "${wt}" --branch "${branch}" ` +
+        `--ledger "${runDir}/merged.tsv"`,
         MERGE_FINALIZE_KEYS, `merge-finalize:${item.id}`, 'Merge')
-      if (fin.frame.subject === 'amended' || fin.frame.subject === 'squashed')
-        log(`${item.id}: merge subject rewritten to carry the required "merge ${item.id}:" prefix`)
+      // commit=none outranks the agent's own merged=true: the tip never
+      // moved and the staged state was too ambiguous to finish from, so
+      // nothing landed. The verb skipped cleanup for exactly this — the
+      // branch and worktree are still there for a retry round.
+      if (fin.frame.commit === 'none')
+        return { merged: false, detail: 'the merge left no commit on the integration branch' }
+      if (fin.frame.commit === 'recovered')
+        log(`${item.id}: squash was staged but uncommitted — committed by the merge backstop`)
+      if (fin.frame.attribution === 'amended' || fin.frame.attribution === 'squashed')
+        log(`${item.id}: merge commit message rewritten by the attribution backstop`)
+      if (fin.frame.ledger === 'failed')
+        log(`${item.id}: merged-ledger row not written (non-fatal) — audit may under-report this item`)
       if (fin.frame.cleanup === 'failed')
         log(`${item.id}: worktree cleanup failed (non-fatal)`)
     }

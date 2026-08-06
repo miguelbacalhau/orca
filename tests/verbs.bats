@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # The relay verbs — worktree-item arrivals, commit-verify's decision
-# table, merge-finalize's attribution/subject/cleanup, and the two
+# table, merge-finalize's commit/attribution/ledger/cleanup, and the two
 # re-entrancy classes per verb (run-twice after success, and
 # mutation-applied-frame-lost-retry).
 
@@ -211,96 +211,160 @@ commit_in() { # <wt> <message>
 
 # ---- merge-finalize ----------------------------------------------------
 
-# merged_layout <dir> <merge-message> — layout with one committed item
-# branch merged --no-ff into feature/x under <merge-message>; sets
-# $tip_before to the integration head before the merge.
-merged_layout() {
+# squash_layout <dir> — layout with one committed item branch; sets
+# $tip_before to the integration head and $ledger to the run's ledger
+# path. The merge stage squashes, so nothing here is merged yet.
+squash_layout() {
   make_run_layout "$1"
   add_wt "$1"
   commit_in "$1/wt1" 'feat: adds a thing'
   tip_before="$(git -C "$1/int" rev-parse HEAD)"
-  git -C "$1/int" merge --no-ff feature/x-W1 -m "$2" -q
+  ledger="$1/.orca/merged.tsv"
 }
 
-@test "merge-finalize: a clean prefixed merge passes untouched and cleans up" {
-  merged_layout "$BATS_TEST_TMPDIR/r" 'merge W1: adds a thing'
-  run orca merge-finalize "$BATS_TEST_TMPDIR/r/int" "$tip_before" W1 \
-    --title-b64 "$(b64 'adds a thing')" --wt "$BATS_TEST_TMPDIR/r/wt1" --branch feature/x-W1
+# do_squash <dir> [message] — what the merge agent does: squash the item
+# branch and commit it. With no <message> the item commit's own message
+# is reused (`git commit -C`), which is the prescribed path.
+do_squash() {
+  git -C "$1/int" merge --squash feature/x-W1 -q
+  if [ $# -ge 2 ]; then
+    git -C "$1/int" commit -q -m "$2"
+  else
+    git -C "$1/int" commit -q -C feature/x-W1
+  fi
+}
+
+# finalize <dir> — the verb under test, over the layout's fixed names.
+finalize() {
+  run orca merge-finalize "$1/int" "$tip_before" W1 \
+    --title-b64 "$(b64 'adds a thing')" --wt "$1/wt1" --branch feature/x-W1 \
+    --ledger "$ledger"
+}
+
+@test "merge-finalize: a committed squash is ledgered, left alone, and cleaned up" {
+  squash_layout "$BATS_TEST_TMPDIR/r"
+  do_squash "$BATS_TEST_TMPDIR/r"
+  finalize "$BATS_TEST_TMPDIR/r"
   [ "$status" -eq 0 ]
+  has_line 'commit=agent'
   has_line 'attribution=clean'
-  has_line 'subject=ok'
+  has_line 'ledger=written'
   has_line 'cleanup=done'
+  # the item's own Conventional message stands, on a single-parent commit:
+  # no merge commit, and no run-internal item id anywhere in the subject
+  [ "$(git -C "$BATS_TEST_TMPDIR/r/int" log -1 --format=%s)" = 'feat: adds a thing' ]
+  [ "$(git -C "$BATS_TEST_TMPDIR/r/int" log -1 --format=%P | wc -w | tr -d ' ')" = '1' ]
+  [ "$(cat "$ledger")" = "W1$(printf '\t')$(git -C "$BATS_TEST_TMPDIR/r/int" rev-parse HEAD)" ]
   [ ! -d "$BATS_TEST_TMPDIR/r/wt1" ]
   ! git -C "$BATS_TEST_TMPDIR/r/int" rev-parse -q --verify refs/heads/feature/x-W1 >/dev/null
 }
 
-@test "merge-finalize: a wrong merge subject gets the prefix prepended by amend" {
-  merged_layout "$BATS_TEST_TMPDIR/r" "Merge branch 'feature/x-W1'"
-  run orca merge-finalize "$BATS_TEST_TMPDIR/r/int" "$tip_before" W1 \
-    --title-b64 "$(b64 'adds a thing')" --wt "$BATS_TEST_TMPDIR/r/wt1" --branch feature/x-W1
+@test "merge-finalize: a squash left staged is committed by the backstop" {
+  squash_layout "$BATS_TEST_TMPDIR/r"
+  git -C "$BATS_TEST_TMPDIR/r/int" merge --squash feature/x-W1 -q
+  finalize "$BATS_TEST_TMPDIR/r"
   [ "$status" -eq 0 ]
-  has_line 'subject=amended'
-  [ "$(git -C "$BATS_TEST_TMPDIR/r/int" log -1 --format=%s)" = "merge W1: Merge branch 'feature/x-W1'" ]
-  # the merge parents survived the amend
-  [ "$(git -C "$BATS_TEST_TMPDIR/r/int" log -1 --format=%P | wc -w | tr -d ' ')" = '2' ]
+  has_line 'commit=recovered'
+  has_line 'ledger=written'
+  has_line 'cleanup=done'
+  # recovered with -C <branch>: the item commit's message, not a fallback
+  [ "$(git -C "$BATS_TEST_TMPDIR/r/int" log -1 --format=%s)" = 'feat: adds a thing' ]
+  [ "$(git -C "$BATS_TEST_TMPDIR/r/int" rev-list --count "$tip_before..HEAD")" = '1' ]
 }
 
-@test "merge-finalize: a banned tip alone is amended, merge topology kept" {
-  merged_layout "$BATS_TEST_TMPDIR/r" $'merge W1: adds a thing\n\nCo-Authored-By: Claude <noreply@example.com>'
-  run orca merge-finalize "$BATS_TEST_TMPDIR/r/int" "$tip_before" W1 \
-    --title-b64 "$(b64 'adds a thing')" --wt "$BATS_TEST_TMPDIR/r/wt1" --branch feature/x-W1
+@test "merge-finalize: an unresolved conflicted squash lands nothing and keeps the item" {
+  squash_layout "$BATS_TEST_TMPDIR/r"
+  commit_in "$BATS_TEST_TMPDIR/r/int" 'feat: conflicting integration work'
+  tip_before="$(git -C "$BATS_TEST_TMPDIR/r/int" rev-parse HEAD)"
+  run git -C "$BATS_TEST_TMPDIR/r/int" merge --squash feature/x-W1
+  [ -n "$(git -C "$BATS_TEST_TMPDIR/r/int" ls-files --unmerged)" ]
+  finalize "$BATS_TEST_TMPDIR/r"
+  [ "$status" -eq 0 ]
+  has_line 'commit=none'
+  has_line 'attribution=unchanged'
+  has_line 'ledger=skipped'
+  has_line 'cleanup=skipped'
+  # nothing landed, so the work must still be reachable for a retry round
+  [ "$(git -C "$BATS_TEST_TMPDIR/r/int" rev-parse HEAD)" = "$tip_before" ]
+  [ ! -f "$ledger" ]
+  [ -d "$BATS_TEST_TMPDIR/r/wt1" ]
+  git -C "$BATS_TEST_TMPDIR/r/int" rev-parse -q --verify refs/heads/feature/x-W1 >/dev/null
+}
+
+@test "merge-finalize: an unmoved tip over a clean tree lands nothing and keeps the item" {
+  squash_layout "$BATS_TEST_TMPDIR/r"
+  finalize "$BATS_TEST_TMPDIR/r"
+  [ "$status" -eq 0 ]
+  has_line 'commit=none'
+  has_line 'attribution=unchanged'
+  has_line 'cleanup=skipped'
+  [ -d "$BATS_TEST_TMPDIR/r/wt1" ]
+  git -C "$BATS_TEST_TMPDIR/r/int" rev-parse -q --verify refs/heads/feature/x-W1 >/dev/null
+}
+
+@test "merge-finalize: a banned tip alone is amended and the ledger follows the rewrite" {
+  squash_layout "$BATS_TEST_TMPDIR/r"
+  do_squash "$BATS_TEST_TMPDIR/r" $'feat: adds a thing\n\nCo-Authored-By: Claude <noreply@example.com>'
+  finalize "$BATS_TEST_TMPDIR/r"
   [ "$status" -eq 0 ]
   has_line 'attribution=amended'
-  has_line 'subject=ok'
+  has_line 'ledger=written'
+  [ "$(git -C "$BATS_TEST_TMPDIR/r/int" log -1 --format=%s)" = 'chore: adds a thing' ]
   [ "$(git -C "$BATS_TEST_TMPDIR/r/int" log -1 --format=%B "$tip_before..HEAD" | grep -c Claude)" = '0' ]
-  [ "$(git -C "$BATS_TEST_TMPDIR/r/int" log -1 --format=%P | wc -w | tr -d ' ')" = '2' ]
+  [ "$(cat "$ledger")" = "W1$(printf '\t')$(git -C "$BATS_TEST_TMPDIR/r/int" rev-parse HEAD)" ]
 }
 
 @test "merge-finalize: a banned message below the tip squashes the span" {
-  merged_layout "$BATS_TEST_TMPDIR/r" $'Merge item\n\nCo-Authored-By: Claude <noreply@example.com>'
+  squash_layout "$BATS_TEST_TMPDIR/r"
+  do_squash "$BATS_TEST_TMPDIR/r" $'chore: land it\n\nCo-Authored-By: Claude <noreply@example.com>'
   commit_in "$BATS_TEST_TMPDIR/r/int" 'fix: post-merge touchup'
-  run orca merge-finalize "$BATS_TEST_TMPDIR/r/int" "$tip_before" W1 \
-    --title-b64 "$(b64 'adds a thing')" --wt "$BATS_TEST_TMPDIR/r/wt1" --branch feature/x-W1
+  finalize "$BATS_TEST_TMPDIR/r"
   [ "$status" -eq 0 ]
   has_line 'attribution=squashed'
-  has_line 'subject=ok'
   [ "$(git -C "$BATS_TEST_TMPDIR/r/int" rev-list --count "$tip_before..HEAD")" = '1' ]
-  [ "$(git -C "$BATS_TEST_TMPDIR/r/int" log -1 --format=%s)" = 'merge W1: adds a thing' ]
+  [ "$(git -C "$BATS_TEST_TMPDIR/r/int" log -1 --format=%s)" = 'chore: adds a thing' ]
   run git -C "$BATS_TEST_TMPDIR/r/int" log --format=%B "$tip_before..HEAD"
   [[ "$output" != *Claude* ]]
 }
 
-@test "merge-finalize: an unmoved tip is unchanged/unchanged, cleanup still runs" {
-  make_run_layout "$BATS_TEST_TMPDIR/r"
-  add_wt "$BATS_TEST_TMPDIR/r"
-  tip_before="$(git -C "$BATS_TEST_TMPDIR/r/int" rev-parse HEAD)"
-  run orca merge-finalize "$BATS_TEST_TMPDIR/r/int" "$tip_before" W1 \
-    --title-b64 "$(b64 'adds a thing')" --wt "$BATS_TEST_TMPDIR/r/wt1" --branch feature/x-W1
+@test "merge-finalize: run-twice converges and leaves one ledger row" {
+  squash_layout "$BATS_TEST_TMPDIR/r"
+  do_squash "$BATS_TEST_TMPDIR/r"
+  orca merge-finalize "$BATS_TEST_TMPDIR/r/int" "$tip_before" W1 \
+    --title-b64 "$(b64 'adds a thing')" --wt "$BATS_TEST_TMPDIR/r/wt1" --branch feature/x-W1 \
+    --ledger "$ledger" >/dev/null
+  # the frame was lost; the retry observes the committed span and the
+  # finished cleanup, and converges instead of replaying
+  finalize "$BATS_TEST_TMPDIR/r"
   [ "$status" -eq 0 ]
-  has_line 'attribution=unchanged'
-  has_line 'subject=unchanged'
+  has_line 'commit=agent'
+  has_line 'attribution=clean'
+  has_line 'ledger=written'
   has_line 'cleanup=done'
-  [ ! -d "$BATS_TEST_TMPDIR/r/wt1" ]
+  [ "$(wc -l <"$ledger" | tr -d ' ')" = '1' ]
 }
 
-@test "merge-finalize: run-twice after a squash no-ops with cleanup already done" {
-  merged_layout "$BATS_TEST_TMPDIR/r" $'Merge item\n\nCo-Authored-By: Claude <noreply@example.com>'
-  commit_in "$BATS_TEST_TMPDIR/r/int" 'fix: post-merge touchup'
-  orca merge-finalize "$BATS_TEST_TMPDIR/r/int" "$tip_before" W1 \
-    --title-b64 "$(b64 'adds a thing')" --wt "$BATS_TEST_TMPDIR/r/wt1" --branch feature/x-W1 >/dev/null
-  # the frame was lost; the retry observes the squashed span and the
-  # finished cleanup, and converges instead of replaying
-  run orca merge-finalize "$BATS_TEST_TMPDIR/r/int" "$tip_before" W1 \
-    --title-b64 "$(b64 'adds a thing')" --wt "$BATS_TEST_TMPDIR/r/wt1" --branch feature/x-W1
+@test "merge-finalize: the ledger rewrites this item's row and keeps the others" {
+  squash_layout "$BATS_TEST_TMPDIR/r"
+  printf 'W9\t%s\nW1\t%s\n' 0000000000000000000000000000000000000009 \
+    0000000000000000000000000000000000000001 >"$ledger"
+  do_squash "$BATS_TEST_TMPDIR/r"
+  finalize "$BATS_TEST_TMPDIR/r"
   [ "$status" -eq 0 ]
-  has_line 'attribution=clean'
-  has_line 'subject=ok'
-  has_line 'cleanup=done'
+  has_line 'ledger=written'
+  [ "$(wc -l <"$ledger" | tr -d ' ')" = '2' ]
+  grep -q "^W9$(printf '\t')0000000000000000000000000000000000000009$" "$ledger"
+  grep -q "^W1$(printf '\t')$(git -C "$BATS_TEST_TMPDIR/r/int" rev-parse HEAD)$" "$ledger"
 }
 
 @test "verbs fail typed on bad arguments" {
   run orca commit-verify
   assert_fail_reason BAD_ARGS
+  run orca merge-finalize /nonexistent 0000000000000000000000000000000000000000 W1 \
+    --title-b64 "$(b64 t)" --wt /x --branch b --ledger /x/merged.tsv
+  assert_fail_reason BAD_ARGS
+  # every flag is required — a missing --ledger would silently drop audit's
+  # only id-to-commit join, so it fails typed rather than defaulting
   run orca merge-finalize /nonexistent 0000000000000000000000000000000000000000 W1 \
     --title-b64 "$(b64 t)" --wt /x --branch b
   assert_fail_reason BAD_ARGS

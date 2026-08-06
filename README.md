@@ -336,6 +336,7 @@ What a repository looks like mid-run (`/orca:init` creates the top three entries
     │   ├── brief.md                   # the consumed brief — moved here when the run starts
     │   ├── spec.md                    # spec, work breakdown, Decisions log, workflow runId
     │   ├── report.md                  # final run report
+    │   ├── merged.tsv                 # one <ID>	<sha> row per landed item — the id-to-commit join audit verifies against git
     │   ├── plans/                     # one plan per item, with its Deviations section; <ID>.round*.md archives superseded plans at replan
     │   └── reviews/                   # raw findings JSON per review round, plus comments-<ts>.json archives per addressing round
     └── YYYYMMDD-HHMMSS-bug-<slug>/    # one directory per debug run
@@ -380,7 +381,7 @@ Runs used to start blind: every spec, plan, and hypothesize agent re-explored th
 - **`map.md`** — a codebase map at architecture altitude only: module boundaries, entry points, build/test commands, conventions, known gotchas. Hard-capped at ~200 lines (the maintainer prunes, not only appends), headed by a commit stamp `**As of:** <short-sha>`.
 - **`decisions.md`** — the decision log: one `chose X over Y: <reason>` entry per load-bearing decision, with date, run id, and the commit that carries it. Append-mostly; a reversal is a new entry pointing at the old one.
 
-The design rule that makes per-machine copies safe is **derivability**: both files are caches over a source of truth git already shares. The map is a cache over the code — any copy self-heals via `git diff <stamp>..HEAD`. The decision log is a cache over commit-message history: the runs write their load-bearing decisions into commit and merge-commit bodies in neutral prose (item-scoped rationale in item commits, run-scoped in merge commits — never both), so a teammate's orca reconstructs the log by catching up with a full `git log <stamp>..HEAD` — full, not `--first-parent`, because the no-ff topology puts item commits on each merge's second parent, and a first-parent walk would see only the run-scoped half. `--first-parent` remains the *human's* run-level view of an orca-built branch: the merge topology is load-bearing, not cosmetic. Locally-written entries keep interview/spec fidelity; reconstructed ones carry commit-message fidelity — both are enough for cross-run consistency.
+The design rule that makes per-machine copies safe is **derivability**: both files are caches over a source of truth git already shares. The map is a cache over the code — any copy self-heals via `git diff <stamp>..HEAD`. The decision log is a cache over commit-message history: the runs write their load-bearing decisions in neutral prose into the body of the one commit that lands each work item — both the item-scoped rationale and the run-scoped decisions that item absorbed — so a teammate's orca reconstructs the log by catching up with `git log <stamp>..HEAD`. One commit per item is the whole topology: the merge stage squashes each item onto the integration branch rather than recording a merge, so the branch is linear and every commit on it reads as ordinary work, with no run-internal item id to decode. Locally-written entries keep interview/spec fidelity; reconstructed ones carry commit-message fidelity — both are enough for cross-run consistency.
 
 The lifecycle: `/orca:init` optionally seeds `map.md` with one deep exploration sweep (the only full-project sweep the design performs; a first run with no map seeds lazily instead). Each run start compares the stamps to the trunk tip — equal means skip, stale means one cheap catch-up agent. Consuming agents (spec, plan, hypothesize, diagnose, the interviews) receive both files as **hints, not ground truth** — "where to look first; verify anything you build on" — because a stale map trusted blindly is worse than no map. At run end a dedicated `context` agent folds the run's artifacts into both files: it distills what the run already learned, never re-explores, deletes what the diff invalidated, and advances the stamps. Rule-shaped knowledge ("never install X via npm") is never absorbed into the files — it surfaces in the run report under **Knowledge worth promoting**, for the human to commit into CLAUDE.md or real documentation under their own name. Orca never writes CLAUDE.md.
 
@@ -400,8 +401,8 @@ The first nine serve feature runs — and, `spec` excepted (the diagnose agent w
 | `review-codex` | Courier that drives the Codex review via MCP and files the findings verbatim | sonnet | medium |
 | `review-claude` | Performs the independent review itself — same adversarial contract and artifact schema as the Codex path | opus | high |
 | `fix` | Applies review findings; escalates findings rooted in the plan, spec, or other items | opus | high |
-| `commit` | One Conventional Commit per item, staged by name, no attribution | haiku | low |
-| `merge` | Serialized merge into the integration branch; resolves conflicts with both plans in hand; verifies the merged result | opus | high |
+| `commit` | One Conventional Commit per item, staged by name, carrying the item's decisions, no attribution | haiku | low |
+| `merge` | Serialized squash onto the integration branch, under the item commit's own message; resolves conflicts with both plans in hand; verifies the merged result | opus | high |
 | `integrate` | Verifies the assembled feature end to end against the spec | opus | high |
 
 The last four serve debug runs:

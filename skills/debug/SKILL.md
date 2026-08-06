@@ -191,7 +191,7 @@ Finally, give the user a short spoken summary — status first, then the diagnos
 - State lives in files and the workflow journal: the case file (with the persisted runId and args lines) anchors resume; the ledger is append-only cross-run memory; `report.md` is the outcome. Mid-run state is the journal — never re-run phases conversationally.
 - Context passes between stages through artifact files — hypotheses file, verdict JSONs, `diagnosis.md`, the synthesized `fix/spec.md` — never relayed summaries. Structured returns exist for the workflow's control flow only.
 - Worktree discipline: hypothesis worktrees are throwaway and never merge; only the nested merge agent writes `fix/<slug>`, inside the fix integration worktree; the run never reads or writes the user's worktrees.
-- No commit anywhere in the run mentions Claude, AI, agents, orca, or the user — the nested work loop enforces its attribution check on every fix-tail commit, merge commits included.
+- No commit anywhere in the run mentions Claude, AI, agents, orca, or the user — the nested work loop enforces its attribution check on every fix-tail commit, the squash that lands it included.
 - If a run is abandoned, clean up `orca-bug-<slug>*` / `orca-fix-<slug>` worktrees and `bug/<slug>*` / `fix/<slug>*` branches via `git worktree list` — but prefer resuming through the open case.
 - After the Step 1 confirmation the run never waits on the user: no approval requests, no clarifying questions. What the run cannot decide lands in the report and the ledger, and the case stays open.
 - Keep the user informed at phase transitions with one or two one-way status lines; inform, never ask.

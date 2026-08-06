@@ -667,7 +667,7 @@ emit_actions() { # <discover-output> <status-output>
         cur_state="$f3"
         ;;
       DONE:)
-        cur_kind=done
+        cur_kind="done"
         cur_dir="$f2"
         cur_state="$f3"
         ;;
@@ -755,8 +755,8 @@ EOF
 $stat
 EOF
 
-  local ddir dstate dlease rec
-  while IFS=$'\t' read -r ddir dstate dlease; do
+  local ddir dstate rec
+  while IFS=$'\t' read -r ddir dstate _; do
     [[ -n "$ddir" ]] || continue
     case "$dstate" in
       leftovers)

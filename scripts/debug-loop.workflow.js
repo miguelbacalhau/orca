@@ -374,23 +374,21 @@ const verb = async (argline, keys, label, ph) => {
 const WORKTREE_KEYS = ['rc', 'arrival', 'head']
 
 // ---------- per-run lease (codex F-03; same design as work-loop) ----------
-// Atomic mkdir is the lock, owner metadata inside, refusal typed. A resume
-// replays this from the journal without re-executing (no self-deadlock); a
-// fresh launch over a live lease fails here, and the skill's user-confirmed
-// recovery removes a stale .lock. Released on every terminal return via
-// finish().
+// The claim/release pair lives in the CLI (triage.sh), the lease's single
+// writer: the verb takes the atomic mkdir lock and records the owning
+// session's identity (walked pid + verbatim start time), which is what
+// lets triage read live/stale as fact. A resume replays this from the
+// journal without re-executing (no self-deadlock — the skill re-claims
+// with its own identity before resuming, and the replayed claim stays a
+// no-op); a fresh launch over a held lease fails typed here (the verb's
+// FAIL: LEASE_HELD line names the owner and verdict), and the skill's
+// steal path (triage claim --steal) recovers a provably stale lock.
+// Released on every terminal return via finish().
 const leaseNote = `orca debug loop; slug=${slug}; scope=${scope}`
-const leaseOut = await sh(
-  `if mkdir '${sq(runDir)}/.lock' 2>/dev/null ; then ` +
-  `{ echo '${sq(leaseNote)}' ; date '+%Y-%m-%dT%H:%M:%S%z' ; } > '${sq(runDir)}/.lock/owner' ; echo LEASE_OK ; ` +
-  `else echo LEASE_HELD ; cat '${sq(runDir)}/.lock/owner' 2>/dev/null ; true ; fi`,
+await sh(`bash "${pluginRoot}/scripts/orca.sh" triage claim '${sq(runDir)}' '${sq(leaseNote)}'`,
   'run-lease', 'Repro')
-if (leaseOut.includes('LEASE_HELD'))
-  throw new Error(`run directory is leased to another writer — ${runDir}/.lock exists ` +
-    `(owner: ${leaseOut.split('\n').slice(1).join(' ').trim() || 'unknown'}). ` +
-    `If that run is dead, confirm with the user, remove ${runDir}/.lock, and relaunch.`)
 const finish = async result => {
-  try { await sh(`rm -rf '${sq(runDir)}/.lock'`, 'run-lease-release', 'Check') }
+  try { await sh(`bash "${pluginRoot}/scripts/orca.sh" triage release '${sq(runDir)}'`, 'run-lease-release', 'Check') }
   catch (err) { log(`run lease not released (non-fatal): ${String((err && err.message) || err)}`) }
   return result
 }
@@ -605,9 +603,10 @@ for (let round = 1; round <= 2; round++) {
   // The nested work loop takes its own lease on runDir/fix. Anyone
   // legitimately writing there holds THIS run's lease on runDir (fix/ is
   // inside it), so a .lock surviving from a crashed prior nested attempt
-  // is stale by construction — clear it or round 2 and resumes would
-  // refuse against a dead holder.
-  try { await sh(`rm -rf '${sq(runDir)}/fix/.lock'`, `fix-lease-clear#${round}`, 'Fix') }
+  // is stale by construction — clear it (via the release verb, the
+  // lease's one remover) or round 2 and resumes would refuse against a
+  // dead holder.
+  try { await sh(`bash "${pluginRoot}/scripts/orca.sh" triage release '${sq(runDir)}/fix'`, `fix-lease-clear#${round}`, 'Fix') }
   catch { /* the nested launch will surface a real problem */ }
   let fixRun = null
   try {

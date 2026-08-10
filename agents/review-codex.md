@@ -31,6 +31,17 @@ from the file now, not from any earlier copy; mid-run amendments land
 there and the current text is the contract.
 {{FOCUS}}
 
+Convention reference: the checkout's committed convention files — any
+.claude/rules/*.md whose `paths:` frontmatter globs cover the changed
+files, and any CLAUDE.md from the repo root down to their directories.
+Read them from HEAD (`git show HEAD:<path>`; `git ls-tree HEAD
+.claude/rules` to enumerate), never from the working copy: the subject
+under review is the uncommitted state, which may include edits to
+these very files, and the subject must not rewrite its own yardstick —
+an uncommitted edit to a convention file the plan does not justify is
+itself a finding. Treat violations of them as findings like any other,
+severity by impact.
+
 Hunt for: bugs, broken edge cases, violations of the spec interfaces,
 regressions to surrounding code, missing or weak tests, and the item's
 acceptance line — in the spec's Work Breakdown — unmet by the change

@@ -140,6 +140,28 @@ agents.plan.model=opus' ]
   [ "$(cat .orca/config)" = 'reviewer = codex' ]
 }
 
+@test "prototype is an ordinary override: set, validated, last in vocabulary order" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  run cfg set prototype.model=sonnet prototype.effort=low plan.model=opus
+  [ "$status" -eq 0 ]
+  has_line $'OVERRIDE:\tprototype\tmodel\tsonnet'
+  has_line $'OVERRIDE:\tprototype\teffort\tlow'
+  # prototype is its own verb's stage, appended to the vocabulary — it
+  # closes the canonical order
+  [ "$(cat .orca/config)" = 'agents.plan.model=opus
+agents.prototype.model=sonnet
+agents.prototype.effort=low' ]
+  run cfg validate
+  [ "$status" -eq 0 ]
+  has_line $'VALID:\t{"agents":{"plan":{"model":"opus"},"prototype":{"model":"sonnet","effort":"low"}}}'
+  # a near-miss stage still fails typed, naming the stage list
+  printf 'agents.prototypo.model=sonnet\n' >.orca/config
+  run cfg show
+  assert_fail_reason UNKNOWN_KEY
+  [[ "$output" == *prototype* ]]
+}
+
 @test "an unknown key in the file fails typed" {
   make_repo "$BATS_TEST_TMPDIR/r"
   cd "$BATS_TEST_TMPDIR/r"

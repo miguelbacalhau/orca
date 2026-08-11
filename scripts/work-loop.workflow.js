@@ -211,14 +211,16 @@ const TUNABLE = ['plan', 'implement', 'review', 'fix', 'commit', 'merge', 'integ
 // treatment: the config file has ONE agents block shared by both verbs
 // (orca:debug passes it verbatim into its nested call to this script), so a
 // debug override must be valid-and-ignored here, never a launch failure.
-const STAGES = ['research', 'spec', ...TUNABLE, 'reproduce', 'hypothesize', 'verify', 'diagnose']
-// The stage vocabulary is one shared 13-key list kept in lockstep across
+// 'prototype' likewise: orca:prototype's own one-agent workflow applies it.
+const STAGES = ['research', 'spec', ...TUNABLE, 'reproduce', 'hypothesize', 'verify', 'diagnose', 'prototype']
+// The stage vocabulary is one shared 14-key list kept in lockstep across
 // three code validators — scripts/lib.sh (the config verb's write path, and the run skills'
 // launch validation via its validate subcommand), this script, and
 // debug-loop.workflow.js — a value accepted anywhere but rejected here bricks
 // every launch until the config file is hand-edited. MODELS/EFFORTS are part
-// of the same lockstep, with a FOURTH and FIFTH holder: spec.workflow.js and
-// research.workflow.js carry their own literal copies for their one-agent
+// of the same lockstep, with a FOURTH, FIFTH, and SIXTH holder:
+// spec.workflow.js, research.workflow.js, and prototype.workflow.js carry
+// their own literal copies for their one-agent
 // spawns' model/effort validation. Workflow
 // scripts run sandboxed with no filesystem access, so they cannot read a
 // shared vocab file — the literal copies are the design.

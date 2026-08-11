@@ -76,6 +76,25 @@ EOF
   has_line $'BRIEF:\t'"$PWD/.orca/feat-briefs/brief.md"
 }
 
+@test "prototype run dirs are invisible to discovery and actions" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  mkdir -p .orca/20250101-1200-proto-x .orca/20250102-1300-proto-y .orca/20250103-1400-feat-alpha
+  echo '# brief' >.orca/20250101-1200-proto-x/brief.md
+  # a finished prototype: brief plus report — still nothing to route
+  echo '# brief' >.orca/20250102-1300-proto-y/brief.md
+  echo '# report' >.orca/20250102-1300-proto-y/report.md
+  # backstop: even a spec.md in a proto dir stays invisible
+  echo '# spec' >.orca/20250102-1300-proto-y/spec.md
+  # a sibling feature fixture still surfaces
+  echo '# brief' >.orca/20250103-1400-feat-alpha/brief.md
+  run triage snapshot
+  [ "$status" -eq 0 ]
+  [[ "$output" != *proto-* ]]
+  has_line $'RUN:\t'"$PWD/.orca/20250103-1400-feat-alpha"$'\tunlaunched'
+  has_line $'ACTION:\t1\trun-brief\tfeature\t'"$PWD/.orca/20250103-1400-feat-alpha"$'\t'
+}
+
 @test "finished runs are DONE, routed by the report's Blocked section" {
   make_repo "$BATS_TEST_TMPDIR/r"
   cd "$BATS_TEST_TMPDIR/r"

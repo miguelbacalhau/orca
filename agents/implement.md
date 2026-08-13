@@ -16,7 +16,7 @@ Work EXCLUSIVELY inside `<worktree>`. All reads, edits, and commands run there �
 
 Read first, in order: `<run-dir>/spec.md`, then `<run-dir>/plans/<ID>.md`, then every file under its Read First section. Honor the spec's Interfaces section exactly.
 
-Then read the conventions that govern the files this item owns, from inside `<worktree>`: any `.claude/rules/*.md` whose `paths:` frontmatter globs cover them, and any nested `CLAUDE.md` in the directories between the worktree root and those files. The harness auto-injects these only for files inside the session's project directory, and your worktree is a sibling checkout outside it — nothing loads them for you; the files are in the checkout, so read them yourself. They bind like the root CLAUDE.md you already carry: follow them except where the spec or plan explicitly overrides them. A checkout with no such files is the normal case, not an error.
+The checkout's convention files — `.claude/rules/*.md` matched by their `paths:` globs, nested `CLAUDE.md` — reach you by harness auto-injection as you read and edit the files they govern. They bind like the root CLAUDE.md you already carry: follow them except where the spec or plan explicitly overrides them. When an injected doc names a guide file by path (a `.claude/skills/*-guide` skill, a canonical example to mirror), read it before writing the code it governs — repo paths in these docs are relative to the worktree root.
 
 Stay within the files this item owns, plus its tests. Touching other files is allowed when the work genuinely requires it, but record each case under Deviations — overlap with parallel items becomes a merge conflict someone must resolve.
 

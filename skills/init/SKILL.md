@@ -1,5 +1,5 @@
 ---
-description: Set up a repository's layout for orca runs — the bare-repo-with-worktrees structure with a default-branch worktree that orca:feature's pre-flight requires — plus an optional final step seeding the machine-local project context (.orca/map.md and decisions.md). Use when the user wants to prepare a new repository, an existing conventional checkout, or a fresh clone for orca runs, or when the pre-flight's layout gate (BARE_REPO) failed. Layout only: machine and session tooling (Codex CLI, MCP timeout, permissions) is orca:doctor's job. Interactive and consent-per-step — it restructures repositories, so every mutating action is confirmed first. Do not use to write a brief or run a feature.
+description: Set up a repository's layout for orca runs — the bare-repo-with-worktrees structure with a default-branch worktree that orca:feature's pre-flight requires — plus optional final steps linking the default worktree's agent context (.claude, CLAUDE.md) to the repo root, so sessions started at the root auto-inject the repo's rules and conventions into every stage agent, and seeding the machine-local project context (.orca/map.md and decisions.md). Use when the user wants to prepare a new repository, an existing conventional checkout, or a fresh clone for orca runs, or when the pre-flight's layout gate (BARE_REPO) failed. Layout only: machine and session tooling (Codex CLI, MCP timeout, permissions) is orca:doctor's job. Interactive and consent-per-step — it restructures repositories, so every mutating action is confirmed first. Do not use to write a brief or run a feature.
 args: <path or clone URL, optional>
 user-invocable: true
 disable-model-invocation: true
@@ -21,7 +21,7 @@ If inside a git repository, run orca:feature's pre-flight first — it is read-o
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh preflight
 ```
 
-The layout gate — `BARE_REPO` — is this skill's work list; fix it with Step 2 below. The machine lines (`REVIEWER`, `CODEX` — `PASS | FAIL | SKIPPED`) are reported but not fixed here: on a machine-gate `FAIL`, point at **orca:doctor**. If `BARE_REPO` already passes, say so and stop — anything else the pre-flight flagged is doctor's, not this skill's.
+The layout gate — `BARE_REPO` — is this skill's work list; fix it with Step 2 below. The machine lines (`REVIEWER`, `CODEX` — `PASS | FAIL | SKIPPED`) are reported but not fixed here: on a machine-gate `FAIL`, point at **orca:doctor**. If `BARE_REPO` already passes, say so; one offer may remain — Step 4's root links, when the default worktree carries `.claude` or `CLAUDE.md` the root does not link yet — otherwise stop. Anything else the pre-flight flagged is doctor's, not this skill's.
 
 If not inside a repository, ask which case applies: initialize a new repository here, convert an existing checkout elsewhere, or clone a remote URL into the layout. A URL or path argument answers this without asking.
 
@@ -97,9 +97,27 @@ Nothing in this touches history, refs, remotes, or config beyond `core.bare` —
 
 ## Step 3: Verify
 
-Re-run the pre-flight. `BARE_REPO` must now pass — that is this skill's deliverable. Report the machine lines too (`REVIEWER`, and `CODEX` as `PASS | FAIL | SKIPPED`): they cost nothing to relay, but a failing machine gate is fixed by **orca:doctor**, not here. Close by pointing at what comes next: `/orca:doctor` if a machine gate failed, then `/orca:feature` to capture a feature's intent and run it — after the optional seeding below.
+Re-run the pre-flight. `BARE_REPO` must now pass — that is this skill's deliverable. Report the machine lines too (`REVIEWER`, and `CODEX` as `PASS | FAIL | SKIPPED`): they cost nothing to relay, but a failing machine gate is fixed by **orca:doctor**, not here. Close by pointing at what comes next: `/orca:doctor` if a machine gate failed, then `/orca:feature` to capture a feature's intent and run it — after the optional linking and seeding below.
 
-## Step 4: Seed the project context (optional, consented)
+## Step 4: Link agent context to the root (optional, consented)
+
+The mechanics are the bundled script's — detection and the links alike; never author `ln` commands here. First the read-only state:
+
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh init-link check
+```
+
+One typed line per fact: `BRANCH:` and `WORKTREE:` (where the default branch is checked out), then one `LINK:` line per name (`.claude`, `CLAUDE.md`) with a state — `LINKABLE` (source exists, root slot empty), `LINKED` (already pointing at the worktree copy), `NO_SOURCE` (the worktree has no such file), or `CONFLICT` (the root slot is occupied by a real entry or a link pointing elsewhere — the script never overwrites, and an existing link is the user's to change, not orca's). With no `LINKABLE` line there is nothing to offer: skip silently when both are `NO_SOURCE`, report the state in a sentence otherwise. When something is linkable, offer it; on consent:
+
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh init-link apply
+```
+
+It creates a relative symlink per `LINKABLE` name (`LINKED:` lines) and reports everything else untouched (`SKIPPED:` lines) — relay both.
+
+State why it matters when offering: a session started at `<repo-root>` treats every worktree as inside its project directory, so the harness auto-injects the repo's conventions — path-matched `.claude/rules`, nested `CLAUDE.md`s, each at the worktree's own checked-out state — into every stage agent of a run, with no per-agent plumbing. The links supply what the bare root itself lacks: the session-start CLAUDE.md and the `.claude` skills, hooks, and settings. The effect requires starting orca sessions at `<repo-root>` rather than inside a worktree — recommend that alongside the offer, with two things worth knowing: the first root session prompts for trust and permissions fresh, and `.claude/settings.local.json` becomes shared with the linked worktree through the symlink.
+
+## Step 5: Seed the project context (optional, consented)
 
 Offer — never default — to seed the machine-local project context the runs consume: two files at `<repo-root>/.orca/` top level, outside every worktree and never committed. `map.md` is a codebase map at architecture altitude (module boundaries, entry points, build/test commands, conventions, known gotchas — no function-level detail), hard-capped at ~200 lines, headed by a commit stamp; `decisions.md` is the decision log, which starts empty. Both are caches over what git already shares — the map over the code, the log over commit-message history — so they are safe to delete and rebuild, and runs refresh them automatically; seeding here just spares the first run the sweep. State that and get consent; declining is fine — the first run seeds lazily instead.
 

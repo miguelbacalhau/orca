@@ -7,12 +7,18 @@ A [Claude Code](https://claude.com/claude-code) plugin for autonomous, multi-age
                          # (interactive until one confirmation, autonomous after)
 /orca:debug <symptom>    # triage → interview/case → repro gate → hypotheses →
                          # verify → diagnose → fix → repro check → report
+/orca:prototype <idea>   # hack an idea into a throwaway spike on proto/<slug>: no review,
+                         # no spec — a learnings-first report; the branch is an appendix
 /orca:review             # review a deliverable in your editor; your comments round-trip
                          # (addressed on consent, resolutions rendered inline next review)
+/orca:pr                 # land a delivered run through a GitHub pull request: the report
+                         # becomes an external-facing description, previewed, published via gh
 /orca:retry              # finish a finished run's unmet items in the same run: audit against
                          # git, resolve the blocked decisions with you, relaunch the work loop
 /orca:followup           # turn a finished run's optional follow-ups into the next brief
                          # for /orca:feature (new intent, not recovery)
+/orca:iterate            # localized new work on a delivered, still-unlanded feature branch —
+                         # same run, same spec, same branch, full stage treatment
 /orca:status             # read-only dashboard: .orca state joined with git ground truth,
                          # grouped by next action, each state naming its skill
 /orca:init               # one-time repository layout setup      (interactive, consent per step)
@@ -20,7 +26,7 @@ A [Claude Code](https://claude.com/claude-code) plugin for autonomous, multi-age
 /orca:config             # optional per-repo reviewer & model/effort tuning
 ```
 
-The deliverable of a run is a branch on an integration worktree — `feature/<slug>` for features, `fix/<slug>` for fixed bugs — which you review with `/orca:review` and land yourself with `git merge --no-ff <branch>`. The runs never touch your own worktree, and no commit they produce mentions Claude, AI, agents, or orca.
+The deliverable of a run is a branch on an integration worktree — `feature/<slug>` for features, `fix/<slug>` for fixed bugs — which you review with `/orca:review` and land yourself with `git merge --no-ff <branch>`, or publish as a GitHub pull request with `/orca:pr`. The runs never touch your own worktree, and no commit they produce mentions Claude, AI, agents, or orca.
 
 ## Table of contents
 
@@ -64,7 +70,7 @@ State lives in files, never in conversation memory: the brief, the spec with its
 | `MCP_TOOL_TIMEOUT` | Codex-only, like the Codex CLI row: set to `1200000` (~20 min) in a Claude Code settings `env` block, so Codex reviews are not killed at the default MCP tool timeout. A plugin cannot ship session env, so `/orca:doctor` writes it for you. |
 | Permission mode | Runs need `bypassPermissions` for the session — see [Permissions and autonomy](#permissions-and-autonomy). |
 
-Everything else — the seventeen stage agents and the codex MCP server registration — ships inside the plugin itself; there is nothing to install per repository beyond the layout.
+Everything else — the eighteen stage agents and the codex MCP server registration — ships inside the plugin itself; there is nothing to install per repository beyond the layout.
 
 ## Installation
 
@@ -123,9 +129,11 @@ MCP servers load at session start, so after installing or enabling the plugin, *
 /orca:debug the export endpoint returns 500 on files over 2MB
 
 # 3. Walk the deliverable's diff in your own editor (nvim, via a tmux
-#    window in your session), then land it from your own worktree.
+#    window in your session), then land it from your own worktree —
+#    or publish it as a GitHub pull request instead with /orca:pr.
 /orca:review
 git merge --no-ff feature/<slug>     # or fix/<slug>
+/orca:pr                             # the PR path: report → description, gh pr create
 
 # 4. If the report left blocked items: resolve their recorded decisions
 #    and finish them inside the same run, on the same branch.
@@ -176,6 +184,14 @@ The debug verb — a dispatcher over `.orca/bug-cases/`, where an open **case** 
 
 **The run** (see [Anatomy of a debug run](#anatomy-of-a-debug-run)) interacts exactly once — one confirmation of the restated case and scope. Two hard rules shape it: the **repro gate** (no deterministic reproduction → the run records the attempt in the ledger and stops loudly; there is no evidence-only fallback) and **three-valued verdicts** (`confirmed` requires observed evidence; `inconclusive` is honest and seeds the next run — no manufactured confidence). On `fixed`, the deliverable is a `fix/<slug>` branch carrying the fix plus a regression test derived from the repro.
 
+### `/orca:prototype <idea>`
+
+The spike verb — for when the question is "does this idea hold up?", not "ship this". It fills the gap between a small single-file change (don't use orca) and the full `/orca:feature` pipeline, whose review and verification machinery exists to make a branch *landable* — pure overhead when all you want is evidence. The deliverable is inverted accordingly: **the report is the product, the branch an appendix** you play with and then discard.
+
+The interaction is micro: the idea argument is the intent (at most one clarifying question — the success line the verdict is written against), one confirmation, then fully autonomous. One `orca:prototype` agent builds in one worktree (`orca-proto-<slug>`, branch `proto/<slug>` off the trunk tip) under an explicitly inverted quality contract: fakes, hardcoding, and shortcuts welcome, each marked `TODO(proto)` so they're greppable. No research agent, no brief, no spec, no review, no integration verification — ever; an idea that needs decomposition is redirected to `/orca:feature` instead of growing scope here.
+
+The run directory (`.orca/<timestamp>-proto-<slug>/`) holds only the micro-brief and the report — verdict first, then learnings, what was faked, what a real implementation would need, and the exact cleanup commands (`git worktree remove` + `git branch -D`). Two stamps keep the spike from ever landing by accident: the `proto/` branch namespace, and `**Deliverable state:** prototype` in the report — which `/orca:pr`'s guard structurally refuses. Prototype runs are deliberately invisible to every resume/offer surface: never resumable, never seen by `/orca:retry` or `/orca:followup`; only `/orca:status`'s git-footprint lines keep leftover `orca-proto-*` worktrees visible until you discard them. The single commit on the branch passes the same no-attribution read-back as run commits. Requirements are the layout gate and the Workflow tool only — the codex/reviewer gates don't apply, since there is no review path.
+
 ### `/orca:review [branch]`
 
 The human half of review — the runs' adversarial review stage is automated and lives inside them; this opens the finished deliverable in *your* editor before you land it. It discovers unmerged `feature/<slug>` / `fix/<slug>` deliverable branches (one → opens it; several → asks; a gone integration worktree → offers to add it back) and opens the deliverable's integration worktree in your editor, running an orca review session — file list, native side-by-side merge-base diffs, your LSP and colors. Two editors are supported:
@@ -189,6 +205,14 @@ Without tmux (on the nvim path), or without either companion installed (`/orca:d
 
 Two config keys govern it, set via `/orca:config`: `editor` (`nvim`|`vscode`|`none`) and `terminal` (`tmux`|`none`, nvim path only), with the same semantics as `reviewer` — absent detects (nvim first, then vscode), a pin fails loudly instead of silently falling back, `none` opts out to the printed command.
 
+### `/orca:pr [run]`
+
+The PR path for landing — the report template's Landing section ends at a local `git merge --no-ff`, which is wrong for a repo that lands work through GitHub pull requests. This skill takes a **delivered-but-unlanded run** (a finished run whose deliverable branch exists and is unmerged, found via `triage snapshot` — newest by default, or the one the argument names) and publishes it with the `gh` CLI. It is report-driven by design: every fact in the PR body traces to a section of the run's `report.md`, nothing is re-derived from the diff — so a branch no run produced is out of scope (plain `gh pr create` already covers it).
+
+Two guards gate it, because a PR asserts "ready for review": the report must say `**Deliverable state:** verified`, and `## Blocked` must be "None" — anything else is refused with a pointer at the owning skill (`/orca:feature`'s resume, `/orca:retry`). No draft-PR fallback: a draft still publishes an unverified branch.
+
+Composition is translation: the reader has never heard of orca, so run vocabulary is dropped wholesale — Summary becomes an opening paragraph about what the branch *does*, Shipped becomes a Changes section (no item IDs, no hashes), Integration verification becomes Testing; run-dir paths, follow-ups, and every `/orca:*` pointer vanish. The no-attribution rule that governs run commits extends verbatim to the PR title and body, enforced by the same deterministic marker scan — explicitly overriding the harness habit of appending a "Generated with Claude Code" footer. You see the exact title, body, base, and head before anything happens; **one confirmation** gates both the push and the PR creation (re-running an existing PR refreshes it). It never merges, never edits the report, never touches the integration worktree.
+
 ### `/orca:retry [run]`
 
 Finishes a finished run's unmet work items **inside the same run** — no new run directory, no new spec, no brief. Recovery never creates a run; only new intent does. It picks a finished feature run with leftovers (newest by default, or the one the argument names), audits it through the same read-only agent `/orca:followup` uses — reconciling the report's claims against the spec's work breakdown and git ground truth — then resolves every blocked item's recorded decision with you. That interview is the entry fee, on principle: the run's escalation agents already spent its bounded machine retries deciding each block could not be resolved within the spec, so a retry without new human input would reproduce it. You can also resurrect items the run cut autonomously (a machine-made scope reduction you never directly approved — overruling it restores scope the original brief contained), and a resolution may authorize the retried item to amend code an earlier item already merged.
@@ -200,6 +224,14 @@ Your resolutions are appended to the run's own `spec.md` as binding Decisions bu
 Turns a finished run's *optional follow-ups* — deferred findings, known gaps, improvements the reviews flagged but did not block on — into the next run's brief. New intent, not recovery: unfinished items and escalated decisions are `/orca:retry`'s job, and an interrupted run is redirected to `/orca:feature`'s resume. It picks a finished feature run (newest by default, or the one the argument names), then audits it through a dedicated read-only agent that reconciles the report's claims against the spec's work breakdown and git ground truth: which items verifiably merged (the integration branch's first-parent log, not the Shipped table), and whether the deliverable branch still exists or was already landed — which decides what the new brief builds on. Discrepancies are named to you plainly.
 
 The discussion is a selection, not an obligation: which follow-ups ride along; unselected ones stay deferred in the old report, losing nothing. The product is a standard brief queued in `.orca/feat-briefs/` — building on the existing integration branch or the trunk per the audit's landed-ness check, with the prior spec's Interfaces and Decisions log as binding inputs — and `/orca:feature` discovers, restates, and runs it like any other brief; this skill never launches a run itself. A run with unmet items is pointed at `/orca:retry` first — a follow-up brief never adopts unmet work or resolves escalated decisions — and a run whose follow-up brief already exists is surfaced rather than duplicated.
+
+### `/orca:iterate [instructions]`
+
+Localized new work on a delivered, **still-unlanded** `feature/<slug>` branch — changes that deserve the full plan → implement → independent review → fix → commit → merge treatment, but not the full pipeline: no interview, no spec agent, no new run directory. The pattern is extracted from the debug loop's fix tail (a synthesized contract driving the nested work loop), aimed at a feature run's deliverable and driven by your instructions instead of a diagnosis.
+
+The run's artifacts stay its single coherent story: triage picks a delivered-but-unlanded feature run from `triage snapshot`, one research agent validates the instructions against the system (the prior spec's Interfaces and Decisions bind the change), a micro-interview confirms the restated change (at most 2–3 questions; with clear instructions and clean research, zero) — then the new items are **appended to the run's own `spec.md`** under a dated iteration heading, continuing the existing W-id sequence, direction decisions land in its Decisions log, the old report is archived to `report.round<N>.md`, and the work loop relaunches over only the new items on the same integration branch. `plans/`, `reviews/`, and `merged.tsv` accumulate in place, so every audit join stays complete.
+
+The boundary map keeps the verb narrow: unmet items and escalated decisions are `/orca:retry`'s; work on a landed (or deleted) branch, or anything needing real decomposition, is `/orca:followup`'s brief; an interrupted run is `/orca:feature`'s resume (an interrupted iteration round resumes through that same path); a debug run's `fix/<slug>` is out by design; and there is no unreviewed fast tier here — `/orca:prototype` owns unreviewed speed. Research surfacing "not localized after all" redirects in conversation, before anything is authorized.
 
 ### `/orca:init [path or clone URL]`
 
@@ -324,6 +356,7 @@ What a repository looks like mid-run (`/orca:init` creates the top three entries
 ├── orca-bug-<slug>/              # debug: case worktree — repro + exploration (branch bug/<slug>)
 ├── orca-bug-<slug>-H1/           # debug: one throwaway worktree per hypothesis, removed after its verdict
 ├── orca-fix-<slug>/              # debug: fix integration worktree (branch fix/<slug>)
+├── orca-proto-<slug>/            # prototype: the spike worktree (branch proto/<slug>) — yours to discard
 └── .orca/
     ├── config                         # optional per-repo reviewer & model/effort overrides
     ├── map.md                         # machine-local codebase map (cache; see Project context)
@@ -332,6 +365,7 @@ What a repository looks like mid-run (`/orca:init` creates the top three entries
     ├── feat-briefs/                   # unconsumed feature briefs (drafts/ for parked ones)
     ├── review-notes/<key>.json        # orca.nvim review comments per deliverable branch (round-trip state)
     ├── bug-cases/<slug>/              # open bug cases: case.md, repro.sh, ledger.md, evidence/
+    ├── YYYYMMDD-HHMMSS-proto-<slug>/  # one directory per prototype run: brief.md (the micro-brief) + report.md
     ├── YYYYMMDD-HHMMSS-feat-<slug>/   # one directory per feature run
     │   ├── brief.md                   # the consumed brief — moved here when the run starts
     │   ├── spec.md                    # spec, work breakdown, Decisions log, workflow runId
@@ -348,7 +382,7 @@ What a repository looks like mid-run (`/orca:init` creates the top three entries
         └── fix/                       # the nested fix run: spec.md (synthesized), plans/, reviews/
 ```
 
-Two naming namespaces, deliberately different: `orca-*` **directory** names are local scratch — the cleanup and discovery story via `git worktree list` — and never enter git; the **branch** names that land in history and on GitHub (`feature/<slug>[-<ID>]`, `fix/<slug>[-<ID>]`) are neutral and carry no orca trace, while throwaway `bug/<slug>*` branches never merge at all. `.orca/` sits outside every worktree, so its contents cannot be committed by accident. Inside `.orca/`, every artifact is verb-prefixed — `feat-briefs/` and `feat-` run directories for the feature verb, `bug-cases/` and `bug-` run directories for the debug verb, `review-notes/` for the review verb — so a bare `ls .orca/` reads unambiguously. `review-notes/` and `secrets/` are the two directories holding user-authored input rather than a cache, but like everything else in `.orca/` they are machine-local scratch and never enter git — and `secrets/` is the one thing in `.orca/` that is not safe to delete (see below).
+Two naming namespaces, deliberately different: `orca-*` **directory** names are local scratch — the cleanup and discovery story via `git worktree list` — and never enter git; the **branch** names that land in history and on GitHub (`feature/<slug>[-<ID>]`, `fix/<slug>[-<ID>]`) are neutral and carry no orca trace, while throwaway `bug/<slug>*` and `proto/<slug>` branches never merge at all. `.orca/` sits outside every worktree, so its contents cannot be committed by accident. Inside `.orca/`, every artifact is verb-prefixed — `feat-briefs/` and `feat-` run directories for the feature verb, `bug-cases/` and `bug-` run directories for the debug verb, `proto-` run directories for the prototype verb, `review-notes/` for the review verb — so a bare `ls .orca/` reads unambiguously. `review-notes/` and `secrets/` are the two directories holding user-authored input rather than a cache, but like everything else in `.orca/` they are machine-local scratch and never enter git — and `secrets/` is the one thing in `.orca/` that is not safe to delete (see below).
 
 ### Worktree secrets
 
@@ -389,7 +423,7 @@ Delete both files any time; runs rebuild them. Nothing about this touches the re
 
 ## Stage agents
 
-Seventeen agents ship in the plugin (`agents/<stage>.md`, loaded as `orca:<stage>`). Each runs with its own context window and only the per-item values it needs; context passes between stages through artifact files, never relayed summaries.
+Eighteen agents ship in the plugin (`agents/<stage>.md`, loaded as `orca:<stage>`). Each runs with its own context window and only the per-item values it needs; context passes between stages through artifact files, never relayed summaries.
 
 The first nine serve feature runs — and, `spec` excepted (the diagnose agent writes the fix tail's contract, so no spec agent ever runs there), the fix tail of a diagnose-and-fix debug run:
 
@@ -426,11 +460,17 @@ And one serves `/orca:review`'s comment round trip, spawned conversationally by 
 |---|---|---|---|
 | `address` | Converts the user's open review comments into fixes and answers in the integration worktree; writes resolutions back into the notes file | opus | high |
 
-And one serves the feature interview's research step, spawned through its own one-agent workflow before any run exists:
+And one serves the feature interview's research step — plus `/orca:iterate`'s validation and `/orca:followup`'s new-scope research — spawned through its own one-agent workflow before any run exists:
 
 | Stage | Role | Default model | Default effort |
 |---|---|---|---|
 | `research` | Read-only analytical exploration of the subsystems a rough idea touches; reports current behavior, touched decisions, tensions, and unknowns to the interviewer | fable | high |
+
+And one serves `/orca:prototype`, spawned through its own one-agent workflow:
+
+| Stage | Role | Default model | Default effort |
+|---|---|---|---|
+| `prototype` | Hacks one idea into a running throwaway spike in a dedicated worktree, optimizing for time-to-evidence; returns a learnings-first report | opus | medium |
 
 And one serves `/orca:retry` and `/orca:followup`, spawned conversationally over a finished run:
 
@@ -440,7 +480,7 @@ And one serves `/orca:retry` and `/orca:followup`, spawned conversationally over
 
 A run uses exactly one of `review-codex` / `review-claude`, chosen by the resolved reviewer at launch. The `/orca:config` stage key for both is `review` — the overrides apply to whichever reviewer agent is active.
 
-Override any of these per repository with [`/orca:config`](#orcaconfig-assignments--reset) — except `context`, `address`, and `audit`, which, like the workflow's internal helper agents (reconciliation, escalation), are not configurable: their cost/judgment profiles are part of the design. The `research` key is configurable and applies at the next feature interview rather than a run launch — the interview reads it fresh at each research spawn.
+Override any of these per repository with [`/orca:config`](#orcaconfig-assignments--reset) — except `context`, `address`, and `audit`, which, like the workflow's internal helper agents (reconciliation, escalation), are not configurable: their cost/judgment profiles are part of the design. The `research` key is configurable and applies at the next research spawn rather than a run launch — the feature interview, `/orca:iterate`, and `/orca:followup` each read it fresh; the `prototype` key likewise applies at the next `/orca:prototype` launch.
 
 ## Configuration
 
@@ -454,7 +494,7 @@ agents.plan.effort=high
 agents.implement.model=opus
 ```
 
-A present `reviewer` key **pins** the choice; an absent key means each launch **detects** (codex on PATH at the minimum version → codex, else claude). `editor` (`nvim`|`vscode`|`none`) and `terminal` (`tmux`|`none`) carry the identical contract for `/orca:review` — absent detects (orca.nvim probe first, then orca.vscode's; `$TMUX`), a pin turns a missing dependency into a loud failure, `none` opts out to a printed command. They are machine preferences in a repo file — a deliberate trade: `.orca/` sits outside every worktree (effectively personal), detection means most users never set them, and one config surface beats a user-level layer for two keys. The `agents` overrides sit on top of the agent defaults. One block serves both verbs — the feature stages and the debug stages (`reproduce`, `hypothesize`, `verify`, `diagnose`) live side by side, and each run applies its own verb's keys while validating and ignoring the other's. The `research` key is the interview's: applied when the feature interview spawns its research agent, validated and ignored by both runs.
+A present `reviewer` key **pins** the choice; an absent key means each launch **detects** (codex on PATH at the minimum version → codex, else claude). `editor` (`nvim`|`vscode`|`none`) and `terminal` (`tmux`|`none`) carry the identical contract for `/orca:review` — absent detects (orca.nvim probe first, then orca.vscode's; `$TMUX`), a pin turns a missing dependency into a loud failure, `none` opts out to a printed command. They are machine preferences in a repo file — a deliberate trade: `.orca/` sits outside every worktree (effectively personal), detection means most users never set them, and one config surface beats a user-level layer for two keys. The `agents` overrides sit on top of the agent defaults. One block serves both verbs — the feature stages and the debug stages (`reproduce`, `hypothesize`, `verify`, `diagnose`) live side by side, and each run applies its own verb's keys while validating and ignoring the other's. The `research` key belongs to no run: it applies whenever a skill spawns the research agent (the feature interview, `/orca:iterate`, `/orca:followup`), and both runs validate and ignore it — as they do `prototype`, which `/orca:prototype` reads at its own launch.
 
 **`MCP_TOOL_TIMEOUT`** — codex-only: client-side session env governing MCP tool-call timeouts; a plugin cannot ship it, so `/orca:doctor` writes it into the `env` block of `.claude/settings.local.json` (or `~/.claude/settings.json`):
 
@@ -491,6 +531,7 @@ Every agent call in the work loop is journaled, and the workflow `runId` is pers
 - **Interrupted run** (session death, kill, harness restart): invoke the same verb — `/orca:feature` triage discovers the interrupted run on disk via `spec.md`; `/orca:debug` triage finds it through its open case — and it offers the resume, re-invoking the workflow with the same script and args plus `resumeFromRunId`. Completed agent calls replay instantly from the journal; only in-flight and remaining work runs live. Never re-run stages conversationally.
 - **Blocked items** keep their branch deliberately, with whatever was in the worktree salvaged as a `wip:` commit and the worktree removed — the report lists them for `/orca:retry`, which resolves the recorded decisions with you and relaunches only the unmet items in the same run, resuming those branches.
 - **Open cases persist by design**: a debug run that ends `no-repro`, `undiagnosed`, or `not-fixed` leaves its case in `.orca/bug-cases/` with the ledger appended, and the next `/orca:debug` starts from it.
+- **Prototype runs are never resumable**, by design — no lease, no persisted runId; abandon or relaunch fresh. Leftover `orca-proto-*` worktrees and `proto/<slug>` branches stay visible in `/orca:status` until you discard them with the cleanup commands in the spike's report.
 - **Abandoned run**: `git worktree list`, remove leftover `orca-*` worktrees and their `feature/<slug>*` (or `bug/<slug>*` / `fix/<slug>*`) branches. A leftover `orca-*` *directory* nowadays means an interrupted run or a pre-salvage blocked item — blocked items survive as branches only; everything else to clean up is branches. Prefer resuming.
 - **Pre-plugin runs cannot resume** under the plugin (agent types, worktree names, and journal keys all changed) — clean up their leftovers and start fresh from a new brief.
 - **Plugin upgrades mid-run**: an in-flight run should be finished (or retried) on the plugin version that started it — resuming across an upgrade is best-effort: changed prompts cache-miss and re-run live, and the CLI verbs' re-entrancy makes that degrade gracefully, not dangerously.
@@ -529,12 +570,13 @@ This repository previously shipped the same workflow as symlink-installed skills
 |---|---|
 | `.claude-plugin/plugin.json` | The plugin manifest (`orca`). |
 | `.mcp.json` | Bundled codex MCP server registration — the global PATH `codex` binary, never npm. |
-| `skills/feature/`, `skills/debug/`, `skills/review/`, `skills/retry/`, `skills/followup/`, `skills/status/`, `skills/init/`, `skills/doctor/`, `skills/config/` | The nine skills. |
+| `skills/feature/`, `skills/debug/`, `skills/prototype/`, `skills/review/`, `skills/pr/`, `skills/retry/`, `skills/followup/`, `skills/iterate/`, `skills/status/`, `skills/init/`, `skills/doctor/`, `skills/config/` | The twelve skills. |
 | `skills/feature/interview.md`, `skills/debug/interview.md` | The interview instructions, loaded only when a verb's triage lands on a new interview. |
 | `scripts/orca.sh`, `scripts/lib.sh`, `scripts/verbs/` | The orca CLI — the plugin's entire shell surface behind one invocation shape (see [The orca CLI](#the-orca-cli) below): a case-statement dispatcher, the shared lib (typed failures, framed output, base64 relay encoding, repository resolution, the config parser/writer, the banned-attribution regex), and one sourced file per verb. |
 | `scripts/work-loop.workflow.js` | The deterministic feature work loop, run through the Workflow tool — also nested by debug runs for the fix tail. |
 | `scripts/debug-loop.workflow.js` | The deterministic debug loop: repro gate, hypothesis fan-out, verification, diagnosis, nested fix, repro check. |
-| `agents/` | The seventeen stage agents, loaded as `orca:<stage>` (the reviewers are `review-codex` and `review-claude`; the debug stages are `reproduce`, `hypothesize`, `verify`, `diagnose`; `context` maintains the project context; `audit` reconciles a finished run for `/orca:retry` and `/orca:followup`). |
+| `scripts/research.workflow.js`, `scripts/spec.workflow.js`, `scripts/prototype.workflow.js` | The one-agent workflows — single stage spawns routed through the Workflow tool instead of the Agent tool, which is what gives them the same `{model, effort}` override surface as every workflow-spawned stage: the research step, the spec stage, and the prototype build. |
+| `agents/` | The eighteen stage agents, loaded as `orca:<stage>` (the reviewers are `review-codex` and `review-claude`; the debug stages are `reproduce`, `hypothesize`, `verify`, `diagnose`; `prototype` builds `/orca:prototype`'s spike; `context` maintains the project context; `audit` reconciles a finished run for `/orca:retry` and `/orca:followup`). |
 | `.github/workflows/version-bump.yml`, `.github/scripts/version-bump.sh` | Version-bump guard, run by GitHub Actions on every push to main: if shipped files (`skills/`, `agents/`, `scripts/`, `.claude-plugin/`, `.mcp.json`) changed since the commit that introduced the current manifest version, the action commits a bump to main — sized by Conventional Commits across the uncovered range (`!`/`BREAKING CHANGE` → major, `feat` → minor, else patch). The plugin updater keys its install cache on that version, so an unbumped push makes updates silently serve stale code. The check is stateless, so a missed run self-heals on the next push; a manual bump of any size covers the changes that land with it. Pull after pushing shipped changes to pick up the bot's bump commit. |
 | [orca.nvim](https://github.com/miguelbacalhau/orca.nvim) *(separate repository)* | The Neovim companion: `:OrcaReview` reviews a branch's merge-base diff in your own editor — opened by `/orca:review`. Dependency-free, installs like any plugin; `/orca:doctor` checks it and prescribes the install. |
 | [orca.vscode](https://github.com/miguelbacalhau/orca.vscode) *(separate repository)* | The VS Code companion: an "Orca: Review" session walks the same merge-base diff — one native diff at a time, ✓ checkboxes in the Source Control sidebar — opened by `/orca:review` via `code --open-url`. Installed from the release VSIX; `/orca:doctor` checks it and prescribes the install. |

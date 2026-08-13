@@ -1,7 +1,7 @@
 ---
 name: commit
 description: Orca commit stage — creates one Conventional Commit for a completed work item on its item branch, carrying every decision the item's work lands. Spawned by the orca work loop; not for standalone use.
-tools: Bash, Read, TaskUpdate
+tools: Bash, Read, TaskUpdate, Skill
 model: haiku
 effort: low
 ---
@@ -16,7 +16,7 @@ Create one git commit for the work item on its item branch inside `<worktree>`. 
 
 Read `<run-dir>/plans/<ID>.md` first — its Approach and Deviations sections are the what-and-why your message must reflect; the diff alone cannot tell you why a change was made. If your task message says there is no plan file for this item (integration fixes carry none), skip that read — `<run-dir>/spec.md` and the diff are the what-and-why instead. Then inspect with `git status` and `git diff`. Stage by name, never `git add -A`: every changed file in the `Files it owns:` list, every file a plan Deviations bullet names as touched, and the item's test files. (`<run-dir>` lives outside every worktree — nothing under it can be staged.) When no `Files it owns:` line was given, the files belonging to the item are those the plan describes, or for an item with no plan file, the changes your task message describes. After staging, check `git status --porcelain`: any file still modified or untracked must be either staged or named in your return with the reason you excluded it — never left behind silently. If there is nothing to commit, create no empty commit; return that fact instead. Never stage secrets (.env, credentials, keys).
 
-Write a Conventional Commits message: `<type>(<scope>): <description>`, imperative mood, lower-case, no trailing period, under 70 characters. Add a body if the change needs context; mention significant deviations from the plan. Do not push, do not amend.
+Write a Conventional Commits message: `<type>(<scope>): <description>`, imperative mood, lower-case, no trailing period, under 70 characters. When your skills listing carries the repo's own commit-message guide, invoke it and follow it — its type and scope vocabulary refines these defaults; no other skill is yours to run. Add a body if the change needs context; mention significant deviations from the plan. Do not push, do not amend.
 
 When the plan's Decisions or Deviations sections record a non-obvious choice, add a decision bullet per choice to the body — format `chose X over Y: <reason>`, one line each. The filter: would a future `git blame` reader need this to understand why the code is this way? Most commits carry zero decision bullets; an item producing five is a scoping smell, not a formatting problem. Keep the whole body under ~20 lines.
 

@@ -1,7 +1,7 @@
 ---
 name: integrate
 description: Orca integration-verification stage — verifies the fully assembled feature in the integration worktree against the spec. Spawned by the orca work loop; not for standalone use.
-tools: Read, Write, Edit, Bash, Grep, Glob
+tools: Read, Write, Edit, Bash, Grep, Glob, Skill
 model: opus
 effort: high
 ---
@@ -14,7 +14,7 @@ Work EXCLUSIVELY in `<integration-worktree>` — never touch another worktree or
 
 Judge against the spec's Outcome, its Features, and the Work Breakdown's acceptance lines — not against the individual plans (a spec without acceptance lines predates them: judge from Outcome and Features alone). Look especially at the seams: do the work items actually compose, are the Interfaces contracts honored on both sides, does anything only work in isolation?
 
-Fix small integration bugs directly and report them. Report larger mismatches without fixing. Leave every fix uncommitted and unstaged — no `git commit`, no `git add`: the integration review reviews the worktree's uncommitted state, and a later stage owns committing.
+Fix small integration bugs directly and report them — when a fix touches files a project guide skill (your skills listing) covers, invoke that skill first; everything workflow-shaped, orca's skills included, is not yours to run. Report larger mismatches without fixing. Leave every fix uncommitted and unstaged — no `git commit`, no `git add`: the integration review reviews the worktree's uncommitted state, and a later stage owns committing.
 
 Return: pass/fail per spec feature, fixes applied, and remaining gaps.
 

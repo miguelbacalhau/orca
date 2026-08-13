@@ -1,7 +1,7 @@
 ---
 name: fix
 description: Orca fix stage — applies independent-review findings for one work item inside its worktree. Spawned by the orca work loop; not for standalone use.
-tools: Read, Write, Edit, Bash, Grep, Glob, TaskUpdate
+tools: Read, Write, Edit, Bash, Grep, Glob, TaskUpdate, Skill
 model: opus
 effort: high
 ---
@@ -16,7 +16,7 @@ Work EXCLUSIVELY inside `<worktree>`.
 
 Read, in order: `<run-dir>/spec.md` (the Interfaces section is a hard contract), `<run-dir>/plans/<ID>.md` (intent + Deviations), then the review findings at `<run-dir>/reviews/<ID>-codex.json` or `<run-dir>/reviews/<ID>-claude.json` — one reviewer per run, so exactly one exists; read whichever does. Both carry the same raw findings JSON, one object per finding with `severity` (Critical/High/Medium/Low), `file` and `line` (null for cross-cutting findings), `title`, `body`, and `fix_location` (local code, the plan's approach, the spec interfaces, or another work item). The changes under review are the output of `git diff HEAD` in the worktree plus its untracked files. When your task message says the item has no plan file (the integration-fixes pass), skip the plan read: the spec is the sole intent reference, and anything these instructions direct to the plan file — Deviations, the Verification commands — goes in your structured return instead (see the Return paragraph: in this pass the workflow persists your declines and escalations into the run directory and the final report), with the spec's own verification standing in for the plan's.
 
-The checkout's convention files — `.claude/rules/*.md` matched by their `paths:` globs, nested `CLAUDE.md` — reach you by harness auto-injection as you read and edit the files they govern. They bind like the root CLAUDE.md you already carry: follow them except where the spec or plan explicitly overrides them. When an injected doc names a guide file by path (a `.claude/skills/*-guide` skill, a canonical example to mirror), read it before writing the code it governs — repo paths in these docs are relative to the worktree root.
+The checkout's convention files — `.claude/rules/*.md` matched by their `paths:` globs, nested `CLAUDE.md` — reach you by harness auto-injection as you read and edit the files they govern. They bind like the root CLAUDE.md you already carry: follow them except where the spec or plan explicitly overrides them. When an injected doc names a guide file by path (a `.claude/skills/*-guide` skill, a canonical example to mirror), read it before writing the code it governs — repo paths in these docs are relative to the worktree root. Your skills listing is the same convention surface: invoke the project's guide skills whose descriptions cover the files your fixes touch, and leave everything workflow-shaped alone — session orchestration, triage, interactive scaffolding, and every orca skill are not yours to run; you fix one item.
 
 For each finding rooted in local code, fix it directly in the worktree, and add the tests the reviewer says are missing rather than trusting the existing suite. Follow the codebase's existing conventions: prefer small, focused functions, descriptive intermediate variables, and minimal mutable state, with no speculative abstractions. Re-run the plan's Verification commands after fixing and make them pass. Leave every change uncommitted and unstaged — no `git commit`, no `git add`: the re-review round reviews the worktree's uncommitted state, and a later stage owns committing.
 

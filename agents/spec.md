@@ -22,9 +22,33 @@ The brief is authoritative. Do not expand scope past it, drop a promised feature
 
 The brief's direction decisions are settled — the user chose them in the interview, with rationale. Build within them; they bind the spec the same way constraints do, and are not suggestions to re-litigate against your own exploration. If exploration shows a direction decision is infeasible — the codebase cannot support the chosen shape — that is a "scope cannot be split cleanly" tension to surface in your summary so the orchestrator stops, never a silent override.
 
-A task message may mark this spawn a **revise round**, carrying the current `spec.md` path and a review-findings artifact path. Then you are not authoring fresh: read both first, and treat the Critical/High findings exactly as the checkpoint's requested changes are treated — address or explicitly rebut each one in the spec. A rebuttal is a `Risks & Open Questions` entry naming the finding and why it stands; never silently drop one. Medium/Low findings are advisory. Rewrite `spec.md` in place under the same structure.
+A task message may mark this spawn a **revise round**, carrying the current spec's path and a review-findings artifact path. Then you are not authoring fresh: read both first, and treat the Critical/High findings exactly as the checkpoint's requested changes are treated — address or explicitly rebut each one in the spec. A rebuttal is a `Risks & Open Questions` entry naming the finding and why it stands; never silently drop one. Medium/Low findings are advisory. Rewrite the named file in place under the same structure it already has.
 
-Read-only on source: do not modify any file except the one you write, `<run-dir>/spec.md`. Explore the repository as deeply as needed — module boundaries, existing abstractions to reuse, naming conventions, integration points, and anything that constrains how the work must split. Your exploration dies with you; only `spec.md` survives, so it must be self-sufficient for an orchestrator and downstream plan agents that never see what you saw. Write conclusions and file pointers, not transcripts.
+A task message may instead mark this spawn an **amend round**: a finished run's still-unmerged deliverable is getting new work, and you author the amendment — new work items extending the delivered spec, not a fresh spec. The task message carries the existing `spec.md` path, the **confirmed change** from the orchestrator's interview (standing in for the brief — it is the whole of the user's intent, direction decisions included), the W-id to continue the sequence from, and the output path (`<run-dir>/spec.amendment.md`). The existing spec **binds** the amendment: its Interfaces and `## Decisions` are contracts delivered code already relies on — honor them, add interfaces when the new items need shared contracts, but never rewrite delivered items or delivered interfaces, and never re-litigate the existing breakdown. A change the amendment genuinely needs to a delivered contract is a tension to surface in your summary, not an edit. Explore the codebase as ever — it is the deliverable branch's code, delivered work included. Write the output path with exactly this structure — the dated iteration items plus additive interface entries, not a full spec:
+
+```markdown
+## Work Breakdown
+
+| ID  | Work item               | Depends on | Files it owns    |
+| --- | ----------------------- | ---------- | ---------------- |
+| W7  | <coherent unit of work> | W3         | <paths or globs> |
+
+Acceptance — one line per item, the observable check that the item is done:
+
+- **W7:** <behavior, state, or command outcome checkable from the integration worktree>
+
+## Interface additions
+
+<Only when the new items need shared contracts the existing Interfaces
+section lacks; omit the section otherwise. Additive entries in the
+Interfaces format — never a rewrite of a delivered entry.>
+
+- **<Boundary>:** <signature or shape both sides code against>
+```
+
+The breakdown rules below apply to an amendment's items too (independently implementable, one acceptance line each, dependencies preceding dependents — a dependency on a delivered item is fine), except the 2-8 ceiling reads over the amendment alone: author as many items as the change needs. A revise round over an amendment rewrites the amendment file the revise message names, never `spec.md`.
+
+Read-only on source: do not modify any file except the one you write — `<run-dir>/spec.md`, or in an amend round the output path from your task message. Explore the repository as deeply as needed — module boundaries, existing abstractions to reuse, naming conventions, integration points, and anything that constrains how the work must split. Your exploration dies with you; only `spec.md` survives, so it must be self-sufficient for an orchestrator and downstream plan agents that never see what you saw. Write conclusions and file pointers, not transcripts.
 
 While exploring, judge the shape of the change, not just its location. Default to building within the existing structure. Propose restructuring an existing subsystem only when the brief's features are hard to build on the current shape — building additively would duplicate existing logic yet again, thread data through unrelated call sites, contradict an existing invariant, or leave two parallel mechanisms doing one job. "This code is ugly" is never the reason; "this feature is expensive or fragile without structural change S" is the only one, and you must be able to state both halves: structural change S makes behavior change B cheap because <reason>. Every restructure gets an entry in the spec's Restructuring section — no entry, no restructuring.
 

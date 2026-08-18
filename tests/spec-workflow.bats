@@ -44,6 +44,37 @@ CLEAN='{"written":true,"total":0,"criticalHigh":0,"reason":""}'
   [[ "$output" == *'args.effort must be one of'* ]]
 }
 
+@test "rejects an empty or relative amendPath at launch" {
+  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"codex","amendPath":""}' '[]'
+  [[ "$output" == *'args.amendPath must be a non-empty string'* ]]
+  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"codex","amendPath":"run/spec.amendment.md"}' '[]'
+  [[ "$output" == *'args.amendPath must be an absolute path'* ]]
+}
+
+@test "amend round: spec-amend artifact names and the Amendment path line in the review message" {
+  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"codex","amendPath":"/run/spec.amendment.md"}' \
+    '["s",'"$CLEAN"']'
+  [[ "$output" == *'Amendment path: /run/spec.amendment.md'* ]]
+  [[ "$output" == *'/run/reviews/spec-amend-codex.json'* ]]
+  [[ "$output" == *'/run/reviews/spec-amend-codex.round1.json'* ]]
+  # the original run's spec-review artifact is never named
+  [[ "$output" != *'/run/reviews/spec-codex.json'* ]]
+}
+
+@test "amend round: the revise prompt rewrites the amendment file, not spec.md" {
+  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"claude","amendPath":"/run/spec.amendment.md"}' \
+    '["s1",{"written":true,"total":1,"criticalHigh":1,"reason":""},"s2",'"$CLEAN"']'
+  [[ "$output" == *'Rewrite /run/spec.amendment.md in place'* ]]
+  [[ "$output" != *'Rewrite /run/spec.md in place'* ]]
+  [[ "$output" == *'/run/reviews/spec-amend-claude.round2.json'* ]]
+}
+
+@test "no amendPath: the fresh-spec path never mentions an amendment" {
+  run_wf "$ARGS" '["s",'"$CLEAN"']'
+  [[ "$output" != *'Amendment path:'* ]]
+  [[ "$output" != *'spec-amend'* ]]
+}
+
 @test "a dead spec agent returns died:true with no review key" {
   run_wf "$ARGS" '[{"die":true}]'
   [[ "$output" == *'"result":{"summary":null,"died":true}'* ]]

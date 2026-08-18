@@ -21,8 +21,8 @@ A [Claude Code](https://claude.com/claude-code) plugin for autonomous, multi-age
                          # git, resolve the blocked decisions with you, relaunch the work loop
 /orca:followup           # turn a finished run's optional follow-ups into the next brief
                          # for /orca:feature (new intent, not recovery)
-/orca:iterate            # localized new work on a delivered, still-unlanded feature branch —
-                         # same run, same spec, same branch, full stage treatment
+/orca:iterate            # new work on a delivered, still-unlanded feature branch, whatever
+                         # the size — same run, same branch, specced and reviewed like a run
 /orca:status             # read-only dashboard: .orca state joined with git ground truth,
                          # grouped by next action, each state naming its skill
 /orca:archive            # retire finished runs whose branches provably landed, so triage
@@ -76,7 +76,7 @@ State lives in files, never in conversation memory: the brief, the spec with its
 | `MCP_TOOL_TIMEOUT` | Codex-only, like the Codex CLI row: set to `1200000` (~20 min) in a Claude Code settings `env` block, so Codex reviews are not killed at the default MCP tool timeout. A plugin cannot ship session env, so `/orca:doctor` writes it for you. |
 | Permission mode | Runs need `bypassPermissions` for the session — see [Permissions and autonomy](#permissions-and-autonomy). |
 
-Everything else — the eighteen stage agents and the codex MCP server registration — ships inside the plugin itself; there is nothing to install per repository beyond the layout.
+Everything else — the twenty stage agents and the codex MCP server registration — ships inside the plugin itself; there is nothing to install per repository beyond the layout.
 
 ## Installation
 
@@ -233,11 +233,11 @@ The discussion is a selection, not an obligation: which follow-ups ride along; u
 
 ### `/orca:iterate [instructions]`
 
-Localized new work on a delivered, **still-unlanded** `feature/<slug>` branch — changes that deserve the full plan → implement → independent review → fix → commit → merge treatment, but not the full pipeline: no interview, no spec agent, no new run directory. The pattern is extracted from the debug loop's fix tail (a synthesized contract driving the nested work loop), aimed at a feature run's deliverable and driven by your instructions instead of a diagnosis.
+New work on a delivered, **still-unlanded** `feature/<slug>` branch, whatever the size — changes that deserve the run's full spec → plan → implement → independent review → fix → commit → merge treatment without a new run: no full interview, no new run directory. Every iteration authors its work contract the way every other orca verb does — through an agent: the confirmed change goes to `orca:spec` in an **amend round** (writing `spec.amendment.md` beside the delivered spec), then through the same independent adversarial spec review and bounded revise round a fresh run's spec gets — judged against a worktree at the deliverable branch's tip, not trunk, so the reviewer sees the code the amendment amends, with the delivered spec's Interfaces and Decisions binding as contracts the amendment may extend but never rewrite — and only then does the work loop run.
 
-The run's artifacts stay its single coherent story: triage picks a delivered-but-unlanded feature run from `triage snapshot`, one research agent validates the instructions against the system (the prior spec's Interfaces and Decisions bind the change), a micro-interview confirms the restated change (at most 2–3 questions; with clear instructions and clean research, zero) — then the new items are **appended to the run's own `spec.md`** under a dated iteration heading, continuing the existing W-id sequence, direction decisions land in its Decisions log, the old report is archived to `report.round<N>.md`, and the work loop relaunches over only the new items on the same integration branch. `plans/`, `reviews/`, and `merged.tsv` accumulate in place, so every audit join stays complete.
+The run's artifacts stay its single coherent story: triage picks a delivered-but-unlanded feature run from `triage snapshot`, one research agent validates the instructions against the system, a micro-interview confirms the restated change (at most 2–3 questions; with clear instructions and clean research, zero) — then the amendment's items are **appended to the run's own `spec.md`** under a dated iteration heading, continuing the existing W-id sequence, direction decisions land in its Decisions log, the old report is archived to `report.round<N>.md`, and the work loop relaunches over only the new items on the same integration branch. `plans/`, `reviews/`, and `merged.tsv` accumulate in place, so every audit join stays complete.
 
-The boundary map keeps the verb narrow: unmet items and escalated decisions are `/orca:retry`'s; work on a landed (or deleted) branch, or anything needing real decomposition, is `/orca:followup`'s brief; an interrupted run is `/orca:feature`'s resume (an interrupted iteration round resumes through that same path); a debug run's `fix/<slug>` is out by design; and there is no unreviewed fast tier here — `/orca:prototype` owns unreviewed speed. Research surfacing "not localized after all" redirects in conversation, before anything is authorized.
+The boundary map is factual, never a size judgment: unmet items and escalated decisions are `/orca:retry`'s; a landed (or deleted) branch means the deliverable shipped, so new intent there is `/orca:followup`'s brief; an interrupted run is `/orca:feature`'s resume (an interrupted iteration round resumes through that same path); a debug run's `fix/<slug>` is out by design; and there is no unreviewed fast tier here — `/orca:prototype` owns unreviewed speed. Only genuinely unrelated scope — a new outcome, not an amendment to this one — redirects to `/orca:feature`, in conversation, before anything is authorized.
 
 ### `/orca:archive [run]`
 
@@ -254,6 +254,8 @@ One-time, consent-per-step setup that makes a repository pass `/orca:feature`'s 
 - **New repository** — bare-init plus a default-branch worktree.
 - **Clone a URL** — bare clone, fetch refspec fix (bare clones silently fetch nothing without it), default-branch worktree.
 - **Convert an existing checkout** — restructures in place: `.git` becomes `.bare`, tracked files move into a `<branch>/` worktree, and **untracked files (including ignored ones — `.env`s, caches) are carried over** via a manifest before anything is deleted. Every path changes, so editors and terminals need re-pointing; the conversion is layout-only (no history, refs, or remotes touched) and reversible until the final cleanup step, which is confirmed separately.
+
+In every case it finishes by **root-linking**: symlinking the default worktree's `.claude` and `CLAUDE.md` at the repo root (`orca.sh init-link`), so a session started at the bare root — where every run worktree lives inside the project directory — auto-injects the checkout's conventions (path-matched `.claude/rules`, nested CLAUDE.mds) into every stage agent.
 
 Preconditions for conversion — it stops rather than improvising: a clean tree, no existing linked worktrees, no submodules.
 
@@ -619,6 +621,7 @@ That single invocation shape is the point: **one allowlist entry — `bash */scr
 | `config show\|validate\|set\|clear\|reset` | Sole reader/writer of `.orca/config` — parse, validation, merge semantics, atomic canonical writes (over `lib.sh`'s shared machinery); the grep-readers in the preflight and review verbs lean on its sole-writer guarantee. |
 | `triage discover\|status\|snapshot\|archive\|unarchive\|claim\|release` | Discovery spine, the per-run lease, and run retirement. Read-only: interrupted/unlaunched runs with byte-exact resume handles, lease verdicts (`LEASE: live\|stale\|none\|unknown`), queued briefs, open cases (`discover`), the git-footprint join (`status`), both domains folded with a ranked `ACTION:` list and `--run` fragment matching (`snapshot`), and the retirement gate (`archive --scan`). The report-body enrichment (`BLOCKED:`/`FOLLOWUP:`) is opt-in behind `--reports`, since it grows with run history and only `/orca:status` renders it. Mutating: the lease's writer pair — `claim [--steal] [--runid]` (atomic mkdir; steal is rename-first) and `release` — and the archived marker's writer pair, `archive <run-dir>` (re-gated at write time) and `unarchive`. |
 | `init-convert check\|convert\|cleanup\|recover` | The mechanical core of `/orca:init`'s conventional-to-bare conversion — gates, NUL-safe untracked moves, crash journal with signal traps, `recover`, and the manifest-checked `cleanup`. |
+| `init-link check\|apply` | `/orca:init`'s root-linking step: `check` reports each name's state (`LINKABLE`, `LINKED`, `NO_SOURCE`, `CONFLICT`), `apply` symlinks the default worktree's `.claude` and `CLAUDE.md` at the repo root, giving bare-root sessions the conventions the harness auto-injects into stage agents. |
 | `review discover\|open\|probe\|wait\|notes` | The deterministic spine of `/orca:review` — deliverable discovery, editor/terminal resolution, probes, and the launch; the skill converses, the script executes. |
 | `secrets place\|remove` | Links `.orca/secrets/` (the mirror-tree secrets convention) into a worktree as relative symlinks — run by the loops and skills after every `worktree add`, and runnable by hand on your own worktree. |
 | `worktree-item`, `commit-verify`, `merge-finalize` | The relay verbs the work loops spawn per item: the whole worktree-arrival ritual, the commit decision table, and merge finalization — results reported through the `@@ORCA@@` frame. |

@@ -112,6 +112,87 @@ EOF
   has_line $'DONE:\t'"$PWD/.orca/20250103-feat-c"$'\tunknown'
 }
 
+@test "the Blocked verdict is the first sentence, not the whole section" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  # Each fixture is <dir>|<Blocked body>|<expected tag>. The clean forms are
+  # verbatim shapes real reports produce; the leftovers forms are the ones a
+  # first-sentence rule must NOT wave through.
+  local cases=(
+    'a|None|clean'
+    'b|None.|clean'
+    'c|- None.|clean'
+    'd|None. Every work item merged.|clean'
+    'e|- None. Every work item is merged or deliberately parked.|clean'
+    'f|- **None.**|clean'
+    'g|None of the W3 work landed|leftovers'
+    'h|- W3: died waiting on a decision|leftovers'
+    'i|**W4 — blocked at reconciliation, four objections.**|leftovers'
+    'j|- Nothing. Well, almost nothing.|leftovers'
+  )
+  local c dir body want
+  for c in "${cases[@]}"; do
+    dir="20250101-feat-${c%%|*}"
+    body="${c#*|}"
+    want="${body##*|}"
+    body="${body%|*}"
+    mkdir -p ".orca/$dir"
+    echo '# spec' >".orca/$dir/spec.md"
+    printf '# report\n\n## Blocked\n\n%s\n\n## Follow-ups\n\nNone\n' "$body" \
+      >".orca/$dir/report.md"
+    run triage discover
+    [ "$status" -eq 0 ]
+    has_line $'DONE:\t'"$PWD/.orca/$dir"$'\t'"$want"
+    rm -r ".orca/$dir"
+  done
+}
+
+@test "a first sentence of None over real list items stays leftovers" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  mkdir -p .orca/20250101-feat-a
+  echo '# spec' >.orca/20250101-feat-a/spec.md
+  # Self-contradictory and not a shape the template produces — but the safe
+  # read is the one that keeps pestering, never the one that retires work.
+  printf '# report\n\n## Blocked\n\nNone.\n\n- W3: actually blocked\n' \
+    >.orca/20250101-feat-a/report.md
+  run triage discover
+  [ "$status" -eq 0 ]
+  has_line $'DONE:\t'"$PWD/.orca/20250101-feat-a"$'\tleftovers'
+}
+
+@test "an empty Blocked section is clean; a missing one stays unknown" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  mkdir -p .orca/20250101-feat-a .orca/20250102-feat-b
+  echo '# spec' >.orca/20250101-feat-a/spec.md
+  echo '# spec' >.orca/20250102-feat-b/spec.md
+  printf '# report\n\n## Blocked\n\n\n## Integration verification\n\n- ok\n' \
+    >.orca/20250101-feat-a/report.md
+  printf '# report\n\nno blocked section at all\n' >.orca/20250102-feat-b/report.md
+  run triage discover
+  [ "$status" -eq 0 ]
+  has_line $'DONE:\t'"$PWD/.orca/20250101-feat-a"$'\tclean'
+  has_line $'DONE:\t'"$PWD/.orca/20250102-feat-b"$'\tunknown'
+}
+
+@test "the same rule governs the Follow-ups routing" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  mkdir -p .orca/20250101-feat-a .orca/20250102-feat-b
+  echo '# spec' >.orca/20250101-feat-a/spec.md
+  echo '# spec' >.orca/20250102-feat-b/spec.md
+  # "None." plus a reassuring clause must not manufacture a followup action
+  printf '# report\n\n## Blocked\n\nNone.\n\n## Follow-ups\n\n- None. Nothing deferred.\n' \
+    >.orca/20250101-feat-a/report.md
+  printf '# report\n\n## Blocked\n\nNone.\n\n## Follow-ups\n\n- tune the cache\n' \
+    >.orca/20250102-feat-b/report.md
+  run triage snapshot
+  [ "$status" -eq 0 ]
+  refute_line $'\tfollowup\tfollowup\t'"$PWD/.orca/20250101-feat-a"$'\t'
+  has_line $'ACTION:\t1\tfollowup\tfollowup\t'"$PWD/.orca/20250102-feat-b"$'\t'
+}
+
 @test "briefs surface from feat-briefs top level only" {
   make_repo "$BATS_TEST_TMPDIR/r"
   cd "$BATS_TEST_TMPDIR/r"

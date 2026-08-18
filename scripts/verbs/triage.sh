@@ -388,17 +388,40 @@ report_section() { # <report.md> <section-title>
 
 # some|none|unknown — whether the section lists anything beyond "None".
 # Fail-open: a missing section is `unknown`, never a guess.
+# The verdict is the FIRST SENTENCE of the first non-empty line, not the
+# whole section mashed together. The report template writes the word as a
+# bullet — `- <item, reason, decision. "None" if nothing is blocked.>` —
+# and report authors routinely follow it with a reassuring clause ("None.
+# Every work item merged."). Judging the whole body made that clause the
+# thing that read as unfinished work: two of one real project's finished
+# runs sat in status's "leftovers" group, pointing at /orca:retry, for
+# nothing. Cutting at the first period reads them right while a section
+# opening "None of the W3 work landed" still reads `some` — which a
+# startswith-"none" test would have gotten wrong.
+#
+# The `listed` guard keeps the failure direction safe. A first sentence of
+# "None" followed by actual list items is self-contradictory and the
+# template does not produce it, but if it ever appears, `some` is the
+# harmless read (the user is pestered) where `none` is the harmful one
+# (real unfinished work retired or routed away).
 section_state() { # <report.md> <section-title>
   awk -v title="$2" '
     $0 ~ ("^##[[:space:]]+" title "[[:space:]]*$") { found = 1; insec = 1; next }
     insec && /^##[[:space:]]/ { insec = 0 }
-    insec { body = body $0 }
+    insec {
+      if ($0 ~ /^[[:space:]]*$/) next
+      if (first == "") { first = $0; next }
+      if ($0 ~ /^[[:space:]]*([-*+]|[0-9]+\.)[[:space:]]/) listed = 1
+    }
     END {
       if (!found) { print "unknown"; exit }
-      # Strip list markers, punctuation, and whitespace; an empty section or
-      # a lone "None" (however bulleted) means nothing is listed.
-      gsub(/[-*.[:space:]]/, "", body)
-      if (body == "" || tolower(body) == "none") print "none"
+      # An empty section lists nothing.
+      if (first == "") { print "none"; exit }
+      sub(/^[[:space:]]*([-*+]|[0-9]+\.)[[:space:]]+/, "", first)  # list marker
+      sub(/^[[:space:]]*\**[[:space:]]*/, "", first)               # bold opener
+      sub(/\..*$/, "", first)                                      # first sentence
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", first)
+      if (tolower(first) == "none" && !listed) print "none"
       else print "some"
     }' "$1" 2>/dev/null || echo "unknown"
 }

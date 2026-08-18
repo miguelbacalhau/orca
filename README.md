@@ -1,4 +1,8 @@
-# orca
+<p align="center">
+  <img src=".github/logo.png" width="280" alt="Orca logo">
+</p>
+
+<h1 align="center">orca</h1>
 
 A [Claude Code](https://claude.com/claude-code) plugin for autonomous, multi-agent development — two verbs on one substrate. Set the repository up once, then **`/orca:feature`** takes a feature from idea to a committed integration branch (an adversarial interview captures intent as a durable brief; a deterministic workflow plans, implements, independently reviews, fixes, commits, merges, and verifies), and **`/orca:debug`** takes a bug from symptom to a verified diagnosis — and, in scope, a committed fix (an interview captures the symptom as a durable case; a deterministic workflow establishes a reproduction, fans out adversarial hypothesis verification, judges a root cause, and lands a fix that must turn the repro green). Either way the user interacts exactly once after the interview (features: twice, by opt-in).
 

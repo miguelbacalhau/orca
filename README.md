@@ -21,6 +21,8 @@ A [Claude Code](https://claude.com/claude-code) plugin for autonomous, multi-age
                          # same run, same spec, same branch, full stage treatment
 /orca:status             # read-only dashboard: .orca state joined with git ground truth,
                          # grouped by next action, each state naming its skill
+/orca:archive            # retire finished runs whose branches provably landed, so triage
+                         # stops carrying the whole history (marker only — deletes nothing)
 /orca:init               # one-time repository layout setup      (interactive, consent per step)
 /orca:doctor             # one-time machine tooling setup        (interactive, consent per step)
 /orca:config             # optional per-repo reviewer & model/effort tuning
@@ -232,6 +234,14 @@ Localized new work on a delivered, **still-unlanded** `feature/<slug>` branch �
 The run's artifacts stay its single coherent story: triage picks a delivered-but-unlanded feature run from `triage snapshot`, one research agent validates the instructions against the system (the prior spec's Interfaces and Decisions bind the change), a micro-interview confirms the restated change (at most 2–3 questions; with clear instructions and clean research, zero) — then the new items are **appended to the run's own `spec.md`** under a dated iteration heading, continuing the existing W-id sequence, direction decisions land in its Decisions log, the old report is archived to `report.round<N>.md`, and the work loop relaunches over only the new items on the same integration branch. `plans/`, `reviews/`, and `merged.tsv` accumulate in place, so every audit join stays complete.
 
 The boundary map keeps the verb narrow: unmet items and escalated decisions are `/orca:retry`'s; work on a landed (or deleted) branch, or anything needing real decomposition, is `/orca:followup`'s brief; an interrupted run is `/orca:feature`'s resume (an interrupted iteration round resumes through that same path); a debug run's `fix/<slug>` is out by design; and there is no unreviewed fast tier here — `/orca:prototype` owns unreviewed speed. Research surfacing "not localized after all" redirects in conversation, before anything is authorized.
+
+### `/orca:archive [run]`
+
+Retires finished runs from triage. Orca never removes a run — the spec, plans, reviews, and report stay the durable record `/orca:retry`, `/orca:followup`, and `/orca:iterate` read long after the branch lands — but nothing retired them either, so every entry-point skill's Step 0 carried the repository's whole history forever, growing with each finished feature.
+
+The gate is deterministic and the script's, never a judgment: a run is archivable only when its report exists, its `## Blocked` section is `None`, no live lease owns it, and **every `feature/<slug>` branch the status join attributes to it — integration and item branches alike — is merged into the trunk** (or already pruned, which is the same end state). `triage archive --scan` reports each finished run as `ARCHIVABLE:` or `KEPT:` with a typed reason (`NOT_LANDED` naming the unmerged branches, `NOT_CLEAN`, `LEASE_LIVE`, `NO_TRUNK`); the skill presents both halves — the kept ones are often the more useful half, since an unmerged branch means a deliverable still waiting to land — and asks before marking anything.
+
+Archiving writes one `archived` marker file beside the run's `report.md`. It deletes nothing and touches git not at all: the run directory, its report, its branches, and its worktrees are exactly as they were, and pruning merged branches stays `/orca:status`'s prescription and your own hand. An archived run drops to a single `ARCHIVED:` line in triage — no lease, no report enrichment, no routing action — but stays addressable by fragment, and `/orca:followup` still picks it, because a retired run's report keeps every deferred follow-up. `--undo` removes the marker and the run returns to the routing surface unchanged.
 
 ### `/orca:init [path or clone URL]`
 
@@ -533,6 +543,7 @@ Every agent call in the work loop is journaled, and the workflow `runId` is pers
 - **Open cases persist by design**: a debug run that ends `no-repro`, `undiagnosed`, or `not-fixed` leaves its case in `.orca/bug-cases/` with the ledger appended, and the next `/orca:debug` starts from it.
 - **Prototype runs are never resumable**, by design — no lease, no persisted runId; abandon or relaunch fresh. Leftover `orca-proto-*` worktrees and `proto/<slug>` branches stay visible in `/orca:status` until you discard them with the cleanup commands in the spike's report.
 - **Abandoned run**: `git worktree list`, remove leftover `orca-*` worktrees and their `feature/<slug>*` (or `bug/<slug>*` / `fix/<slug>*`) branches. A leftover `orca-*` *directory* nowadays means an interrupted run or a pre-salvage blocked item — blocked items survive as branches only; everything else to clean up is branches. Prefer resuming.
+- **Landed runs pile up**: nothing removes a finished run, so triage grows with the repository's history. `/orca:archive` retires the ones whose branches provably merged — a marker file, nothing deleted, `/orca:followup` still able to pick them, reversible with `--undo`.
 - **Pre-plugin runs cannot resume** under the plugin (agent types, worktree names, and journal keys all changed) — clean up their leftovers and start fresh from a new brief.
 - **Plugin upgrades mid-run**: an in-flight run should be finished (or retried) on the plugin version that started it — resuming across an upgrade is best-effort: changed prompts cache-miss and re-run live, and the CLI verbs' re-entrancy makes that degrade gracefully, not dangerously.
 
@@ -570,7 +581,7 @@ This repository previously shipped the same workflow as symlink-installed skills
 |---|---|
 | `.claude-plugin/plugin.json` | The plugin manifest (`orca`). |
 | `.mcp.json` | Bundled codex MCP server registration — the global PATH `codex` binary, never npm. |
-| `skills/feature/`, `skills/debug/`, `skills/prototype/`, `skills/review/`, `skills/pr/`, `skills/retry/`, `skills/followup/`, `skills/iterate/`, `skills/status/`, `skills/init/`, `skills/doctor/`, `skills/config/` | The twelve skills. |
+| `skills/feature/`, `skills/debug/`, `skills/prototype/`, `skills/review/`, `skills/pr/`, `skills/retry/`, `skills/followup/`, `skills/iterate/`, `skills/status/`, `skills/archive/`, `skills/init/`, `skills/doctor/`, `skills/config/` | The thirteen skills. |
 | `skills/feature/interview.md`, `skills/debug/interview.md` | The interview instructions, loaded only when a verb's triage lands on a new interview. |
 | `scripts/orca.sh`, `scripts/lib.sh`, `scripts/verbs/` | The orca CLI — the plugin's entire shell surface behind one invocation shape (see [The orca CLI](#the-orca-cli) below): a case-statement dispatcher, the shared lib (typed failures, framed output, base64 relay encoding, repository resolution, the config parser/writer, the banned-attribution regex), and one sourced file per verb. |
 | `scripts/work-loop.workflow.js` | The deterministic feature work loop, run through the Workflow tool — also nested by debug runs for the fix tail. |
@@ -595,7 +606,7 @@ That single invocation shape is the point: **one allowlist entry — `bash */scr
 |---|---|
 | `preflight` | Read-only environment validation — the gate lines above. |
 | `config show\|validate\|set\|clear\|reset` | Sole reader/writer of `.orca/config` — parse, validation, merge semantics, atomic canonical writes (over `lib.sh`'s shared machinery); the grep-readers in the preflight and review verbs lean on its sole-writer guarantee. |
-| `triage discover\|status\|snapshot\|claim\|release` | Discovery spine and the per-run lease. Read-only: interrupted/unlaunched runs with byte-exact resume handles, lease verdicts (`LEASE: live\|stale\|none\|unknown`), queued briefs, open cases (`discover`), the git-footprint join (`status`), and both domains folded with a ranked `ACTION:` list and `--run` fragment matching (`snapshot`). Mutating: the lease's single writer pair — `claim [--steal] [--runid]` (atomic mkdir; steal is rename-first) and `release`. |
+| `triage discover\|status\|snapshot\|archive\|unarchive\|claim\|release` | Discovery spine, the per-run lease, and run retirement. Read-only: interrupted/unlaunched runs with byte-exact resume handles, lease verdicts (`LEASE: live\|stale\|none\|unknown`), queued briefs, open cases (`discover`), the git-footprint join (`status`), both domains folded with a ranked `ACTION:` list and `--run` fragment matching (`snapshot`), and the retirement gate (`archive --scan`). The report-body enrichment (`BLOCKED:`/`FOLLOWUP:`) is opt-in behind `--reports`, since it grows with run history and only `/orca:status` renders it. Mutating: the lease's writer pair — `claim [--steal] [--runid]` (atomic mkdir; steal is rename-first) and `release` — and the archived marker's writer pair, `archive <run-dir>` (re-gated at write time) and `unarchive`. |
 | `init-convert check\|convert\|cleanup\|recover` | The mechanical core of `/orca:init`'s conventional-to-bare conversion — gates, NUL-safe untracked moves, crash journal with signal traps, `recover`, and the manifest-checked `cleanup`. |
 | `review discover\|open\|probe\|wait\|notes` | The deterministic spine of `/orca:review` — deliverable discovery, editor/terminal resolution, probes, and the launch; the skill converses, the script executes. |
 | `secrets place\|remove` | Links `.orca/secrets/` (the mirror-tree secrets convention) into a worktree as relative symlinks — run by the loops and skills after every `worktree add`, and runnable by hand on your own worktree. |

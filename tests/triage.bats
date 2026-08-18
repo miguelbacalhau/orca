@@ -361,6 +361,32 @@ write_owner() {
 
 # ---- report enrichment: BLOCKED:/FOLLOWUP: ----
 
+@test "the report bodies are opt-in: absent by default, emitted under --reports" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  mkdir -p .orca/20250101-feat-a
+  echo '# spec' >.orca/20250101-feat-a/spec.md
+  printf '# report\n\n## Blocked\n\n- W3: died\n\n## Follow-ups\n\n- polish\n' \
+    >.orca/20250101-feat-a/report.md
+  # the routing tag is always on the wire; only the bodies are gated
+  run triage discover
+  [ "$status" -eq 0 ]
+  has_line $'DONE:\t'"$PWD/.orca/20250101-feat-a"$'\tleftovers'
+  refute_line $'BLOCKED:\t'
+  refute_line $'FOLLOWUP:\t'
+  run triage snapshot
+  [ "$status" -eq 0 ]
+  refute_line $'BLOCKED:\t'
+  # the action still routes without the bodies
+  has_line $'ACTION:\t1\tfinish-unmet\tretry\t'"$PWD/.orca/20250101-feat-a"$'\t'
+  run triage discover --reports
+  [ "$status" -eq 0 ]
+  has_line $'BLOCKED:\t'"$PWD/.orca/20250101-feat-a"$'\t'
+  run triage snapshot --reports
+  [ "$status" -eq 0 ]
+  has_line $'BLOCKED:\t'"$PWD/.orca/20250101-feat-a"$'\t'
+}
+
 @test "DONE runs carry base64 Blocked and Follow-ups sections; missing sections emit no line" {
   make_repo "$BATS_TEST_TMPDIR/r"
   cd "$BATS_TEST_TMPDIR/r"
@@ -370,7 +396,7 @@ write_owner() {
   printf '# report\n\n## Blocked\n\n- W3: died waiting on a decision\n\n## Follow-ups\n\n- polish the docs\n' \
     >.orca/20250101-feat-a/report.md
   printf '# report\n\nno sections at all\n' >.orca/20250102-feat-b/report.md
-  run triage discover
+  run triage discover --reports
   [ "$status" -eq 0 ]
   has_line $'BLOCKED:\t'"$PWD/.orca/20250101-feat-a"$'\t'
   has_line $'FOLLOWUP:\t'"$PWD/.orca/20250101-feat-a"$'\t'
@@ -483,6 +509,155 @@ EOF
   has_line $'ACTION:\t2\tprune-branch\t-\tfeature/alpha-W1\t'
   has_line $'ACTION:\t3\tinspect-orphan\t-\tfeature/gamma\t'
   has_line $'ACTION:\t4\tprune-worktree\t-\t'"$PWD/orca-alpha"$'\t'
+}
+
+# ---- archive: retiring finished, landed runs ----
+
+# make_finished <dir> <blocked-body> — a finished run fixture.
+make_finished() {
+  mkdir -p ".orca/$1"
+  echo '# spec' >".orca/$1/spec.md"
+  printf '# report\n\n## Blocked\n\n%s\n\n## Follow-ups\n\n- something deferred\n' \
+    "$2" >".orca/$1/report.md"
+}
+
+@test "archive --scan: landed and clean is archivable; unlanded, unclean, and leased are kept" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  make_finished 20250101-feat-landed None
+  make_finished 20250102-feat-unlanded None
+  make_finished 20250103-feat-stuck '- W2: needs a decision'
+  make_finished 20250104-feat-owned None
+  make_finished 20250105-feat-pruned None
+  # landed: branch merged into the trunk. pruned: no branch at all.
+  git branch feature/landed
+  git branch feature/landed-W1
+  git checkout -qb feature/unlanded
+  echo work >w.txt
+  git add w.txt && git commit -qm work
+  git checkout -q main
+  # owned: a live lease blocks retirement even though it is clean
+  git branch feature/owned
+  sleep 60 &
+  local spid=$!
+  write_owner .orca/20250104-feat-owned "$(hostname)" "$spid" "$(ps -o lstart= -p "$spid")"
+  run triage archive --scan
+  kill "$spid" 2>/dev/null || true
+  [ "$status" -eq 0 ]
+  has_line $'ARCHIVABLE:\t'"$PWD/.orca/20250101-feat-landed"$'\t'
+  has_line $'ARCHIVABLE:\t'"$PWD/.orca/20250105-feat-pruned"$'\t'
+  has_line $'KEPT:\t'"$PWD/.orca/20250102-feat-unlanded"$'\tNOT_LANDED\t'
+  has_line $'KEPT:\t'"$PWD/.orca/20250103-feat-stuck"$'\tNOT_CLEAN\t'
+  has_line $'KEPT:\t'"$PWD/.orca/20250104-feat-owned"$'\tLEASE_LIVE\t'
+  # the unlanded detail names the branch, so the refusal is actionable
+  printf '%s\n' "$output" | grep '^KEPT:' | grep -q 'feature/unlanded(unmerged)'
+}
+
+@test "archive: a leftover worktree is reported in the evidence, never a gate" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  make_finished 20250101-feat-alpha None
+  git branch feature/alpha
+  git worktree add orca-alpha feature/alpha >/dev/null 2>&1
+  run triage archive --scan
+  [ "$status" -eq 0 ]
+  has_line $'ARCHIVABLE:\t'"$PWD/.orca/20250101-feat-alpha"$'\t'
+  printf '%s\n' "$output" | grep '^ARCHIVABLE:' | grep -q 'leftover worktree'
+  run triage archive .orca/20250101-feat-alpha
+  [ "$status" -eq 0 ]
+  # archiving touches no git state: the worktree is still status's to prune
+  run triage snapshot
+  has_line $'ACTION:\t2\tprune-worktree\t-\t'"$PWD/orca-alpha"$'\t'
+}
+
+@test "archive: an unmerged ITEM branch alone blocks retirement" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  make_finished 20250101-feat-alpha None
+  git branch feature/alpha
+  git checkout -qb feature/alpha-W2
+  echo work >w.txt
+  git add w.txt && git commit -qm work
+  git checkout -q main
+  run triage archive .orca/20250101-feat-alpha
+  assert_fail_reason NOT_LANDED
+  [ ! -f .orca/20250101-feat-alpha/archived ]
+}
+
+@test "archive: an archived run leaves the routing surface but stays followup-pickable" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  make_finished 20250101-feat-alpha None
+  git branch feature/alpha
+  run triage archive .orca/20250101-feat-alpha
+  [ "$status" -eq 0 ]
+  has_line $'ARCHIVED:\t.orca/20250101-feat-alpha'
+  # one bare line: no DONE:, no enrichment, no action, no lease
+  run triage snapshot --reports
+  [ "$status" -eq 0 ]
+  has_line $'ARCHIVED:\t'"$PWD/.orca/20250101-feat-alpha"
+  refute_line $'DONE:\t'"$PWD/.orca/20250101-feat-alpha"
+  refute_line $'FOLLOWUP:\t'"$PWD/.orca/20250101-feat-alpha"
+  refute_line $'ACTION:\t1\tfollowup'
+  # still addressable by fragment — retirement is not disappearance
+  run triage snapshot --run alpha
+  [ "$status" -eq 0 ]
+  has_line $'MATCH:\t'"$PWD/.orca/20250101-feat-alpha"
+  # the branch is still status's to prune: archiving touches no git state
+  has_line $'ACTION:\t1\tprune-branch\t-\tfeature/alpha\t'
+}
+
+@test "archive is idempotent and reversible; unarchive restores the routing" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  make_finished 20250101-feat-alpha None
+  run triage archive .orca/20250101-feat-alpha
+  [ "$status" -eq 0 ]
+  run triage archive .orca/20250101-feat-alpha
+  [ "$status" -eq 0 ]
+  has_line $'ARCHIVED:\t.orca/20250101-feat-alpha'
+  run triage archive --scan
+  has_line $'ARCHIVED:\t'"$PWD/.orca/20250101-feat-alpha"
+  refute_line $'ARCHIVABLE:\t'
+  run triage unarchive .orca/20250101-feat-alpha
+  [ "$status" -eq 0 ]
+  has_line $'UNARCHIVED:\t.orca/20250101-feat-alpha'
+  run triage unarchive .orca/20250101-feat-alpha
+  [ "$status" -eq 0 ]
+  run triage discover
+  has_line $'DONE:\t'"$PWD/.orca/20250101-feat-alpha"$'\tclean'
+}
+
+@test "archive refuses typed: missing dir, unfinished run, detached trunk" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  run triage archive .orca/does-not-exist
+  assert_fail_reason NO_RUN_DIR
+  mkdir -p .orca/20250101-feat-running
+  echo '# spec' >.orca/20250101-feat-running/spec.md
+  run triage archive .orca/20250101-feat-running
+  assert_fail_reason NO_REPORT
+  # an unfinished run is never a scan candidate either
+  run triage archive --scan
+  [ "$status" -eq 0 ]
+  refute_line $'ARCHIVABLE:\t'
+  refute_line $'KEPT:\t'
+  make_finished 20250102-feat-alpha None
+  git checkout -q --detach
+  run triage archive .orca/20250102-feat-alpha
+  assert_fail_reason NO_TRUNK
+}
+
+@test "a stray archived marker never hides a resumable run" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  mkdir -p .orca/20250101-feat-alpha
+  echo '# spec' >.orca/20250101-feat-alpha/spec.md
+  printf 'archived=whenever\n' >.orca/20250101-feat-alpha/archived
+  run triage discover
+  [ "$status" -eq 0 ]
+  has_line $'RUN:\t'"$PWD/.orca/20250101-feat-alpha"$'\tunlaunched'
+  refute_line $'ARCHIVED:\t'
 }
 
 @test "snapshot --run: fragment match in bash, loud miss with candidates" {

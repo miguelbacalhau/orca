@@ -2,16 +2,21 @@
 #
 # orca triage — the discovery spine of orca:feature's and orca:debug's
 # Step 0, orca:status's dashboard, and the home of the per-run lease.
-# The read-only boundary runs PER SUBCOMMAND: `discover`, `status`, and
-# `snapshot` never write anything; `claim` and `release` are the lease's
-# writer pair — the ONLY writers of <run-dir>/.lock anywhere in orca
-# (both workflow scripts call them through orca.sh). No bare-layout
+# The read-only boundary runs PER SUBCOMMAND: `discover`, `status`,
+# `snapshot`, and `archive --scan` never write anything; `claim` and
+# `release` are the lease's writer pair — the ONLY writers of
+# <run-dir>/.lock anywhere in orca (both workflow scripts call them
+# through orca.sh) — and `archive`/`unarchive` are the archived marker's
+# writer pair, the ONLY writers of <run-dir>/archived. No bare-layout
 # requirement: triage runs before the preflight.
 #
 # Usage:
-#   orca.sh triage discover
+#   orca.sh triage discover [--reports]
 #   orca.sh triage status
-#   orca.sh triage snapshot [--run <fragment>]
+#   orca.sh triage snapshot [--reports] [--run <fragment>]
+#   orca.sh triage archive --scan
+#   orca.sh triage archive <run-dir>
+#   orca.sh triage unarchive <run-dir>
 #   orca.sh triage claim [--steal] [--runid <id>] <run-dir> <note>
 #   orca.sh triage release <run-dir>
 #
@@ -71,10 +76,23 @@
 #                   case where the liveness caveat survives.
 #   BLOCKED:<TAB><run-dir><TAB><b64>
 #   FOLLOWUP:<TAB><run-dir><TAB><b64>
-#       DONE: runs only — the report's "## Blocked" / "## Follow-ups"
-#       section bodies, base64 (one line each; decode before rendering).
-#       Emitted only when the section exists, so consumers never see a
-#       guessed empty body.
+#       DONE: runs, --reports only — the report's "## Blocked" /
+#       "## Follow-ups" section bodies, base64 (one line each; decode
+#       before rendering). Emitted only when the section exists, so
+#       consumers never see a guessed empty body. Off by default,
+#       deliberately: the bodies grow with run HISTORY, not with
+#       actionable state, and every entry-point skill calls this verb —
+#       orca:status, the one consumer that renders the bodies, opts in
+#       with --reports; every other caller routes on the DONE: tag alone.
+#   ARCHIVED:<TAB><run-dir>
+#       Finished runs retired by `triage archive` (an `archived` marker
+#       file beside report.md): one bare line — no LEASE:, no BLOCKED:/
+#       FOLLOWUP: enrichment, no ACTION: routing, no MATCH-candidacy
+#       loss (the dirs still list as CANDIDATE:/MATCH: under --run).
+#       orca:followup still picks archived runs (their reports keep the
+#       deferred follow-ups); every other caller ignores the line. The
+#       marker is honored only beside a report.md, so a stray marker can
+#       never hide a resumable run.
 #   BRIEF:<TAB><path>
 #       Queued briefs: .orca/feat-briefs/*.md, top level only (drafts/
 #       does not count).
@@ -150,6 +168,25 @@
 #   not provably stale), STEAL_RACED (another contender won the rename),
 #   NO_RUN_DIR, BAD_ARGS.
 #
+# archive output contract — the retirement gate is provable, never
+# guessed: report.md present, Blocked section "None", lease not live,
+# and every feature/* branch joining this run dir (integration and item
+# alike, through the same anchored run_join the status join uses) merged
+# into the trunk; absent branches pass (landed and pruned). Worktrees
+# never gate — the run dir stays in place, so status keeps joining and
+# pruning them. TAB-separated:
+#
+#   ARCHIVABLE:<TAB><run-dir><TAB><evidence>     --scan: every gate passes
+#       (evidence is one plain line — script-composed, no free prose)
+#   KEPT:<TAB><run-dir><TAB><reason><TAB><detail> --scan: a gate failed;
+#       reason NOT_CLEAN|LEASE_LIVE|NO_TRUNK|NOT_LANDED. Finished runs
+#       only — unfinished runs are RUN:, never archive candidates.
+#   ARCHIVED:<TAB><run-dir>       --scan: already archived; write form:
+#                                 the marker is written (idempotent)
+#   UNARCHIVED:<TAB><run-dir>     marker removed; idempotent
+#   Typed failures, exit 1: NO_RUN_DIR, NO_REPORT, NOT_CLEAN, LEASE_LIVE,
+#   NO_TRUNK, NOT_LANDED, BAD_ARGS.
+#
 # The ARGS payloads are the point: a resume must replay the launch args
 # byte-identical (any drift changes agent prompts and re-runs completed
 # stages instead of replaying them from the journal), and extracting the
@@ -164,6 +201,12 @@ triage_fail() { # <reason> <detail> — typed failure, exit 1
   printf 'FAIL:\t%s\t%s\n' "$1" "$2"
   exit 1
 }
+
+# The --reports opt-in, set by the discover/snapshot flag loops and read
+# by emit_done_extras. Default off: the BLOCKED:/FOLLOWUP: bodies are the
+# only part of the output that grows with run HISTORY rather than with
+# actionable state, and only orca:status renders them.
+want_reports=0
 
 triage_resolve_repo() {
   common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
@@ -371,10 +414,14 @@ done_state() { # <report.md>
   esac
 }
 
-# The DONE: adjacency block: lease verdict plus the report's Blocked and
-# Follow-ups bodies, base64 so a reason is never paraphrased in transit.
+# The DONE: adjacency block: lease verdict, plus — under --reports only —
+# the report's Blocked and Follow-ups bodies, base64 so a reason is never
+# paraphrased in transit. The bodies are the snapshot's whole size
+# problem: they scale with how many runs a repository has ever finished,
+# while every caller but orca:status routes on the DONE: tag alone.
 emit_done_extras() { # <run-dir>
   emit_lease "$1"
+  [[ "$want_reports" == 1 ]] || return 0
   local body
   if body="$(report_section "$1/report.md" Blocked)"; then
     printf 'BLOCKED:\t%s\t%s\n' "$1" "$(b64_encode_str "$body")"
@@ -382,6 +429,13 @@ emit_done_extras() { # <run-dir>
   if body="$(report_section "$1/report.md" Follow-ups)"; then
     printf 'FOLLOWUP:\t%s\t%s\n' "$1" "$(b64_encode_str "$body")"
   fi
+}
+
+# An archived run is a finished run the user retired: landed, clean, and
+# harvested. The marker counts only beside a report.md — a stray file can
+# never hide a resumable run from its resume offer.
+is_archived() { # <run-dir>
+  [[ -f "$1/archived" && -f "$1/report.md" ]]
 }
 
 collect_discover() {
@@ -403,6 +457,13 @@ collect_discover() {
     # run never writes spec.md; this is the backstop.)
     case "$(basename "$dir")" in *-proto-*) continue ;; esac
     if [[ -f "$dir/report.md" ]]; then
+      # An archived run reduces to one bare line: retired by the user,
+      # nothing routes off it. orca:followup reads ARCHIVED: as a pick
+      # candidate — deferred follow-ups outlive the retirement.
+      if is_archived "$dir"; then
+        printf 'ARCHIVED:\t%s\n' "$dir"
+        continue
+      fi
       printf 'DONE:\t%s\t%s\n' "$dir" "$(done_state "$dir/report.md")"
       emit_done_extras "$dir"
       continue
@@ -484,6 +545,15 @@ collect_discover() {
 }
 
 cmd_discover() {
+  while [[ "${1:-}" == --* ]]; do
+    case "$1" in
+      --reports)
+        want_reports=1
+        shift
+        ;;
+      *) triage_fail BAD_ARGS "unknown flag '$1' — usage: triage.sh discover [--reports]" ;;
+    esac
+  done
   triage_resolve_repo
   collect_discover
   exit 0
@@ -621,12 +691,145 @@ cmd_status() {
   exit 0
 }
 
+# ---- archive: retire a finished run from the routing surface ----------
+#
+# The size problem the marker solves is structural: finished runs are
+# never removed, so every entry-point skill's triage pays for the whole
+# history of the repository forever. Retirement is the user's decision,
+# but the GATE is provable — a run is archivable only when it is
+# finished, clean, unleased, and its git footprint has landed. The
+# branch test reuses the status join verbatim (the same anchored
+# run_join, the same merged_state against the same targets), so archive
+# and status can never disagree about what "landed" means.
+
+# "<verdict>\t<detail>" — PASS, or a typed reason with its evidence.
+archive_gate() { # <run-dir> <status-output>
+  local dir="$1" stat="$2" trunk unmerged
+  [[ -f "$dir/report.md" ]] || {
+    printf 'NO_REPORT\tno report.md — the run has not finished'
+    return
+  }
+  case "$(done_state "$dir/report.md")" in
+    clean) ;;
+    leftovers)
+      printf 'NOT_CLEAN\treport lists unmet items — /orca:retry finishes them'
+      return
+      ;;
+    *)
+      printf "NOT_CLEAN\treport's Blocked section is unreadable — nothing provable to archive on"
+      return
+      ;;
+  esac
+  if [[ "$(lease_read "$dir" | cut -f1)" == live ]]; then
+    printf 'LEASE_LIVE\tan open session owns this run'
+    return
+  fi
+  trunk="$(printf '%s' "$stat" | awk -F'\t' '$1 == "TRUNK:" { print $2; exit }')"
+  if [[ -z "$trunk" ]]; then
+    printf 'NO_TRUNK\tdetached or unset HEAD — merged-ness is unknowable, never guessed'
+    return
+  fi
+  # Every branch the status join attributes to this run must be merged.
+  # Absent branches emit no line and so pass: landed and pruned is the
+  # end state this gate exists to recognize.
+  unmerged="$(printf '%s' "$stat" | awk -F'\t' -v d="$dir" '
+    ($1 == "BRANCH:" && $5 == d && $3 != "merged") { printf "%s(%s) ", $2, $3 }
+    ($1 == "ITEMBR:" && $4 == d && $3 != "merged") { printf "%s(%s) ", $2, $3 }')"
+  if [[ -n "$unmerged" ]]; then
+    printf 'NOT_LANDED\tunlanded branches: %s' "${unmerged% }"
+    return
+  fi
+  # Leftover worktrees are REPORTED, never a gate. One sitting on a merged
+  # branch is exactly the garbage status already prescribes removing, and
+  # the run directory survives archiving, so the join keeps rendering it
+  # under "safe to delete" either way — blocking retirement on it would
+  # demand cleanup for a state that carries no information. Naming it in
+  # the evidence is the honest middle: the user sees it and decides.
+  local leftover
+  leftover="$(printf '%s' "$stat" | awk -F'\t' -v d="$dir" \
+    '($1 == "WORKTREE:" && $4 == d) { n++ } END { if (n) print n }')"
+  printf 'PASS\tclean, unleased, and every joined branch merged into %s' "$trunk"
+  [[ -n "$leftover" ]] && printf '; %s leftover worktree(s) still to prune' "$leftover"
+}
+
+cmd_archive() {
+  local scan=0 dir stat verdict detail
+  while [[ "${1:-}" == --* ]]; do
+    case "$1" in
+      --scan)
+        scan=1
+        shift
+        ;;
+      *) triage_fail BAD_ARGS "unknown flag '$1' — usage: triage.sh archive --scan | triage.sh archive <run-dir>" ;;
+    esac
+  done
+  triage_resolve_repo
+  stat="$(collect_status)"
+
+  if [[ "$scan" -eq 1 ]]; then
+    [[ -z "${1:-}" ]] || triage_fail BAD_ARGS "archive --scan takes no run directory"
+    local spec
+    for spec in "$repo_root/.orca"/*/spec.md; do
+      [[ -f "$spec" ]] || continue
+      dir="$(dirname "$spec")"
+      case "$(basename "$dir")" in *-proto-*) continue ;; esac
+      [[ -f "$dir/report.md" ]] || continue
+      if is_archived "$dir"; then
+        printf 'ARCHIVED:\t%s\n' "$dir"
+        continue
+      fi
+      IFS=$'\t' read -r verdict detail < <(archive_gate "$dir" "$stat")
+      if [[ "$verdict" == PASS ]]; then
+        printf 'ARCHIVABLE:\t%s\t%s\n' "$dir" "$detail"
+      else
+        printf 'KEPT:\t%s\t%s\t%s\n' "$dir" "$verdict" "$detail"
+      fi
+    done
+    exit 0
+  fi
+
+  dir="${1:-}"
+  [[ -n "$dir" ]] || triage_fail BAD_ARGS "usage: triage.sh archive --scan | triage.sh archive <run-dir>"
+  [[ -d "$dir" ]] || triage_fail NO_RUN_DIR "not a directory: $dir"
+  if is_archived "$dir"; then
+    # Idempotent: re-archiving an archived run is a no-op, not a failure.
+    printf 'ARCHIVED:\t%s\n' "$dir"
+    exit 0
+  fi
+  # The gate compares against the status join's PHYSICAL absolute paths,
+  # so a relative or symlinked argument must be canonicalized first — a
+  # bare `.orca/<run>` would otherwise match no branch line and archive a
+  # run whose deliverable is still unlanded. The echoed path stays the
+  # caller's own, like claim/release.
+  local gate_dir
+  gate_dir="$(cd "$dir" && pwd -P)" || triage_fail NO_RUN_DIR "cannot resolve: $dir"
+  IFS=$'\t' read -r verdict detail < <(archive_gate "$gate_dir" "$stat")
+  [[ "$verdict" == PASS ]] || triage_fail "$verdict" "refusing to archive $dir: $detail"
+  # The marker is the whole mechanism: no move, no rewrite, nothing the
+  # run's own artifacts or the status join can notice. Reversible with
+  # `unarchive`, or by deleting one file by hand.
+  printf 'archived=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" >"$dir/archived"
+  printf 'ARCHIVED:\t%s\n' "$dir"
+  exit 0
+}
+
+cmd_unarchive() {
+  local dir="${1:-}"
+  [[ -n "$dir" ]] || triage_fail BAD_ARGS "usage: triage.sh unarchive <run-dir>"
+  [[ -d "$dir" ]] || triage_fail NO_RUN_DIR "not a directory: $dir"
+  rm -f "$dir/archived" 2>/dev/null
+  printf 'UNARCHIVED:\t%s\n' "$dir"
+  exit 0
+}
+
 # ---- snapshot: the combined call, the fragment match, the action list ---
 
 emit_run_match() { # <fragment> <discover-output>
   local frag="$1" disc="$2" tag dir rest matches="" candidates=""
   while IFS=$'\t' read -r tag dir rest; do
-    case "$tag" in RUN: | DONE:) ;; *) continue ;; esac
+    # ARCHIVED: runs stay addressable by fragment — retirement removes a
+    # run from the routing, not from the user's vocabulary.
+    case "$tag" in RUN: | DONE: | ARCHIVED:) ;; *) continue ;; esac
     candidates="$candidates$dir"$'\n'
     case "$(basename "$dir")" in
       *"$frag"*) matches="$matches$dir"$'\n' ;;
@@ -815,7 +1018,11 @@ cmd_snapshot() {
         frag="${2:-}"
         shift 2
         ;;
-      *) triage_fail BAD_ARGS "unknown flag '$1' — usage: triage.sh snapshot [--run <fragment>]" ;;
+      --reports)
+        want_reports=1
+        shift
+        ;;
+      *) triage_fail BAD_ARGS "unknown flag '$1' — usage: triage.sh snapshot [--reports] [--run <fragment>]" ;;
     esac
   done
   triage_resolve_repo
@@ -832,10 +1039,12 @@ cmd_snapshot() {
 sub="${1:-}"
 [[ $# -gt 0 ]] && shift
 case "$sub" in
-  discover) cmd_discover ;;
+  discover) cmd_discover "$@" ;;
   status) cmd_status ;;
   snapshot) cmd_snapshot "$@" ;;
+  archive) cmd_archive "$@" ;;
+  unarchive) cmd_unarchive "$@" ;;
   claim) cmd_claim "$@" ;;
   release) cmd_release "$@" ;;
-  *) triage_fail BAD_ARGS "usage: triage.sh discover | status | snapshot [--run <fragment>] | claim [--steal] [--runid <id>] <run-dir> <note> | release <run-dir>" ;;
+  *) triage_fail BAD_ARGS "usage: triage.sh discover [--reports] | status | snapshot [--reports] [--run <fragment>] | archive --scan | archive <run-dir> | unarchive <run-dir> | claim [--steal] [--runid <id>] <run-dir> <note> | release <run-dir>" ;;
 esac

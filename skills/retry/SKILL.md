@@ -24,8 +24,8 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh triage discover
 Read the `DONE:` lines — finished feature runs, oldest first, each tagged `clean`, `leftovers`, or `unknown` from its report's `## Blocked` section. (`FAIL: NOT_GIT` means there is nothing here to retry; say so and stop.)
 
 - **No `DONE:` lines** — nothing has finished. If a `RUN: <dir> interrupted` line exists, the user's real move is the resume: say the run is interrupted, not finished-partial, and point at `/orca:feature`, which discovers it in triage. Otherwise point at `/orca:feature` to run something first. Stop either way.
-- **An argument** — match it against the `DONE:` run directories (name or slug fragment). One match → that run. No match → a loud miss: list the finished runs, never guess.
-- **No argument** — default to the newest (last `DONE:` line). When several runs finished, name the chosen one and list the others in one line — the audit verdict in Step 2 restates the choice, so a wrong default is visible and cheap to correct.
+- **An argument** — match it against the `DONE:` run directories (name or slug fragment). One match → that run. No match → a loud miss: list the finished runs, never guess. Check the `ARCHIVED:` lines before declaring the miss: a run retired by `/orca:archive` passed a gate that required nothing blocked and everything landed, so there is nothing here to retry — say that, rather than reporting the run as not found.
+- **No argument** — default to the newest (last `DONE:` line); archived runs are never candidates. When several runs finished, name the chosen one and list the others in one line — the audit verdict in Step 2 restates the choice, so a wrong default is visible and cheap to correct.
 
 **The chosen run is `clean`** — nothing to retry: every item merged or was cut. Say so; if its report's Follow-ups section lists anything, point at `/orca:followup` for those. Stop. An `unknown` tag proceeds — the marker is routing sugar and the audit is the real check.
 

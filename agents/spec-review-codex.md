@@ -97,9 +97,18 @@ the amendment violates or a codebase fact — a file, symbol, or
 structure — that refutes the amendment. Taste is not a finding.
 
 Hunt for, exhaustively — and nothing else:
-1. Amend discipline: the amendment mutating a delivered item's
-   contract, contradicting a ## Decisions entry, claiming files a
-   delivered item's seams own, or breaking the W-id sequence.
+1. Amend discipline: the amendment SILENTLY mutating a delivered
+   item's contract, contradicting a ## Decisions entry, granting two
+   new items the same files, or breaking the W-id sequence. The
+   amendment's stated intent carries the same authority a brief does:
+   a supersession it explicitly calls for — a delivered behavior the
+   user asked to change, named as such — is authorized, not a finding.
+   The finding is the UNSTATED mutation: a delivered contract the
+   amendment contradicts without saying so, or collateral rewrites
+   beyond what the stated intent covers. Delivered items' file
+   ownership lapsed at delivery — ownership polices collisions between
+   items that run concurrently, and new items owning delivered files
+   is how iteration works, never a finding in itself.
 2. Decomposition soundness: missing work items, items that cannot be
    implemented independently as split, seams the delivered code
    fights — the defect class the round cannot repair once launched,

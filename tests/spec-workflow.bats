@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 # spec.workflow.js — launch-time arg validation and the gated
-# spec → review → revise sequence's return shape, run through the
-# tests/run-workflow.js harness (host-style wrapping, stubbed agent()).
+# spec → review → revise sequence's return shape (one review, one final
+# revise round, no re-review), run through the tests/run-workflow.js
+# harness (host-style wrapping, stubbed agent()).
 
 load helpers
 
@@ -51,22 +52,20 @@ CLEAN='{"written":true,"total":0,"criticalHigh":0,"reason":""}'
   [[ "$output" == *'args.amendPath must be an absolute path'* ]]
 }
 
-@test "amend round: spec-amend artifact names and the Amendment path line in the review message" {
+@test "amend round: spec-amend artifact name and the Amendment path line in the review message" {
   run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"codex","amendPath":"/run/spec.amendment.md"}' \
     '["s",'"$CLEAN"']'
   [[ "$output" == *'Amendment path: /run/spec.amendment.md'* ]]
   [[ "$output" == *'/run/reviews/spec-amend-codex.json'* ]]
-  [[ "$output" == *'/run/reviews/spec-amend-codex.round1.json'* ]]
   # the original run's spec-review artifact is never named
   [[ "$output" != *'/run/reviews/spec-codex.json'* ]]
 }
 
 @test "amend round: the revise prompt rewrites the amendment file, not spec.md" {
   run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"claude","amendPath":"/run/spec.amendment.md"}' \
-    '["s1",{"written":true,"total":1,"criticalHigh":1,"reason":""},"s2",'"$CLEAN"']'
+    '["s1",{"written":true,"total":1,"criticalHigh":1,"reason":""},"s2"]'
   [[ "$output" == *'Rewrite /run/spec.amendment.md in place'* ]]
   [[ "$output" != *'Rewrite /run/spec.md in place'* ]]
-  [[ "$output" == *'/run/reviews/spec-amend-claude.round2.json'* ]]
 }
 
 @test "no amendPath: the fresh-spec path never mentions an amendment" {
@@ -80,16 +79,15 @@ CLEAN='{"written":true,"total":0,"criticalHigh":0,"reason":""}'
   [[ "$output" == *'"result":{"summary":null,"died":true}'* ]]
 }
 
-@test "clean round 1: one review round, no revise, review shape on the return" {
+@test "clean review: no revise, review shape on the return" {
   run_wf "$ARGS" '["spec summary",'"$CLEAN"']'
   [[ "$output" == *'"summary":"spec summary","died":false'* ]]
-  [[ "$output" == *'"review":{"written":true,"total":0,"criticalHigh":0,"rounds":1,"reason":""}'* ]]
+  [[ "$output" == *'"review":{"written":true,"total":0,"criticalHigh":0,"revised":false,"reason":""}'* ]]
   # exactly two agent calls: spec, then the codex spec reviewer with the
-  # artifact and round-1 archive paths in its task message
-  [[ "$output" != *'spec-review#2'* ]]
-  [[ "$output" == *'"agentType":"orca:spec-review-codex"'* ]]
+  # artifact path in its task message
+  [ "$(grep -o '"agentType":"orca:spec-review-codex"' <<<"$output" | wc -l | tr -d ' ')" -eq 1 ]
+  [[ "$output" != *'spec-revise'* ]]
   [[ "$output" == *'/run/reviews/spec-codex.json'* ]]
-  [[ "$output" == *'/run/reviews/spec-codex.round1.json'* ]]
 }
 
 @test "reviewer claude selects the claude spec reviewer and its artifact paths" {
@@ -106,47 +104,36 @@ CLEAN='{"written":true,"total":0,"criticalHigh":0,"reason":""}'
   [ "$(grep -o '"model":"opus"' <<<"$output" | wc -l | tr -d ' ')" -eq 1 ]
 }
 
-@test "Critical/High findings drive one revise spawn and a round-2 re-review" {
+@test "Critical/High findings drive one revise spawn whose output is final — no re-review" {
   run_wf "$ARGS" \
-    '["s1",{"written":true,"total":3,"criticalHigh":2,"reason":""},"s2",{"written":true,"total":1,"criticalHigh":0,"reason":""}]'
+    '["s1",{"written":true,"total":3,"criticalHigh":2,"reason":""},"s2"]'
   [[ "$output" == *'"summary":"s2","died":false'* ]]
-  [[ "$output" == *'"review":{"written":true,"total":1,"criticalHigh":0,"rounds":2,"reason":""}'* ]]
-  # the revise spawn is an orca:spec re-spawn carrying the findings path
+  [[ "$output" == *'"review":{"written":true,"total":3,"criticalHigh":2,"revised":true,"reason":""}'* ]]
+  # the revise spawn is an orca:spec re-spawn carrying the findings path,
+  # and the one reviewer call is the only one — the revise output launches
   [[ "$output" == *'"label":"spec-revise","phase":"Revise"'* ]]
   [[ "$output" == *'REVISE ROUND'* ]]
-  [[ "$output" == *'/run/reviews/spec-codex.round2.json'* ]]
-}
-
-@test "gate exhausted: round 2 still Critical/High comes back written with the counts" {
-  run_wf "$ARGS" \
-    '["s1",{"written":true,"total":2,"criticalHigh":2,"reason":""},"s2",{"written":true,"total":1,"criticalHigh":1,"reason":""}]'
-  [[ "$output" == *'"review":{"written":true,"total":1,"criticalHigh":1,"rounds":2,"reason":""}'* ]]
+  [[ "$output" == *'/run/reviews/spec-codex.json'* ]]
+  [ "$(grep -o '"agentType":"orca:spec-review-codex"' <<<"$output" | wc -l | tr -d ' ')" -eq 1 ]
 }
 
 @test "fail open: a dead then written:false reviewer returns written:false with the reason" {
   run_wf "$ARGS" '["s",{"die":true},{"written":false,"total":0,"criticalHigh":0,"reason":"boom"}]'
   [[ "$output" == *'"summary":"s","died":false'* ]]
-  [[ "$output" == *'"review":{"written":false,"total":0,"criticalHigh":0,"rounds":0,"reason":"boom"}'* ]]
-  [[ "$output" == *'spec-review#1~retry'* ]]
+  [[ "$output" == *'"review":{"written":false,"total":0,"criticalHigh":0,"revised":false,"reason":"boom"}'* ]]
+  [[ "$output" == *'spec-review~retry'* ]]
 }
 
 @test "an impossible count (criticalHigh > total) is retried like written:false" {
   run_wf "$ARGS" \
     '["s",{"written":true,"total":0,"criticalHigh":2,"reason":""},'"$CLEAN"']'
-  [[ "$output" == *'"review":{"written":true,"total":0,"criticalHigh":0,"rounds":1,"reason":""}'* ]]
-  [[ "$output" == *'spec-review#1~retry'* ]]
+  [[ "$output" == *'"review":{"written":true,"total":0,"criticalHigh":0,"revised":false,"reason":""}'* ]]
+  [[ "$output" == *'spec-review~retry'* ]]
 }
 
-@test "a dead revise spawn leaves the round-1 findings standing (written, rounds:1)" {
+@test "a dead revise spawn leaves the findings standing (written, revised:false)" {
   run_wf "$ARGS" \
     '["s1",{"written":true,"total":2,"criticalHigh":1,"reason":""},{"die":true}]'
   [[ "$output" == *'"summary":"s1","died":false'* ]]
-  [[ "$output" == *'"review":{"written":true,"total":2,"criticalHigh":1,"rounds":1,"reason":"revise agent was skipped or died — the round-1 findings stand unaddressed"}'* ]]
-}
-
-@test "a failed re-review after a revise fails open with rounds:1" {
-  run_wf "$ARGS" \
-    '["s1",{"written":true,"total":2,"criticalHigh":1,"reason":""},"s2",{"die":true},{"die":true}]'
-  [[ "$output" == *'"summary":"s2","died":false'* ]]
-  [[ "$output" == *'"review":{"written":false,"total":0,"criticalHigh":0,"rounds":1,"reason":"revise round ran; the re-review failed: review agent was skipped or died"}'* ]]
+  [[ "$output" == *'"review":{"written":true,"total":2,"criticalHigh":1,"revised":false,"reason":"revise agent was skipped or died — the findings stand unaddressed"}'* ]]
 }

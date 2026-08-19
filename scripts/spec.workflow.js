@@ -13,11 +13,12 @@
 // same codex-or-claude selection the work loop uses — reads brief and spec
 // together against a clean checkout of the codebase and writes a findings
 // artifact. Critical/High findings trigger exactly one revise round (an
-// orca:spec re-spawn over the current spec plus the findings) followed by
-// one re-review; Medium/Low never block. The review fails OPEN: a courier
-// that cannot complete after a retry never bricks the run — the skill
-// relays the failure as one-way status and every downstream gate still
-// stands.
+// orca:spec re-spawn over the current spec plus the findings) whose output
+// is final: the revised spec proceeds with no re-review and no further
+// gate — the item reviews and integration verification are the backstop.
+// Medium/Low never block. The review fails OPEN: a courier that cannot
+// complete after a retry never bricks the run — the skill relays the
+// failure as one-way status and every downstream gate still stands.
 //
 // args: {
 //   prompt          the complete task message for the orca:spec agent,
@@ -44,12 +45,12 @@
 //                   delivered spec instead of authoring <runDir>/spec.md.
 //                   When set: the revise prompt's hardcoded lines point at
 //                   <amendPath> ("rewrite <amendPath> in place") instead of
-//                   <runDir>/spec.md; the review spawns' task message gains
+//                   <runDir>/spec.md; the review spawn's task message gains
 //                   an `Amendment path: <amendPath>` line; and the review
-//                   artifact base becomes spec-amend-<reviewer> (+ round
-//                   archives), never clobbering the original run's spec
-//                   review. When absent, the fresh-spec path is
-//                   byte-identical to before the arg existed.
+//                   artifact becomes spec-amend-<reviewer>.json, never
+//                   clobbering the original run's spec review. When absent,
+//                   the fresh-spec path is byte-identical to before the arg
+//                   existed.
 // }
 //
 // Return: { summary, died, review } —
@@ -57,18 +58,20 @@
 //            revise round ran), or null with died: true when the spec agent
 //            was skipped or died on a terminal API error before anything
 //            else ran (review is absent in that one case)
-//   review   { written, total, criticalHigh, rounds, reason }
-//            written      whether the latest completed review round
-//                         produced an artifact (false = the review failed
-//                         open; the counts are 0 and reason names why)
-//            total        finding count from the latest written round
-//            criticalHigh Critical/High count from that round — > 0 after
-//                         rounds 2 (or after a dead revise spawn) is the
-//                         skill's surface-and-stop gate
-//            rounds       written review rounds completed (0-2)
-//            reason       '' on a written round with nothing to flag;
-//                         otherwise one line (fail-open cause, or a revise
-//                         spawn that died leaving round-1 findings standing)
+//   review   { written, total, criticalHigh, revised, reason }
+//            written      whether the review produced an artifact (false =
+//                         the review failed open; the counts are 0 and
+//                         reason names why)
+//            total        finding count from the written artifact
+//            criticalHigh Critical/High count from the artifact
+//            revised      whether the revise round ran to completion —
+//                         criticalHigh > 0 with revised: false means the
+//                         revise spawn died and the findings stand
+//                         unaddressed: the skill's surface-and-stop gate.
+//                         With revised: true the counts are what the
+//                         revision folded in, never a still-standing gate
+//            reason       '' when nothing needs relaying; otherwise one
+//                         line (fail-open cause, or the dead revise spawn)
 //
 // No resume plumbing, deliberately: the whole stage is cheap to redo. An
 // interrupted spec stage relaunches fresh; the runId is throwaway and is
@@ -76,11 +79,11 @@
 
 export const meta = {
   name: 'orca-spec',
-  description: "Author the run's spec from the confirmed brief, then adversarially review it against brief and codebase — one gated revise round",
+  description: "Author the run's spec from the confirmed brief, then adversarially review it against brief and codebase — one final revise round on Critical/High findings",
   phases: [
     { title: 'Spec', detail: 'orca:spec authors spec.md from the brief' },
     { title: 'Review', detail: 'independent reviewer reads brief + spec against a clean checkout' },
-    { title: 'Revise', detail: 'one orca:spec re-spawn on Critical/High findings, then a re-review' },
+    { title: 'Revise', detail: 'one orca:spec re-spawn folds Critical/High findings in — its output launches' },
   ],
 }
 
@@ -148,28 +151,27 @@ const REVIEW = { type: 'object', additionalProperties: false, required: ['writte
     reason: { type: 'string' } } }
 
 const reviewAgentType = `orca:spec-review-${reviewer}`
-// An amend round's review artifacts get their own base name so they never
-// clobber the original run's spec review; across iteration rounds the
-// artifact is latest-wins, matching report.md's rewrite posture.
-const artifactBase = amendPath ? `spec-amend-${reviewer}` : `spec-${reviewer}`
-const artifact = `${runDir}/reviews/${artifactBase}.json`
+// An amend round's review artifact gets its own name so it never clobbers
+// the original run's spec review; across iteration rounds (and checkpoint
+// re-spawns) the artifact is latest-wins, matching report.md's rewrite
+// posture.
+const artifact = `${runDir}/reviews/${amendPath ? `spec-amend-${reviewer}` : `spec-${reviewer}`}.json`
 
-// One review round: two workflow-level attempts on top of the agent's
+// The one review: two workflow-level attempts on top of the agent's
 // internal retries; the returned counts never pass the impossible-count
 // check unexamined (trusting {total: 0, criticalHigh: 2} would misgate the
-// revise round). A round that cannot complete returns written:false with
+// revise round). A review that cannot complete returns written:false with
 // the last reason — the FAIL-OPEN branch, not an error: a dead reviewer
 // must never brick a feature run, and every downstream gate still stands.
-const review = async (round) => {
-  const archive = `${runDir}/reviews/${artifactBase}.round${round}.json`
+const review = async () => {
   let lastReason
   for (let attempt = 1; attempt <= 2; attempt++) {
     const r = await agent(
       [`Review worktree: ${reviewWorktree}`, `Run directory: ${runDir}`,
        ...(amendPath ? [`Amendment path: ${amendPath}`] : []),
-       `Artifact path: ${artifact}`, `Round archive path: ${archive}`].join('\n'),
+       `Artifact path: ${artifact}`].join('\n'),
       { agentType: reviewAgentType, schema: REVIEW,
-        label: `spec-review#${round}${attempt > 1 ? '~retry' : ''}`, phase: 'Review' })
+        label: `spec-review${attempt > 1 ? '~retry' : ''}`, phase: 'Review' })
     if (r === null || r === undefined) { lastReason = 'review agent was skipped or died'; continue }
     if (!r.written) { lastReason = r.reason || 'review agent reported written=false with no reason'; continue }
     if (r.criticalHigh > r.total) {
@@ -181,22 +183,25 @@ const review = async (round) => {
   return { written: false, reason: lastReason }
 }
 
-const r1 = await review(1)
+const r1 = await review()
 if (!r1.written) {
   log(`spec review failed open: ${r1.reason}`)
   return { summary, died: false,
-    review: { written: false, total: 0, criticalHigh: 0, rounds: 0, reason: r1.reason } }
+    review: { written: false, total: 0, criticalHigh: 0, revised: false, reason: r1.reason } }
 }
 if (r1.criticalHigh === 0)
   return { summary, died: false,
-    review: { written: true, total: r1.total, criticalHigh: 0, rounds: 1, reason: '' } }
+    review: { written: true, total: r1.total, criticalHigh: 0, revised: false, reason: '' } }
 
 // Critical/High findings: exactly one revise round — an orca:spec re-spawn
 // carrying the original task message plus the revise contract (current spec
-// and findings artifact by path; the agent reads both itself), then one
-// re-review. The revise prompt reuses the original prompt verbatim so the
-// agent still holds the brief, the repo root, and the project context.
-log(`spec review round 1: ${r1.total} finding(s), ${r1.criticalHigh} Critical/High — revising`)
+// and findings artifact by path; the agent reads both itself). Its output
+// is final: no re-review — a second adversarial pass is blind to the first
+// and churns on fresh or re-raised findings instead of converging, and the
+// item reviews and integration verification still gate everything built
+// over the spec. The revise prompt reuses the original prompt verbatim so
+// the agent still holds the brief, the repo root, and the project context.
+log(`spec review: ${r1.total} finding(s), ${r1.criticalHigh} Critical/High — revising`)
 const reviseTarget = amendPath || `${runDir}/spec.md`
 const revisePrompt = [
   prompt,
@@ -207,25 +212,19 @@ const revisePrompt = [
   `The current spec is at ${reviseTarget} — read it first.`,
   `An independent adversarial review of that spec against the brief and the codebase found ${r1.criticalHigh} Critical/High finding(s). The findings artifact is at ${artifact} — read it.`,
   'Address or explicitly rebut each Critical/High finding, exactly as the checkpoint\'s requested changes are treated: a rebuttal is a `Risks & Open Questions` entry naming the finding and why it stands. Never silently drop one. Medium/Low findings are advisory — adopt what improves the spec.',
+  'Your rewrite is final: it is not re-reviewed, and the run launches over it.',
   `Rewrite ${reviseTarget} in place under the same structure, then return the same 4-6 sentence summary, noting what the revision changed.`,
 ].join('\n')
 const reviseSummary = await agent(revisePrompt, specOpts('spec-revise', 'Revise'))
 if (reviseSummary === null || reviseSummary === undefined) {
-  // A dead revise spawn leaves the round-1 findings standing: report them
-  // written so the skill's surface-and-stop gate fires rather than
+  // A dead revise spawn leaves the findings standing: report them with
+  // revised:false so the skill's surface-and-stop gate fires rather than
   // launching against a spec known to be wrong.
-  log('spec revise agent was skipped or died — round-1 findings stand')
+  log('spec revise agent was skipped or died — the findings stand')
   return { summary, died: false,
-    review: { written: true, total: r1.total, criticalHigh: r1.criticalHigh, rounds: 1,
-      reason: 'revise agent was skipped or died — the round-1 findings stand unaddressed' } }
+    review: { written: true, total: r1.total, criticalHigh: r1.criticalHigh, revised: false,
+      reason: 'revise agent was skipped or died — the findings stand unaddressed' } }
 }
 
-const r2 = await review(2)
-if (!r2.written) {
-  log(`spec re-review failed open after the revise round: ${r2.reason}`)
-  return { summary: reviseSummary, died: false,
-    review: { written: false, total: 0, criticalHigh: 0, rounds: 1,
-      reason: `revise round ran; the re-review failed: ${r2.reason}` } }
-}
 return { summary: reviseSummary, died: false,
-  review: { written: true, total: r2.total, criticalHigh: r2.criticalHigh, rounds: 2, reason: '' } }
+  review: { written: true, total: r1.total, criticalHigh: r1.criticalHigh, revised: true, reason: '' } }

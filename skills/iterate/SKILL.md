@@ -77,14 +77,15 @@ git worktree add --detach <repo-root>/orca-<slug>-specreview feature/<slug>
 
 No branch, no `secrets place` — clean by construction. Every spec-workflow invocation is bracketed by this create and the matching remove.
 
-**Invoke the Workflow tool** with `scriptPath: "${CLAUDE_PLUGIN_ROOT}/scripts/spec.workflow.js"` and `args: { prompt, model?, effort?, runDir, reviewWorktree, reviewer, amendPath }` — `model`/`effort` from the held `agents.spec` block, each passed only when set; `runDir`, `reviewWorktree`, and `amendPath` (`<run-dir>/spec.amendment.md`) absolute; `reviewer` the held value. It runs in the background — wait for its task notification, never fabricate the result; the runId is throwaway, never persisted. The review artifacts land as `reviews/spec-amend-<reviewer>.json` plus round archives — the original run's spec review is never clobbered; across iteration rounds the artifact is latest-wins, like `report.md`.
+**Invoke the Workflow tool** with `scriptPath: "${CLAUDE_PLUGIN_ROOT}/scripts/spec.workflow.js"` and `args: { prompt, model?, effort?, runDir, reviewWorktree, reviewer, amendPath }` — `model`/`effort` from the held `agents.spec` block, each passed only when set; `runDir`, `reviewWorktree`, and `amendPath` (`<run-dir>/spec.amendment.md`) absolute; `reviewer` the held value. It runs in the background — wait for its task notification, never fabricate the result; the runId is throwaway, never persisted. The review artifact lands as `reviews/spec-amend-<reviewer>.json` — the original run's spec review is never clobbered; across iteration rounds it is latest-wins, like `report.md`.
 
 It returns `{ summary, died, review }`. **Remove the review worktree first** — `git worktree remove <repo-root>/orca-<slug>-specreview` — on every path out. Then branch on the result, feature's gate semantics verbatim:
 
 - `died: true` → relaunch once, re-creating the worktree first. Died twice → the **hand-authoring fallback**: author the items yourself from the confirmed change, exactly as the amend round would have — table rows continuing the W-id sequence with title, file ownership, deps, and a one-line acceptance criterion each — say plainly that the spec stage was skipped, and proceed to Step 4 with these items in place of the amendment file.
-- `review.written` with `criticalHigh > 0` → the gate is exhausted and findings still stand. Surface them, pointing at `<run-dir>/reviews/spec-amend-<reviewer>.json` as the evidence, and stop — cheap by construction: nothing has been written yet, the run still reads `DONE`, no report archived, `spec.md` untouched.
+- `review.written` with `criticalHigh > 0` and `revised: true` → the revise round folded the findings into the amendment, and its output proceeds — no re-review; carry the counts into the closing status line.
+- `review.written` with `criticalHigh > 0` and `revised: false` → the revise spawn died and the findings stand unaddressed. Surface them, pointing at `<run-dir>/reviews/spec-amend-<reviewer>.json` as the evidence, and stop — cheap by construction: nothing has been written yet, the run still reads `DONE`, no report archived, `spec.md` untouched.
 - `review.written: false` → the review failed open; relay `review.reason` as a one-way status line and proceed — the amendment stands unreviewed, and every downstream gate still stands.
-- otherwise (`criticalHigh: 0`) → clean, or revised clean — proceed.
+- otherwise (`criticalHigh: 0`) → clean — proceed.
 
 Close with one one-way status line: what the amendment specced ("specced as W7–W9") and the review outcome (reviewer, finding counts, whether a revise round ran — or that the review failed open).
 

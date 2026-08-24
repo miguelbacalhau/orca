@@ -26,5 +26,5 @@ A Claude Code plugin for autonomous multi-agent development: `/orca:feature` tak
 
 - Commit directly to `main` — no feature branches in this repo.
 - **Never edit the `version` in `plugin.json`.** CI (`.github/workflows/version-bump.yml`) bumps it on every push to main that touches shipped files, sized by Conventional Commits. Pull after pushing to pick up the bot's bump commit.
-- Use Conventional Commit messages (`feat:`, `fix:`, `chore:`, …) — CI sizes version bumps from them.
+- Use Conventional Commit messages (`feat:`, `fix:`, `chore:`, …) — CI sizes version bumps from them. Never reference Claude, AI, or co-authorship trailers in commit messages.
 - When changing shell scripts or workflows, run the relevant `tests/*.bats` file; add coverage for new verbs or lib functions.

@@ -40,9 +40,6 @@
 //                diagnose) are applied here, the feature stages are validated
 //                here and applied by the nested work loop, which receives the
 //                block verbatim
-//   fixTaskId    optional id of the fix work item's session task (created by
-//                the main conversation before launch under diagnose-and-fix);
-//                threaded into the nested work loop's item for live display
 //   pluginRoot   REQUIRED absolute path of the installed plugin root (the
 //                launching skill substitutes ${CLAUDE_PLUGIN_ROOT} — this
 //                script has no environment to resolve it from). The
@@ -84,7 +81,7 @@ if (typeof parsedArgs === 'string') {
 }
 if (typeof parsedArgs !== 'object' || parsedArgs === null)
   throw new Error(`args must be a JSON object (got ${JSON.stringify(args)}) — pass it as a real object, not a JSON-encoded string`)
-const { runDir, repoRoot, slug, caseDir, scope, hasRepro, workLoopPath, reviewer, fixTaskId } = parsedArgs
+const { runDir, repoRoot, slug, caseDir, scope, hasRepro, workLoopPath, reviewer } = parsedArgs
 for (const [k, v] of Object.entries({ runDir, repoRoot, slug, caseDir, workLoopPath }))
   if (typeof v !== 'string' || !v)
     throw new Error(`args.${k} must be a non-empty string (got ${JSON.stringify(v)})`)
@@ -98,8 +95,6 @@ if (typeof hasRepro !== 'boolean')
   throw new Error(`args.hasRepro must be a boolean (got ${JSON.stringify(hasRepro)})`)
 if (reviewer !== 'codex' && reviewer !== 'claude')
   throw new Error(`args.reviewer must be "codex" or "claude" (got ${JSON.stringify(reviewer)}) — the skill resolves it before launch`)
-if (fixTaskId !== undefined && (typeof fixTaskId !== 'string' || !fixTaskId))
-  throw new Error(`args.fixTaskId, when present, must be a non-empty string (got ${JSON.stringify(fixTaskId)})`)
 // Grammar validation at the deterministic boundary (same posture as
 // work-loop): the slug is interpolated into worktree paths and the
 // bug/<slug>, fix/<slug> refs by every stage — a malformed one must fail
@@ -472,7 +467,6 @@ const verifyOne = async (h, hypPath) => {
     if (/^(UNIGNORED|SKIPPED_EXISTS|SKIPPED_ERROR):/.test(line))
       log(`${h.id}: secrets ${line.replace(/\t/g, ' ')}`)
 
-  const short = h.statement.length > 60 ? `${h.statement.slice(0, 57)}…` : h.statement
   const v = await agent(
     [`Worktree: ${wt}`,
      `Case directory: ${caseDir}`,
@@ -480,10 +474,7 @@ const verifyOne = async (h, hypPath) => {
      `Hypothesis: ${h.id} — ${h.statement}`,
      `Hypotheses file: ${hypPath} — your hypothesis's full entry (causal story, killing evidence, falsification experiment) is there${h.fileId && h.fileId !== h.id ? ` under the id "${h.fileId}"` : ''}.`,
      `Verdict artifact path: ${runDir}/verdicts/${h.id}.json`,
-     `Repro command: ${reproCmd} — run from the worktree root; exit 0 = bug absent, 1-127 = bug present, 125 = cannot test (git-bisect-run compatible).`,
-     // JSON.stringify: a statement containing quotes must not garble the
-     // subject the agent is told to set verbatim.
-     `Status task: as your FIRST action, create one session task via TaskCreate with subject ${JSON.stringify(`${h.id} — ${short}`)}, then set it in_progress via TaskUpdate with activeForm "verifying ${h.id}". Just before returning, TaskUpdate it to completed with subject ${JSON.stringify(`${h.id} — ${short} · `)}<your verdict>. If a call fails or the tools are missing, skip it and proceed; never touch any other task.`]
+     `Repro command: ${reproCmd} — run from the worktree root; exit 0 = bug absent, 1-127 = bug present, 125 = cannot test (git-bisect-run compatible).`]
       .join('\n'),
     tuned('verify', { agentType: 'orca:verify', label: `verify:${h.id}`, phase: 'Verify', schema: VERDICT }))
   if (v === null || v === undefined) return null
@@ -593,7 +584,6 @@ for (let round = 1; round <= 2; round++) {
   phase('Fix')
   const item = { id: fixItemId, title: diag.fixTitle || `fix ${slug}`, deps: [],
     files: Array.isArray(diag.ownedFiles) ? diag.ownedFiles : [] }
-  if (fixTaskId) item.taskId = fixTaskId
   // The revert target for a failed committed attempt: the branch tip before
   // anything landed on it. Journaled, so a resume replays the same sha. The
   // sha is interpolated into the revert command, so it is read through

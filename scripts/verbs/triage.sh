@@ -259,46 +259,6 @@ lease_session_pid() {
   printf '%s' "$pid"
 }
 
-lease_owner_field() { # <owner-file> <key> — the value, verbatim (leading padding kept)
-  sed -n "s/^$2=//p" "$1" 2>/dev/null | head -1
-}
-
-# The LEASE: payload for a run dir: "<verdict>\tpid:<n|->\tsince:<iso|->".
-lease_read() { # <run-dir>
-  local lock="$1/.lock" owner host pid pidstart taken cur
-  if [[ ! -e "$lock" ]]; then
-    printf 'none'
-    return
-  fi
-  owner="$lock/owner"
-  host="$(lease_owner_field "$owner" host)"
-  pid="$(lease_owner_field "$owner" pid)"
-  pidstart="$(lease_owner_field "$owner" pidstart)"
-  taken="$(lease_owner_field "$owner" taken)"
-  if [[ -z "$host" || -z "$pid" ]] || ! [[ "$pid" =~ ^[0-9]+$ ]]; then
-    # A pre-verb prose owner file or a hand-mangled one — nothing testable.
-    printf 'unknown\tpid:%s\tsince:%s' "${pid:--}" "${taken:--}"
-    return
-  fi
-  if [[ "$host" != "$(hostname)" ]]; then
-    printf 'unknown\tpid:%s\tsince:%s' "$pid" "${taken:--}"
-    return
-  fi
-  # kill -0 on another user's pid fails EPERM and reads stale — accepted:
-  # irrelevant on a single-user dev machine.
-  if kill -0 "$pid" 2>/dev/null; then
-    # pidstart is compared VERBATIM, leading padding included — reader and
-    # writer run the identical `ps -o lstart=` and never parse the date.
-    # The match defeats pid reuse inside the bash 3.2 + coreutils envelope.
-    cur="$(ps -o lstart= -p "$pid" 2>/dev/null)"
-    if [[ -n "$pidstart" && "$cur" == "$pidstart" ]]; then
-      printf 'live\tpid:%s\tsince:%s' "$pid" "${taken:--}"
-      return
-    fi
-  fi
-  printf 'stale\tpid:%s\tsince:%s' "$pid" "${taken:--}"
-}
-
 emit_lease() { # <run-dir>
   printf 'LEASE:\t%s\n' "$(lease_read "$1")"
 }

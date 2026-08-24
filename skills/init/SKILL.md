@@ -1,5 +1,5 @@
 ---
-description: Set up a repository's layout for orca runs — the bare-repo-with-worktrees structure with a default-branch worktree that orca:feature's pre-flight requires — plus optional final steps linking the default worktree's agent context (.claude, CLAUDE.md) to the repo root, so sessions started at the root auto-inject the repo's rules and conventions into every stage agent, and seeding the machine-local project context (.orca/map.md and decisions.md). Use when the user wants to prepare a new repository, an existing conventional checkout, or a fresh clone for orca runs, or when the pre-flight's layout gate (BARE_REPO) failed. Layout only: machine and session tooling (Codex CLI, MCP timeout, permissions) is orca:doctor's job. Interactive and consent-per-step — it restructures repositories, so every mutating action is confirmed first. Do not use to write a brief or run a feature.
+description: Set up a repository's layout for orca runs — the bare-repo-with-worktrees structure with a default-branch worktree that orca:feature's pre-flight requires — plus optional final steps linking the default worktree's agent context (.claude, CLAUDE.md) to the repo root, so sessions started at the root auto-inject the repo's rules and conventions into every stage agent, seeding the machine-local project context (.orca/map.md and decisions.md), and offering the orca status line — the live run board rendered by orca.sh statusline. Use when the user wants to prepare a new repository, an existing conventional checkout, or a fresh clone for orca runs, or when the pre-flight's layout gate (BARE_REPO) failed. Layout only: machine and session tooling (Codex CLI, MCP timeout, permissions) is orca:doctor's job. Interactive and consent-per-step — it restructures repositories, so every mutating action is confirmed first. Do not use to write a brief or run a feature.
 args: <path or clone URL, optional>
 user-invocable: true
 disable-model-invocation: true
@@ -142,6 +142,23 @@ Then create `<repo-root>/.orca/decisions.md` yourself, header only, same stamp:
 ```
 
 An empty repository (the new-repository case) has nothing to map — skip the offer and say why.
+
+## Step 6: Offer the orca status line (optional, consented)
+
+A run's live per-item surface is a set of one-word status files under the run directory, written by the stage agents and rendered by the plugin's `statusline` verb as a two-row board — `orca · <slug> · 2/6 merged · 18m` over one cell per work item (`W1 ✓merged  W2 ▸implementing  W4 ⏸W2,W3`). The harness draws it only if the session's `statusLine` setting invokes the verb — a client-side setting a plugin cannot ship, so it is offered here, once per machine, consented like every write.
+
+A session has exactly one `statusLine` command, and orca never clobbers a foreign one. Read the current state from `~/.claude/settings.json` and the project's `.claude/settings.local.json` first:
+
+- **No `statusLine` configured anywhere**: offer to write, merged into the file of the user's choice (global for every project, or the project's `settings.local.json` for just this one):
+
+  ```json
+  "statusLine": { "type": "command", "command": "bash <plugin-root>/scripts/orca.sh statusline", "refreshInterval": 5 }
+  ```
+
+  Substitute `<plugin-root>` with the resolved absolute `${CLAUDE_PLUGIN_ROOT}` — settings files expand no variables. `refreshInterval` is load-bearing, not cosmetic: the event-driven statusLine triggers go quiet exactly when an orca run is in flight (the main session sits blocked on the Workflow tool), so without the interval the board freezes at launch. Caveats to state after writing: settings load at session start — a fresh session before it takes effect — and the command prints nothing except while a run is in flight, so an idle session's status line simply stays empty.
+- **A `statusLine` already configured**: never overwrite and never merge into it. Print the composable one-liner for the user to chain into their own script if they want the board: `bash <plugin-root>/scripts/orca.sh statusline` (substituted) — it prints nothing when no run is active, so appending its output costs an idle session nothing.
+
+`orca:doctor` reports which of the states a session is in, and re-prescribes the block when a plugin update moves the install root out from under a written path.
 
 ## Guidelines
 

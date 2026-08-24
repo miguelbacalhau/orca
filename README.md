@@ -176,7 +176,7 @@ The brief is *what and why*, never *how*: no work breakdown, no interfaces, no f
 1. **One confirmation** of the restated brief (plus trunk-branch confirmation) — this authorizes everything that follows. It runs in full even when the brief was written seconds earlier in the same session: the file, not the conversation, is the authorized intent.
 2. **One optional checkpoint** — only if the brief opted in: review the spec and work breakdown before any code.
 
-After that, nothing asks you anything. Ambiguities resolve against the spec and the doubt rule; what cannot be resolved that way becomes a `blocked` item in the final report, with the options you must choose between recorded. Mid-run, live per-item status shows on the session task list; the outcome lands in `report.md`.
+After that, nothing asks you anything. Ambiguities resolve against the spec and the doubt rule; what cannot be resolved that way becomes a `blocked` item in the final report, with the options you must choose between recorded. Mid-run, live per-item status shows on the orca status line (the board `/orca:init` offers — one stage word per item, written by the stage agents themselves); the outcome lands in `report.md`.
 
 ### `/orca:debug <symptom>`
 
@@ -257,6 +257,8 @@ One-time, consent-per-step setup that makes a repository pass `/orca:feature`'s 
 
 In every case it finishes by **root-linking**: symlinking the default worktree's `.claude` and `CLAUDE.md` at the repo root (`orca.sh init-link`), so a session started at the bare root — where every run worktree lives inside the project directory — auto-injects the checkout's conventions (path-matched `.claude/rules`, nested CLAUDE.mds) into every stage agent.
 
+Optionally — consented like everything else — it offers the **orca status line**: a `statusLine` settings block invoking `orca.sh statusline` on a refresh interval, rendering a live two-row board while a run is in flight (`orca · <slug> · 2/6 merged · 18m` over per-item stage cells) and printing nothing otherwise. An existing status line is never clobbered — you get the composable one-liner to chain instead.
+
 Preconditions for conversion — it stops rather than improvising: a clean tree, no existing linked worktrees, no submodules.
 
 Layout only: machine-gate failures the pre-flight reports (Codex, the MCP timeout) are routed to `/orca:doctor`, not fixed here.
@@ -268,6 +270,7 @@ Interactive, consent-per-step machine and session tooling — the per-machine co
 - **Codex missing or stale** — points you at the official non-npm install (`brew install codex` or the release binaries; never npm). Installing is your action.
 - **Not authenticated** — suggests `codex login` and verifies with `codex login status`. Also yours.
 - **`MCP_TOOL_TIMEOUT` unset** — writes it into a settings `env` block (project or user level, your choice), merged, with the session-restart caveat.
+- **The orca status line** — reports whether your `statusLine` setting is orca's board, absent, or a foreign command; offers the settings block when absent, and never touches a foreign one — you get a composable one-liner (`orca.sh statusline`) to chain into your own script instead.
 
 It is reviewer-aware: with a detected claude reviewer (codex not installed) there is nothing to fix — it says runs will use the Claude reviewer, explains that installing codex enables the stronger cross-model review, and offers to pin either choice via `/orca:config`. With claude pinned and codex present, it notes the codex gates were skipped by choice. A codex gate failing while the reviewer is codex is always a failure to fix — never a silent switch to the other reviewer.
 
@@ -391,6 +394,7 @@ What a repository looks like mid-run (`/orca:init` creates the top three entries
     │   ├── spec.md                    # spec, work breakdown, Decisions log, workflow runId
     │   ├── report.md                  # final run report
     │   ├── merged.tsv                 # one <ID>	<sha> row per landed item — the id-to-commit join audit verifies against git
+    │   ├── status/                    # one-word live stage per item (pending → planning → … → merged/cut/blocked) — the status line board's source
     │   ├── plans/                     # one plan per item, with its Deviations section; <ID>.round*.md archives superseded plans at replan
     │   └── reviews/                   # raw findings JSON per review round, plus comments-<ts>.json archives per addressing round
     └── YYYYMMDD-HHMMSS-bug-<slug>/    # one directory per debug run
@@ -625,6 +629,7 @@ That single invocation shape is the point: **one allowlist entry — `bash */scr
 | `review discover\|open\|probe\|wait\|notes` | The deterministic spine of `/orca:review` — deliverable discovery, editor/terminal resolution, probes, and the launch; the skill converses, the script executes. |
 | `secrets place\|remove` | Links `.orca/secrets/` (the mirror-tree secrets convention) into a worktree as relative symlinks — run by the loops and skills after every `worktree add`, and runnable by hand on your own worktree. |
 | `worktree-item`, `commit-verify`, `merge-finalize` | The relay verbs the work loops spawn per item: the whole worktree-arrival ritual, the commit decision table, and merge finalization — results reported through the `@@ORCA@@` frame. |
+| `statusline` | The live run board for a Claude Code `statusLine` command: reads the session JSON on stdin, finds the live-leased feature run under `.orca`, and renders a two-row board — `orca · <slug> · 2/6 merged · 18m` over per-item stage cells — from the run's `status/` files, `merged.tsv`, and the spec's args line. Fail-soft by contract: no active run prints nothing, a malformed run dir prints what parses, exit is always 0. Offered by `/orca:init`, diagnosed by `/orca:doctor`. |
 | `self-test` | Smoke verb — proves dispatch, lib loading, and the frame path without touching a repository. |
 
 ## License

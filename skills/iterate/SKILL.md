@@ -110,7 +110,7 @@ This is a fresh workflow launch, not a resume, so launch-time config legitimatel
   ```
 
   (no `-b` — the branch exists; typed secrets skips are worth a mention, never a stop).
-- **Fresh status tasks** for the new items only: `TaskCreate` per item, `addBlockedBy` mirroring deps inside the iteration set, ids into each item's `taskId`.
+- **Fresh status files** for the new items only: seed `<run-dir>/status/<id>` with the single word `pending` per new item (create `status/` first if a run from before the status files lacks it); prior items' terminal words stay in place.
 - **Lease, then launch:** claim the run directory (`orca.sh triage claim <run-dir> 'orca iterate skill; slug=<slug>; pre-launch'`), release it immediately before the Workflow call (`triage release <run-dir>` — the workflow takes its own lease at launch), then **invoke the Workflow tool** exactly as feature Step 4 shapes it: same `scriptPath` (`${CLAUDE_PLUGIN_ROOT}/scripts/work-loop.workflow.js`), the same `runDir`, `repoRoot`, `slug`, and `integrationBranch` as the original launch, `items` = **the new items only** (deps pruned to edges inside the iteration set — a dependency on a merged prior item is satisfied and dropped; the launch validators reject unknown ids), the held `reviewer`/`agents` from Step 3, and `pluginRoot`. On a typed `LEASE_HELD` refusal, act on the verdict it names as feature Step 4 does.
 - **Persist the resume handle immediately:** append the new `**Workflow run:** <runId>` / `**Workflow args:** <one-line JSON, exactly as passed>` pair to the end of `spec.md` — triage reads the LAST pair, so an interrupted iteration resumes through `/orca:feature` with the iteration's own workflow, byte-exact.
 

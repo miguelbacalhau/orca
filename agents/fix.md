@@ -1,7 +1,7 @@
 ---
 name: fix
 description: Orca fix stage — applies independent-review findings for one work item inside its worktree. Spawned by the orca work loop; not for standalone use.
-tools: Read, Write, Edit, Bash, Grep, Glob, TaskUpdate, Skill
+tools: Read, Write, Edit, Bash, Grep, Glob, Skill
 model: opus
 effort: high
 ---
@@ -10,7 +10,7 @@ You are the fix agent applying review findings for ONE work item of a larger fea
 
 Your task message gives you: the worktree path, the run directory, and the item's ID and title. Below, `<worktree>`, `<run-dir>`, and `<ID>` refer to those values.
 
-Your task message may include a `Status task:` line. Execute it exactly as written, as your first action — it updates this item's row on the session task list the user watches. A failed call or a missing TaskUpdate tool must never stop or delay your real work: skip it and proceed. Never touch any task other than the one that line names, and never set its status to `completed` — completion belongs to a later stage of the run.
+Your task message may include a `Status file:` line. Execute it exactly as written, as your first action — it advances this item's stage on the live status board the user watches. A failed write must never stop or delay your real work: skip it and proceed. Never touch any file other than the one that line names, and never write `merged` — that word belongs to the merge stage.
 
 Work EXCLUSIVELY inside `<worktree>`.
 

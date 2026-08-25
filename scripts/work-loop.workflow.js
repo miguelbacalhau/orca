@@ -559,18 +559,12 @@ const review = async (id, worktree, round, mode, ownedFiles = []) => {
   await secretsStage('remove', worktree, `secrets-remove:${id}#${round}`)
   const artifact = `${runDir}/reviews/${id}-${reviewer}.json`
   const archive = `${runDir}/reviews/${id}-${reviewer}.round${round}.json`
-  // The integration pseudo-item has no entry in `items`, so the find misses
-  // and the status line stays empty — no special-casing.
-  // The stage word carries no round marker — the statusline renderer derives
-  // it from the count of reviews/<id>-*.json files on disk.
-  const status = stageLine(items.find(i => i.id === id), 'review')
   let lastReason
   for (let attempt = 1; attempt <= 2; attempt++) {
     const call = () => agent(
       [`Worktree: ${worktree}`, `Run directory: ${runDir}`, `Item: ${id}`, `Mode: ${mode}`,
        `Artifact path: ${artifact}`, `Round archive path: ${archive}`,
-       mode === 'item' ? `Owned files: ${ownedFiles.join(', ') || 'the files its plan names'}` : '',
-       status]
+       mode === 'item' ? `Owned files: ${ownedFiles.join(', ') || 'the files its plan names'}` : '']
         .filter(Boolean).join('\n'),
       tuned('review', { agentType: reviewAgentType, schema: REVIEW,
         label: `review:${id}#${round}${attempt > 1 ? '~retry' : ''}`, phase: 'Review' }))
@@ -591,31 +585,6 @@ const review = async (id, worktree, round, mode, ownedFiles = []) => {
   throw new Error(`${reviewer} review did not complete: ${lastReason}`)
 }
 
-// Live per-item display: <runDir>/status/<itemId> holds the item's current
-// stage — one word from the pinned vocabulary (pending, planning,
-// implementing, review, fixing, committing, merging, merged, cut,
-// blocked — <reason>), seeded `pending` by the launching skill and rendered
-// by the statusline verb (scripts/verbs/statusline.sh). The sink is a file
-// because Claude Code 2.1.221 removed the session Task tools from all
-// subagents (see plans/statusline-progress.md); the seam is unchanged: each
-// stage prompt ends with one instruction — computed here, executed as the
-// FIRST action of the agent that is already running, so the board advances
-// with no extra agents. Display-only and fail-soft: the line itself orders
-// the agent to proceed on failure, and an item missing from `items` (the
-// integration pseudo-item) gets no line. Artifacts stay authoritative —
-// renderers trust merged.tsv and the run artifacts over this word.
-const stageLine = (item, stage, extra = '') => {
-  if (!item) return ''
-  // Merge passes its terminal grant as `extra`; every other stage is
-  // mid-pipeline, so its line forbids the terminal word — without the ban,
-  // a stage agent's end-of-work habit marks the item done while later
-  // stages still run.
-  const tail = extra ||
-    ' Never write `merged` — later stages of this item still run; only the merge stage writes that.'
-  return `Status file: as your FIRST action, write the single word \`${stage}\` to ${runDir}/status/${item.id}, ` +
-    `replacing whatever is there. If the write fails, skip it and proceed.${tail}`
-}
-
 // A replan carries a note naming what failed and a distinct label tag; a
 // first-round call passes neither, keeping its prompt and label byte-identical
 // to pre-replan journals so resumes still replay. A retry launch rides the
@@ -628,8 +597,7 @@ const planItem = (i, replanNote = '', labelTag = '') => agent(
    `Integration worktree: ${integrationWt}`,
    contextLine,
    i.retryNote || '',
-   replanNote,
-   stageLine(i, 'planning')].filter(Boolean).join('\n'),
+   replanNote].filter(Boolean).join('\n'),
   tuned('plan', { agentType: 'orca:plan', label: `plan:${i.id}${labelTag}`, phase: 'Plan' }))
 
 // A superseded plan left at plans/<ID>.md reads as finished work to a fresh
@@ -667,13 +635,12 @@ const archivePlan = async (i, tag) => {
 // finished item was reported blocked). Inside quotes the same corruption is
 // inert data — the verb's own b64 decode check rejects it by name.
 const commitItem = async (wt, id, title, base, extraLines = []) => {
-  const status = stageLine(items.find(i => i.id === id), 'committing')
   const titleB64 = b64encode(title)
   let warn = ''
   for (let attempt = 1; attempt <= 2; attempt++) {
     must(await agent(
       [`Worktree: ${wt}`, `Run directory: ${runDir}`, `Item: ${id} — ${title}`, ...extraLines,
-       warn, status]
+       warn]
         .filter(Boolean).join('\n'),
       tuned('commit', { agentType: 'orca:commit', label: `commit:${id}#${attempt}`, phase: 'Merge' })),
       `commit:${id}#${attempt}`)
@@ -736,8 +703,8 @@ const buildItem = async item => {
 
   const impl = must(await agent(
     [`Worktree: ${wt}`, `Run directory: ${runDir}`,
-     `Item: ${item.id} — ${item.title}`, `Owned files: ${item.files.join(', ')}`,
-     stageLine(item, 'implementing')].filter(Boolean).join('\n'),
+     `Item: ${item.id} — ${item.title}`, `Owned files: ${item.files.join(', ')}`]
+      .filter(Boolean).join('\n'),
     tuned('implement', { agentType: 'orca:implement', label: `implement:${item.id}`, phase: 'Build', schema: IMPLEMENT })),
     `implement:${item.id}`)
   // "I could not implement this as specified" is a signal, not noise — without
@@ -755,8 +722,8 @@ const buildItem = async item => {
       // The fixer runs tests — it needs the credentials the review stripped.
       await secretsStage('place', wt, `secrets-place:${item.id}#${round}`)
       must(await agent(
-        [`Worktree: ${wt}`, `Run directory: ${runDir}`, `Item: ${item.id} — ${item.title}`,
-         stageLine(item, 'fixing')].filter(Boolean).join('\n'),
+        [`Worktree: ${wt}`, `Run directory: ${runDir}`, `Item: ${item.id} — ${item.title}`]
+          .filter(Boolean).join('\n'),
         tuned('fix', { agentType: 'orca:fix', label: `fix:${item.id}#${round}`, phase: 'Review' })),
         `fix:${item.id}#${round}`)
       const verdict = await review(item.id, wt, round, 'item', item.files)
@@ -788,10 +755,7 @@ const buildItem = async item => {
     const m = must(await agent(
       [`Integration worktree: ${integrationWt}`, `Run directory: ${runDir}`,
        `Item: ${item.id} — ${item.title}`,
-       `Item branch: ${branch}`, `Integration branch: ${integrationBranch}`,
-       stageLine(item, 'merging', ' After the merge succeeds — only if you will report merged=true — ' +
-         'write the single word `merged` to the same file, replacing its contents; ' +
-         'the same skip-on-failure rule applies.')]
+       `Item branch: ${branch}`, `Integration branch: ${integrationBranch}`]
         .filter(Boolean).join('\n'),
       tuned('merge', { agentType: 'orca:merge', label: `merge:${item.id}`, phase: 'Merge', schema: MERGE })),
       `merge:${item.id}`)

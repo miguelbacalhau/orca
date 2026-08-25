@@ -313,9 +313,8 @@ is_banned() { # <text> — exit 0 iff the text trips the attribution regex
 # The read side of the per-run lease (atomic mkdir <run-dir>/.lock with
 # a machine-readable owner file inside). Writing — claim, release,
 # steal, and the pid-capture rule — lives solely in verbs/triage.sh,
-# the lease's single home; the reader lives here because triage and the
-# statusline renderer both need the verdict, and the statusline hot
-# path must stay too cheap to shell out to another verb.
+# the lease's single home; the reader lives here so any verb needing
+# the verdict shares one implementation.
 lease_owner_field() { # <owner-file> <key> — the value, verbatim (leading padding kept)
   sed -n "s/^$2=//p" "$1" 2>/dev/null | head -1
 }

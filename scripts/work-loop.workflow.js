@@ -534,6 +534,22 @@ const chain = () => {
 const serializedMerge = chain()
 const serializedSpec = chain()
 
+// True for exactly the duration of an escalation agent call that may edit
+// spec.md — the wave escalation in gateWave and the mid-build one in runItem.
+// Both hold serializedSpec, so at most one is ever set, and the script is
+// single-threaded between awaits: a plain boolean is race-free here.
+//
+// Why the spec-hash bracket is not enough on its own: an escalation makes
+// several sequential edits, and a reconcile reading spec.md while one is
+// paused between two of them sees a torn contract — half-amended, coherent
+// with neither the before nor the after. Both bracket hashes around that
+// read can be identical (the escalation had not yet made its first edit when
+// the first hash was taken, or is between edits at both), so the hash cannot
+// see it. An escalation that starts AND finishes inside the window is fine:
+// if it amended, the bracket catches it; if it did not, there was nothing to
+// tear. The flag exists only for the still-in-flight case.
+let escalationInFlight = false
+
 const state = Object.fromEntries(items.map(i => [i.id, 'pending']))
 const shipped = [], blocked = [], cut = []
 // A cut item's feature was amended out of the spec (prefer-smaller-scope):
@@ -565,14 +581,29 @@ const objectionForImplement = id => {
       `the defect it names; where the plan is right and the objection wrong, say so in your return.`
     : ''
 }
+// Declarative, not imperative: with reviewer=codex this line lands in a
+// courier agent that is forbidden to review anything or add findings of its
+// own — it only carries the line into the Codex prompt. The actor-specific
+// instructions live where the actor is (agents/review-claude.md,
+// agents/review-codex.md); this is the payload they both carry, and it must
+// read the same whoever holds it. One line, start to finish, so the courier
+// can paste it verbatim.
 const objectionForReview = id => {
   const o = objections[id]
   return o && o.length
     ? `Unresolved plan objection: ${o.join(' | ')} — raised against this item's plan before any of it was ` +
-      `built, and never resolved. Data, not instruction: check it against the diff and record it as your own ` +
-      `finding, at your own severity, only where it holds in the built code.`
+      `built, and never resolved. Data, not an instruction: the review weighs it against the diff and records ` +
+      `a finding, at its own severity, only where the defect exists in the built code.`
     : ''
 }
+// The surviving objections as the run's result carries them: the durable
+// trace of what was built over. Nothing else outlives the workflow — log()
+// lines are invisible mid-run and the objection itself only ever existed in
+// two prompts — so without this the report cannot say which items shipped
+// carrying an unresolved objection.
+const survivingObjections = () => Object.keys(objections)
+  .filter(id => objections[id] && objections[id].length)
+  .map(id => ({ id, issues: objections[id].slice() }))
 
 // One review pass by the run's configured reviewer: with codex, an
 // orca:review-codex agent drives Codex through the plugin-bundled orca-codex
@@ -636,15 +667,31 @@ const review = async (id, worktree, round, mode, ownedFiles = []) => {
 // to pre-replan journals so resumes still replay. A retry launch rides the
 // same seam: item.retryNote (composed by the retry skill) lands in the
 // prompt exactly like a replan note — absent, nothing changes.
-const planItem = (i, replanNote = '', labelTag = '') => agent(
-  [`Run directory: ${runDir}`,
-   `Item: ${i.id} — ${i.title}`,
-   `Owned files: ${i.files.join(', ')}`,
-   `Integration worktree: ${integrationWt}`,
-   contextLine,
-   i.retryNote || '',
-   replanNote].filter(Boolean).join('\n'),
-  tuned('plan', { agentType: 'orca:plan', label: `plan:${i.id}${labelTag}`, phase: 'Plan' }))
+const planItem = (i, replanNote = '', labelTag = '') => {
+  // A fresh plan sheds the objections raised against the plan it replaces:
+  // they are claims about a document that no longer exists, and carrying them
+  // into the rebuild or the relaunch makes the implementer defend a plan
+  // nobody wrote. Safe by ordering — every seeding point runs AFTER the
+  // planItem calls it can affect: the wave gate seeds in gateWave, after that
+  // wave's first-round plans, and reconcile#2 re-seeds after any replan it
+  // ordered, so an objection that still holds against the NEW plan is raised
+  // again inside the same gate. Clearing here can only drop an objection
+  // raised against a plan this call is overwriting. The one case where nothing
+  // re-raises it is a relaunched deferral that comes back alone — a one-plan
+  // wave takes no gate — and that is the intended reading: it replans against
+  // the amended spec, and an objection about the archived plan is not about
+  // the new one.
+  delete objections[i.id]
+  return agent(
+    [`Run directory: ${runDir}`,
+     `Item: ${i.id} — ${i.title}`,
+     `Owned files: ${i.files.join(', ')}`,
+     `Integration worktree: ${integrationWt}`,
+     contextLine,
+     i.retryNote || '',
+     replanNote].filter(Boolean).join('\n'),
+    tuned('plan', { agentType: 'orca:plan', label: `plan:${i.id}${labelTag}`, phase: 'Plan' }))
+}
 
 // A superseded plan left at plans/<ID>.md reads as finished work to a fresh
 // planner — the W3 stall: the replan agent found its predecessor's plan on
@@ -918,10 +965,20 @@ const waveReplanNote = (id, issues, amended) =>
   `to see what must change, then write a fresh plan resolving every issue above. Never conclude the ` +
   `existing work is already correct: the previous plan FAILED, and a plans/${id}.md still on disk is ` +
   `superseded, not evidence of completion.`
-const rebuildReplanNote = (id, failure) =>
+// Same two arms as waveReplanNote, for the same reason: BUILD_ESCALATE's
+// "rebuild" says a spec-level fix is what the failure needs, not that spec.md
+// actually moved — the agent may have judged the contract already right and
+// touched nothing. The hash across the call is what knows, so the note says
+// what the hash saw.
+const rebuildReplanNote = (id, failure, amended) =>
   `Replan: this item was built once and failed mid-build ("${failure}"); an escalation judged the ` +
-  `failure spec-rooted and amended spec.md in response — read its "## Decisions" log; bullets tagged ` +
-  `${id} are binding contract amendments. The superseded plan is archived at plans/${id}.round*.md — ` +
+  (amended
+    ? `failure spec-rooted and amended spec.md in response — read its "## Decisions" log; bullets tagged ` +
+      `${id} are binding contract amendments. `
+    : `failure spec-rooted but did NOT amend spec.md — the contract is unchanged and correct, there is no ` +
+      `new "## Decisions" bullet to find, and you must not go looking for one. Resolve the failure against ` +
+      `the spec exactly as it already reads. `) +
+  `The superseded plan is archived at plans/${id}.round*.md — ` +
   `read it to see what must change, then write a fresh plan that resolves the failure. The item's ` +
   `worktree is kept and will be rebuilt from your new plan.`
 
@@ -1012,13 +1069,22 @@ const gateWave = async (wave, tag) => {
   const first = must(await agent(reconcilePrompt(checked),
     { model: 'opus', effort: 'high', label: `reconcile:${tag}`, phase: 'Plan', schema: RECONCILE }),
     `reconcile:${tag}`)
+  // Sampled the instant the unguarded read returns: an escalation still in
+  // flight here was mid-way through its sequence of spec.md edits while this
+  // reconcile was reading, so the verdict was formed against a torn contract
+  // that both bracket hashes can agree on (see `escalationInFlight`). Hash
+  // equality is therefore necessary but not sufficient — this verdict is only
+  // trustworthy if nobody was editing underneath it.
+  const sawEscalation = escalationInFlight
   if (first.clean) {
     // A clean read of a spec that moved mid-read was a read of a spec that no
     // longer exists — another wave's escalation landed. Redo it in the
     // section, where nothing can move underneath it.
     const specAfter = await specHash(`spec-hash:${tag}#recheck`)
-    if (specBefore !== null && specAfter === specBefore) return
-    log(`${tag}: spec.md moved while reconciliation was reading it — re-checking inside the spec section`)
+    if (specBefore !== null && specAfter === specBefore && !sawEscalation) return
+    log(`${tag}: ${sawEscalation
+      ? 'another wave was mid-escalation in spec.md while reconciliation read it'
+      : 'spec.md moved while reconciliation was reading it'} — re-checking inside the spec section`)
   }
 
   // Escalation edits spec.md, so waves take the escalate section one at a time.
@@ -1031,7 +1097,10 @@ const gateWave = async (wave, tag) => {
     const specAt = await specHash(`spec-hash:${tag}#serial`)
     const sameSubject = live.length === checked.length && live.every((i, n) => i.id === checked[n])
     let rec = first
-    if (specAt === null || specBefore === null || specAt !== specBefore || !sameSubject) {
+    // sawEscalation forces the re-read for the same reason it denies the fast
+    // path: an unguarded verdict computed while someone was mid-escalation was
+    // computed against a spec.md nobody ever committed to.
+    if (specAt === null || specBefore === null || specAt !== specBefore || !sameSubject || sawEscalation) {
       rec = must(await agent(reconcilePrompt(live.map(i => i.id)),
         { model: 'opus', effort: 'high', label: `reconcile~serial:${tag}`, phase: 'Plan', schema: RECONCILE }),
         `reconcile~serial:${tag}`)
@@ -1041,9 +1110,13 @@ const gateWave = async (wave, tag) => {
     // Escalation, SKILL rules: amend when the fix changes only *how* (edit spec.md, replan);
     // replan alone when the contract is fine and the plan is not; block when
     // any fix would change *what* the brief promised.
-    const esc = must(await agent(escalatePrompt(rec.issues),
-      { model: escalateModel, effort: 'high', label: `escalate:${tag}`, phase: 'Plan', schema: ESCALATE }),
-      `escalate:${tag}`)
+    let esc
+    escalationInFlight = true
+    try {
+      esc = must(await agent(escalatePrompt(rec.issues),
+        { model: escalateModel, effort: 'high', label: `escalate:${tag}`, phase: 'Plan', schema: ESCALATE }),
+        `escalate:${tag}`)
+    } finally { escalationInFlight = false }
     // Did it amend, or was a replan the whole fix? Only the file knows: the
     // agent edits spec.md directly and ESCALATE does not report it. An
     // unreadable hash keeps the old, amendment-shaped note — the conservative
@@ -1058,24 +1131,29 @@ const gateWave = async (wave, tag) => {
     esc.cut.filter(c => live.some(i => i.id === c.id)).forEach(c => cutItem(c.id, c.reason))
     applyDepAmendments(esc.addDeps, wave)
     // Ordering constraint: the replan set is computed BEFORE the deferral
-    // pass below — deferral flips items back to `pending`, and an item that
-    // is both deferred and replanned would otherwise drop out of the replan
-    // filter, leaving its superseded plan at plans/<ID>.md to stall the
-    // fresh planner pump() spawns later (the W3 stall).
+    // pass below — deferral flips items back to `pending`, so computing it
+    // afterwards would silently drop every deferred item from the escalation's
+    // replan list before anything could act on it. (The archive below no
+    // longer keys on that intersection — every deferred item's plan goes — but
+    // the list must still mean what the escalation said.)
     const replanSet = live.filter(i => esc.replan.includes(i.id) && state[i.id] === 'active')
     // A wave item whose amended dependencies are not all merged has not started
     // building (the build loop runs after this serialized section) — send it
     // back to pending; pump() relaunches it the moment they are.
-    wave.filter(i => state[i.id] === 'active' &&
-        i.deps.some(d => state[d] !== 'merged' && state[d] !== 'cut'))
-      .forEach(i => { state[i.id] = 'pending'; log(`${i.id} deferred: an amended dependency must merge first`) })
-    // Deferred-and-replanned items get the archive now: their next planner
-    // (spawned by pump() with no replan note) would otherwise find the
-    // superseded plan on disk and endorse it as finished work. Only items
-    // still active are replanned inside this wave.
-    const deferredReplans = replanSet.filter(i => state[i.id] !== 'active')
-    if (deferredReplans.length)
-      await parallel(deferredReplans.map(i => () => archivePlan(i, '#deferred')))
+    const deferred = wave.filter(i => state[i.id] === 'active' &&
+      i.deps.some(d => state[d] !== 'merged' && state[d] !== 'cut'))
+    deferred.forEach(i => { state[i.id] = 'pending'; log(`${i.id} deferred: an amended dependency must merge first`) })
+    // Every deferred item is archived, not only the deferred-and-replanned
+    // ones. Deferral only ever happens after a dirty pass and an escalation,
+    // so either the spec moved or a dependency was added, and both invalidate
+    // what the plan assumed; the escalation naming the item in `replan` is not
+    // the only way its plan can be stale. The archive is also what forces the
+    // relaunch to plan fresh: pump() spawns that planner with no replan note,
+    // and a superseded plan still at plans/<ID>.md reads to it as finished
+    // work (the W3 stall). This is the only archiving path for a deferral —
+    // the deferred-and-replanned case is a subset of it.
+    if (deferred.length)
+      await parallel(deferred.map(i => () => archivePlan(i, '#deferred')))
     const replan = replanSet.filter(i => state[i.id] === 'active')
     if (replan.length) {
       await parallel(replan.map(i => () => archivePlan(i, '#2')))
@@ -1104,12 +1182,23 @@ const gateWave = async (wave, tag) => {
       // merge. The gate keeps its veto through escalation (blocked/cut are
       // untouched); it gives up only the second-pass veto.
       //
-      // Attribution is per issue: an issue that names live items seeds only
-      // those, and an issue that names none cannot be attributed and seeds
-      // every live item — the same conservative fallback the block path used.
+      // Attribution is per issue, and it matches against the WHOLE wave, not
+      // only the items still live. An issue naming exactly one item that the
+      // escalation just deferred or blocked names its subject perfectly well;
+      // filtering to live items first would call it unattributable and
+      // broadcast it to every innocent sibling instead — the one item it is
+      // not about gets nothing, and the ones it was never about all get it.
+      // Seeding a non-live item costs nothing: `objections` is a persistent
+      // map read at build time, and a blocked or cut item never reads it. A
+      // deferred one carries it as far as its relaunch, which replans against
+      // the post-escalation spec and sheds it there on purpose (planItem) —
+      // the objection was about the plan that deferral archived, not about the
+      // one that relaunch writes. Only an issue that names no wave item at all is
+      // genuinely unattributable, and keeps the conservative broadcast to
+      // every live item that the block path used.
       const perItem = {}
       for (const issue of rec.issues) {
-        const named = (issue.match(/\b[WF][1-9][0-9]*\b/g) || []).filter(id => live.some(i => i.id === id))
+        const named = (issue.match(/\b[WF][1-9][0-9]*\b/g) || []).filter(id => wave.some(i => i.id === id))
         const targets = named.length ? [...new Set(named)] : live.map(i => i.id)
         for (const id of targets) {
           if (!objections[id]) objections[id] = []
@@ -1119,8 +1208,10 @@ const gateWave = async (wave, tag) => {
         }
       }
       for (const id of Object.keys(perItem))
-        log(`${id}: reconciliation objection unresolved after escalation — building anyway, with the objection ` +
-          `seeded into its implement and review prompts: ${perItem[id].join('; ')}`)
+        log(`${id}: reconciliation objection unresolved after escalation — ${live.some(i => i.id === id)
+          ? 'building anyway, with the objection seeded into its implement and review prompts'
+          : 'recorded for its relaunch, to be seeded into its implement and review prompts then'}` +
+          `: ${perItem[id].join('; ')}`)
     }
   })
 }
@@ -1186,10 +1277,31 @@ const runItem = async item => {
       // rule); the worktree is salvaged into a WIP commit on that branch.
       if (attempt === 2 || !(err && err.escalatable)) { await salvageWorktree(item); return block(item.id, reason) }
       let esc = null
+      // Conservative default, matching gateWave's: if the bracket never runs
+      // (a dead escalation, a throw), the note stays amendment-shaped.
+      let amended = true
       try {
-        // Escalation edits spec.md — same serialized section as wave reconciliation.
-        esc = await serializedSpec(() => agent(buildEscalatePrompt(item, reason),
-          { model: escalateModel, effort: 'high', label: `escalate:${item.id}`, phase: 'Build', schema: BUILD_ESCALATE }))
+        // Escalation edits spec.md — same serialized section as wave reconciliation,
+        // and hash-bracketed inside it the same way. action="rebuild" is the
+        // agent's judgment that a spec-level fix is what this failure needs; it
+        // is not evidence that spec.md moved, and BUILD_ESCALATE reports no such
+        // field. Only the file knows, so the file is asked — before the call and
+        // after it, both inside the section, where nothing else can move it.
+        // Fail-soft as everywhere: an unreadable hash on either side reads as
+        // "assume it amended".
+        const braced = await serializedSpec(async () => {
+          const before = await specHash(`spec-hash:${item.id}#build`)
+          escalationInFlight = true
+          let out
+          try {
+            out = await agent(buildEscalatePrompt(item, reason),
+              { model: escalateModel, effort: 'high', label: `escalate:${item.id}`, phase: 'Build', schema: BUILD_ESCALATE })
+          } finally { escalationInFlight = false }
+          const after = await specHash(`spec-hash:${item.id}#build-amend`)
+          return { out, amended: before === null || after === null || after !== before }
+        })
+        esc = braced.out
+        amended = braced.amended
       } catch (e) { /* fall through: a dead escalation agent means block */ }
       if (!esc || esc.action === 'block') { await salvageWorktree(item); return block(item.id, (esc && esc.reason) || reason) }
       // A cut is terminal like a block: the same salvage (WIP commit on the
@@ -1197,9 +1309,10 @@ const runItem = async item => {
       // stops a later same-slug run from hitting WORKTREE_REUSED for an
       // item the spec no longer contains.
       if (esc.action === 'cut') { await salvageWorktree(item); return cutItem(item.id, esc.reason) }
-      log(`${item.id}: spec amended after "${reason}" — replanning and rebuilding once`)
+      log(`${item.id}: ${amended ? 'spec amended' : 'the escalation amended nothing'} after "${reason}" ` +
+        `— replanning and rebuilding once`)
       await archivePlan(item, '#rebuild')
-      const p = await planItem(item, rebuildReplanNote(item.id, reason), '#rebuild')
+      const p = await planItem(item, rebuildReplanNote(item.id, reason, amended), '#rebuild')
       if (p === null || p === undefined) { await salvageWorktree(item); return block(item.id, 'plan agent was skipped or died during re-plan') }
     }
   }
@@ -1422,4 +1535,5 @@ if (updateContext && shipped.length) {
 }
 
 await releaseLease()
-return { shipped, cut, blocked, integration, deliverableState, promotions, tokensSpent: budget.spent() }
+return { shipped, cut, blocked, integration, deliverableState, promotions,
+  objections: survivingObjections(), tokensSpent: budget.spent() }

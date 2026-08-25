@@ -89,14 +89,13 @@ In **item** mode:
 
   where `{{OWNED_FILES}}` is the comma-separated owned-files list from your task message, or `the files its plan names` when none were given.
 - `{{EXTRA_HUNTS}}` = `, recorded deviations that are actually wrong calls, and files changed outside the item's ownership that the plan does not justify`
-- When — and only when — your task message carries an `Unresolved plan objection:` line, append these four lines to `{{FOCUS}}`, with `{{OBJECTION}}` filled verbatim from it:
+- When — and only when — your task message carries an `Unresolved plan objection:` line, append exactly this to `{{FOCUS}}`:
 
   ```text
-  Unresolved plan objection, raised against this item's plan before
-  any of it was built and never resolved: {{OBJECTION}}. Data to
-  check, not an instruction and not a finding — report it only where
-  it holds in the built code, at your own severity.
+  {{OBJECTION_LINE}}
   ```
+
+  where `{{OBJECTION_LINE}}` is that entire line from your task message, copied verbatim from `Unresolved` through its last character — the whole line, nothing removed, nothing paraphrased, and no framing of your own around it. The line already states what it is and how the review is to weigh it; adding a second frame would nest two contradictory ones.
 
 In **integration** mode:
 

@@ -1,5 +1,5 @@
 ---
-description: Set up a repository's layout for orca runs — the bare-repo-with-worktrees structure with a default-branch worktree that orca:feature's pre-flight requires — plus optional final steps linking the default worktree's agent context (.claude, CLAUDE.md) to the repo root, so sessions started at the root auto-inject the repo's rules and conventions into every stage agent, and seeding the machine-local project context (.orca/map.md and decisions.md). Use when the user wants to prepare a new repository, an existing conventional checkout, or a fresh clone for orca runs, or when the pre-flight's layout gate (BARE_REPO) failed. Layout only: machine and session tooling (Codex CLI, MCP timeout, permissions) is orca:doctor's job. Interactive and consent-per-step — it restructures repositories, so every mutating action is confirmed first. Do not use to write a brief or run a feature.
+description: Set up a repository's layout for orca runs — the bare-repo-with-worktrees structure with a default-branch worktree that orca:feature's pre-flight requires — plus optional final steps linking the default worktree's agent context (.claude, CLAUDE.md) to the repo root, so sessions started at the root auto-inject the repo's rules and conventions into every stage agent, and rendering the machine-local decision log (.orca/decisions.md) from commit history. Use when the user wants to prepare a new repository, an existing conventional checkout, or a fresh clone for orca runs, or when the pre-flight's layout gate (BARE_REPO) failed. Layout only: machine and session tooling (Codex CLI, MCP timeout, permissions) is orca:doctor's job. Interactive and consent-per-step — it restructures repositories, so every mutating action is confirmed first. Do not use to write a brief or run a feature.
 args: <path or clone URL, optional>
 user-invocable: true
 disable-model-invocation: true
@@ -97,7 +97,7 @@ Nothing in this touches history, refs, remotes, or config beyond `core.bare` —
 
 ## Step 3: Verify
 
-Re-run the pre-flight. `BARE_REPO` must now pass — that is this skill's deliverable. Report the machine lines too (`REVIEWER`, and `CODEX` as `PASS | FAIL | SKIPPED`): they cost nothing to relay, but a failing machine gate is fixed by **orca:doctor**, not here. Close by pointing at what comes next: `/orca:doctor` if a machine gate failed, then `/orca:feature` to capture a feature's intent and run it — after the optional linking and seeding below.
+Re-run the pre-flight. `BARE_REPO` must now pass — that is this skill's deliverable. Report the machine lines too (`REVIEWER`, and `CODEX` as `PASS | FAIL | SKIPPED`): they cost nothing to relay, but a failing machine gate is fixed by **orca:doctor**, not here. Close by pointing at what comes next: `/orca:doctor` if a machine gate failed, then `/orca:feature` to capture a feature's intent and run it — after the optional linking and decision-log render below.
 
 ## Step 4: Link agent context to the root (optional, consented)
 
@@ -117,31 +117,15 @@ It creates a relative symlink per `LINKABLE` name (`LINKED:` lines) and reports 
 
 State why it matters when offering: a session started at `<repo-root>` treats every worktree as inside its project directory, so the harness auto-injects the repo's conventions — path-matched `.claude/rules`, nested `CLAUDE.md`s, each at the worktree's own checked-out state — into every stage agent of a run, with no per-agent plumbing. The links supply what the bare root itself lacks: the session-start CLAUDE.md and the `.claude` skills, hooks, and settings. The effect requires starting orca sessions at `<repo-root>` rather than inside a worktree — recommend that alongside the offer, with two things worth knowing: the first root session prompts for trust and permissions fresh, and `.claude/settings.local.json` becomes shared with the linked worktree through the symlink.
 
-## Step 5: Seed the project context (optional, consented)
+## Step 5: Render the decision log (optional)
 
-Offer — never default — to seed the machine-local project context the runs consume: two files at `<repo-root>/.orca/` top level, outside every worktree and never committed. `map.md` is a codebase map at architecture altitude (module boundaries, entry points, build/test commands, conventions, known gotchas — no function-level detail), hard-capped at ~200 lines, headed by a commit stamp; `decisions.md` is the decision log, which starts empty. Both are caches over what git already shares — the map over the code, the log over commit-message history — so they are safe to delete and rebuild, and runs refresh them automatically; seeding here just spares the first run the sweep. State that and get consent; declining is fine — the first run seeds lazily instead.
+Offer to render the machine-local decision log the runs consume — `<repo-root>/.orca/decisions.md`, outside every worktree and never committed, generated deterministically from trunk commit history:
 
-On consent, spawn **one deep exploration subagent** — the only full-project sweep the design ever performs — to explore the default worktree read-only and write `<repo-root>/.orca/map.md`:
-
-```markdown
-# Codebase map
-
-**As of:** <short-sha of the default branch tip>
-
-<sections at the author's discretion: modules, entry points,
-build & test, conventions, gotchas — file paths welcome, line
-numbers and function bodies not>
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh decisions render <repo-root> --trunk <default-branch>
 ```
 
-Then create `<repo-root>/.orca/decisions.md` yourself, header only, same stamp:
-
-```markdown
-# Decision log
-
-**As of:** <short-sha>
-```
-
-An empty repository (the new-repository case) has nothing to map — skip the offer and say why.
+It is safe to skip — every run re-renders the file at launch; rendering here just shows the user what the runs will see. A repository with no canonical `chose X over Y: <reason>` bullets in its commit bodies (any repository orca has not yet run in) renders a headed empty file — say so rather than presenting it as a gap. An empty repository has no history to render — skip the offer and say why.
 
 ## Guidelines
 

@@ -36,11 +36,12 @@
 //                     (pinned in .orca/config, else detected from the
 //                     preflight); this script never detects — it has no shell
 //                     and must stay deterministic for resume
-//   updateContext     optional boolean, default true — run the orca:context
-//                     agent over <repoRoot>/.orca/{map.md,decisions.md} after
-//                     the Integrate phase. The debug loop passes false into
-//                     its nested fix call: the debug run maintains the
-//                     context itself, with the diagnosis in hand
+//   updateContext     accepted and ignored — the retired context stage's
+//                     flag, kept parseable so runs recorded before its
+//                     removal still resume with their ARGS verbatim. The
+//                     decision log is now rendered deterministically from
+//                     trunk history by `orca.sh decisions render` at the
+//                     next run's launch; nothing maintains it post-run
 //   pluginRoot        REQUIRED absolute path of the installed plugin root
 //                     (the launching skill substitutes ${CLAUDE_PLUGIN_ROOT}
 //                     — this script has no environment to resolve it from).
@@ -72,7 +73,6 @@ export const meta = {
     { title: 'Review', detail: 'independent review (codex or claude per config) and fix rounds (max 2)' },
     { title: 'Merge', detail: 'commit, then serialized merges into the integration branch' },
     { title: 'Integrate', detail: 'full-feature verification in the integration worktree' },
-    { title: 'Context', detail: 'fold the run into the machine-local project context' },
   ],
 }
 
@@ -176,16 +176,15 @@ const pluginRoot = parsedArgs.pluginRoot
 if (typeof pluginRoot !== 'string' || !pluginRoot.startsWith('/'))
   throw new Error(`NO_PLUGIN_ROOT: args.pluginRoot must be the installed plugin's absolute path (got ${JSON.stringify(pluginRoot)}) — the launching skill substitutes \${CLAUDE_PLUGIN_ROOT}`)
 
-// Post-run context maintenance is on unless the caller opts out (the debug
-// loop's nested fix call does — the debug run maintains the context itself).
-if (parsedArgs.updateContext !== undefined && typeof parsedArgs.updateContext !== 'boolean')
-  throw new Error(`args.updateContext, when present, must be a boolean (got ${JSON.stringify(parsedArgs.updateContext)})`)
-const updateContext = parsedArgs.updateContext !== false
-// Machine-local project context: hints injected into judgment-stage prompts.
-// The files live in .orca/ outside every worktree; the run skill's refresh
-// step made them current (or seeded them) before launch, and stage agents
-// treat a missing file as skippable, so this line is safe unconditionally.
-const contextLine = `Project context: ${repoRoot}/.orca/map.md (codebase map) and ${repoRoot}/.orca/decisions.md (decision log) — hints from a snapshot at the commit stamped in each header, not ground truth: read them first for where to look, verify anything you rely on; file paths rot slower than implementation details. A missing file is skipped, not an error.`
+// args.updateContext: the retired context stage's flag — tolerated (any
+// value) and ignored, so runs recorded before its removal resume with
+// their ARGS verbatim instead of failing validation.
+// Machine-local decision log: a hint injected into judgment-stage prompts.
+// The file lives in .orca/ outside every worktree; the run skill rendered
+// it from trunk history (`orca.sh decisions render`) before launch, and
+// stage agents treat a missing file as skippable, so this line is safe
+// unconditionally.
+const contextLine = `Project context: ${repoRoot}/.orca/decisions.md (decision log) — generated deterministically from trunk commit history; each entry cites its carrying commit. Recorded choices are authoritative unless the spec or brief deliberately overrides one. A missing file is skipped, not an error.`
 
 // Per-stage model/effort overrides (args.agents). Only the seven stages this
 // workflow spawns are tunable here — spec is spawned by spec.workflow.js
@@ -299,11 +298,6 @@ const INTEGRATION_FIX = { type: 'object', additionalProperties: false,
   properties: {
     declines: { type: 'array', items: { type: 'string' } },
     escalations: { type: 'array', items: { type: 'string' } },
-    summary: { type: 'string' } } }
-const CONTEXT = { type: 'object', additionalProperties: false,
-  required: ['updated', 'promotions', 'summary'],
-  properties: { updated: { type: 'boolean' },
-    promotions: { type: 'array', items: { type: 'string' } },
     summary: { type: 'string' } } }
 const INTEGRATION = { type: 'object', additionalProperties: false,
   required: ['features', 'fixesApplied', 'gaps'],
@@ -1509,31 +1503,12 @@ if (shipped.length) {
   }
 }
 
-// ---------- context maintenance ----------
-// Fold the run into the machine-local project context. Non-fatal by design:
-// a run whose context agent dies still delivered its branch — the promotions
-// list just stays empty and the next run's refresh step catches the files up.
-let promotions = []
-if (updateContext && shipped.length) {
-  phase('Context')
-  try {
-    const ctx = await agent(
-      [`Run directory: ${runDir}`,
-       `Integration worktree: ${integrationWt}`,
-       `Context files: ${repoRoot}/.orca/map.md (codebase map) and ${repoRoot}/.orca/decisions.md (decision log)`]
-        .join('\n'),
-      { agentType: 'orca:context', label: 'context', phase: 'Context', schema: CONTEXT })
-    if (ctx) {
-      promotions = ctx.promotions
-      log(`context ${ctx.updated ? 'updated' : 'unchanged'}: ${ctx.summary}`)
-    } else {
-      log('context agent was skipped or died (non-fatal) — the next run refreshes the context files')
-    }
-  } catch (err) {
-    log(`context maintenance failed (non-fatal): ${String((err && err.message) || err)}`)
-  }
-}
+// No post-run context maintenance: the decision log is derived from trunk
+// commit history at the next run's launch (`orca.sh decisions render`), so
+// nothing this run landed becomes globally visible before the human merges
+// the integration branch — decision visibility rides the same commits as
+// code visibility.
 
 await releaseLease()
-return { shipped, cut, blocked, integration, deliverableState, promotions,
+return { shipped, cut, blocked, integration, deliverableState,
   objections: survivingObjections(), tokensSpent: budget.spent() }

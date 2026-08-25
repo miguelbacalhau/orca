@@ -33,9 +33,9 @@ Carry forward the run directory, the branch, and the joined facts exactly as emi
 
 ## Step 1: Research
 
-Before anything is authorized, validate the idea against the system. Pick up any per-repo tuning first: `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh config show`, taking only the `OVERRIDE:` lines whose stage is `research` (a typed `FAIL:` → proceed with defaults, mention orca:config once, never repair the file here).
+Before anything is authorized, validate the idea against the system. Pick up any per-repo tuning first: `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh config show`, taking only the `OVERRIDE:` lines whose stage is `research` (a typed `FAIL:` → proceed with defaults, mention orca:config once, never repair the file here). Then render the decision log current — `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh decisions render <repo-root> --trunk <trunk>` — non-fatal on failure; every consumer treats a missing file as skippable.
 
-Compose the research task message from: the repository root; the instructions verbatim; the prior run's `spec.md` (its Interfaces and `## Decisions` bind this change) and `report.md` **by path**; and — when they exist — a `Project context:` line naming `<repo-root>/.orca/map.md` and `.orca/decisions.md` as hints. The report should answer: does the change fight a recorded decision, touch seams the spec assigned to other items, or ask for something this deliverable was never about?
+Compose the research task message from: the repository root; the instructions verbatim; the prior run's `spec.md` (its Interfaces and `## Decisions` bind this change) and `report.md` **by path**; and — when it exists — a `Project context:` line naming `<repo-root>/.orca/decisions.md` (the decision log, generated from trunk commit history). The report should answer: does the change fight a recorded decision, touch seams the spec assigned to other items, or ask for something this deliverable was never about?
 
 Spawn **one `orca:research` agent through its bundled one-agent workflow**: the Workflow tool with `scriptPath: "${CLAUDE_PLUGIN_ROOT}/scripts/research.workflow.js"` and `args: { prompt, model?, effort? }`, `model`/`effort` from the `research` OVERRIDE lines, each passed only when set. It runs in the background — wait for its task notification, never fabricate the result; it returns `{ report, died }`, and the runId is throwaway. On `died: true` twice, fall back to reading the prior `spec.md`'s Interfaces and Decisions directly and say the research was skipped.
 
@@ -67,7 +67,7 @@ The confirmed change goes to the spec workflow — `orca:spec` in an amend round
 - the existing spec **by path** (`<run-dir>/spec.md`), stated as binding: its Interfaces and `## Decisions` are contracts delivered code relies on
 - the W-id to continue from: the next id after the highest in `spec.md`'s Work Breakdown, retry rounds' items counted
 - the output path: `<run-dir>/spec.amendment.md`
-- when they exist, a `Project context:` line naming `<repo-root>/.orca/map.md` and `.orca/decisions.md` as hints
+- when it exists, a `Project context:` line naming `<repo-root>/.orca/decisions.md` (the decision log, generated from trunk commit history)
 
 **Create the review worktree at the deliverable branch's tip, not trunk** — the amendment amends `feature/<slug>`'s code, and a reviewer on the trunk tip would judge it against a codebase missing everything the run delivered:
 
@@ -122,7 +122,7 @@ Run feature Step 5 by reference — the task reconciliation from the returned va
 - **Integration verification** results for the amended behavior, from the workflow's returned values as usual.
 - A **Prior rounds** section naming the archived `report.round*.md` files.
 
-The context agent runs inside the workflow (`updateContext` defaults true), folding the amendment's decisions into `map.md`/`decisions.md` like any landed work — nothing to pass. Close with the standard landing pointer (`/orca:review`, then `git merge --no-ff feature/<slug>` — or `/orca:pr`), and route anything blocked to `/orca:retry` as ever.
+There is no post-run context stage: the amendment's decisions travel in its commit bodies and enter the decision log when the branch lands on trunk and the next run re-renders it. Close with the standard landing pointer (`/orca:review`, then `git merge --no-ff feature/<slug>` — or `/orca:pr`), and route anything blocked to `/orca:retry` as ever.
 
 ## Guidelines
 

@@ -24,7 +24,7 @@ Interview the user, in as many rounds as it takes. The case is the run's entire 
 
 Push back. Symptoms arrive pre-diagnosed ("the cache is corrupting X") — separate the observation from the theory, record the observation as the symptom and the theory as a note. Vague symptoms ("it's flaky") get concretized: how often, observed where, since when.
 
-If the machine-local project context exists — `<repo-root>/.orca/decisions.md` and `.orca/map.md` — read it before the later rounds and interview decision-aware: a recorded decision near the symptom may mean the behavior is chosen, not broken ("the decision log says errors on that endpoint are deliberately swallowed — is this that, or something new?"). The files are hints from a snapshot, not ground truth; what they surface becomes questions and case notes, never conclusions.
+If the machine-local decision log exists — `<repo-root>/.orca/decisions.md`, generated from trunk commit history — read it before the later rounds and interview decision-aware: a recorded decision near the symptom may mean the behavior is chosen, not broken ("the decision log says errors on that endpoint are deliberately swallowed — is this that, or something new?"). What it surfaces becomes questions and case notes, never conclusions.
 
 ## Step 2: Early pre-flight (optional, never blocking)
 

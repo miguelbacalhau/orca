@@ -80,7 +80,7 @@ Compose the agent's complete task message from:
 - the worktree path `<repo-root>/orca-proto-<slug>` and branch `proto/<slug>`
 - the run directory
 - the micro-brief verbatim — idea and success line
-- a `Project context:` line naming `<repo-root>/.orca/map.md` and `<repo-root>/.orca/decisions.md` as hints — read-only for this verb; a missing file is skipped, not an error
+- a `Project context:` line naming `<repo-root>/.orca/decisions.md` (the decision log, generated from trunk commit history) — read-only for this verb; a missing file is skipped, not an error
 
 Invoke the Workflow tool with `scriptPath: "${CLAUDE_PLUGIN_ROOT}/scripts/prototype.workflow.js"` — the substituted value is already absolute; never pass `~` or an unsubstituted variable — and `args: { prompt, model?, effort? }`, where `model`/`effort` come from the held `agents.prototype` block, each passed only when set. The workflow runs in the background: wait for its task notification and never fabricate the result. It returns `{ summary, died }`: on `died: true`, relaunch once; if the second launch dies too, report the failure and stop. No lease is taken and no runId is persisted — an interrupted prototype is abandoned or relaunched fresh, by design.
 

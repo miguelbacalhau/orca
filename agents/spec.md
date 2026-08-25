@@ -14,9 +14,9 @@ Your task message gives you:
 - the repository root (`<repo-root>`)
 - the current timestamp, for the spec's `Created` line
 - the **brief**: the outcome, required features, explicit non-goals, direction decisions (when the brief settled any), inputs/outputs, constraints, and the doubt rule (prefer-smaller-scope or prefer-complete), exactly as the orchestrator confirmed them with the user
-- possibly a `Project context:` line naming the machine-local context files (`map.md`, the codebase map; `decisions.md`, the decision log)
+- possibly a `Project context:` line naming the machine-local decision log (`decisions.md`)
 
-When the `Project context:` line is present, read both files FIRST — they are hints from a snapshot at the commit stamped in each header, not ground truth: use the map as where-to-look-first and verify anything you build on (file paths rot slower than implementation details), and honor the decision log's recorded choices unless the brief itself overrides one — a spec that silently contradicts a recorded decision is a bug, a spec that deliberately reverses one says so under Assumptions. A named file that does not exist is skipped, not an error.
+When the `Project context:` line is present, read the decision log FIRST. It is generated deterministically from trunk commit history — each entry cites the commit that carries it — so its recorded choices are what the landed code actually did: honor them unless the brief itself overrides one — a spec that silently contradicts a recorded decision is a bug, a spec that deliberately reverses one says so under Assumptions. A named file that does not exist is skipped, not an error.
 
 The brief is authoritative. Do not expand scope past it, drop a promised feature, or cross a stated non-goal. Your job is to translate that intent into a decomposition the codebase can actually support.
 
@@ -125,7 +125,10 @@ autonomous decision later in the run cites this.>
 <Leave empty at authoring — your own spec-time choices belong under
 Assumptions. During the run the workflow's escalation agents append
 amendments here, one bullet per decision, tagged with the affected
-item ids: `- (W3) chose X over Y: <reason>`.>
+item ids: `- (W3) chose X over Y: <reason>`. Every entry MUST carry
+an item-id tag — the first-tagged item's commit is what carries the
+decision into history, and an untagged entry has no carrier and is
+lost.>
 
 ## Risks & Open Questions
 

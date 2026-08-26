@@ -82,11 +82,32 @@ $line"
   grep -q "^- \*\*D-$sha-2\*\* .*: chose three over four: second reason$" "$r/.orca/decisions.md"
 }
 
+@test "wrapped bullets are rejoined, colon-at-end-of-line included" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  r="$BATS_TEST_TMPDIR/r"
+  commit_with_body "$r" w.txt "feat: wrapped" "" \
+    "chose wrapping pgx.ErrNoRows with core.ErrNotFound over a local sentinel:" \
+    "  repo convention errors.Is without redefining; importing pkg/core is not" \
+    "  an operator-surface edit" \
+    "chose Warn over Debug for the not-found log: visible at production Info" \
+    "default without paging" \
+    "" \
+    "Trailing prose after a blank line is not a continuation."
+  sha="$(git -C "$r" log -1 --format=%h)"
+  run decisions render "$r" --trunk main
+  [ "$status" -eq 0 ]
+  has_line $'ENTRIES:\t2'
+  grep -q "^- \*\*D-$sha\*\* .*: chose wrapping pgx.ErrNoRows with core.ErrNotFound over a local sentinel: repo convention errors.Is without redefining; importing pkg/core is not an operator-surface edit$" "$r/.orca/decisions.md"
+  grep -q "^- \*\*D-$sha-2\*\* .*: chose Warn over Debug for the not-found log: visible at production Info default without paging$" "$r/.orca/decisions.md"
+  ! grep -q 'Trailing prose' "$r/.orca/decisions.md"
+}
+
 @test "unprefixed bullets match; mid-sentence and subject-line 'chose' do not" {
   make_repo "$BATS_TEST_TMPDIR/r"
   r="$BATS_TEST_TMPDIR/r"
   commit_with_body "$r" p.txt "chose subject over body: never scanned" "" \
     "chose bare over dashed: history carries both spellings" \
+    "" \
     "we chose this over that: prose, not a bullet"
   run decisions render "$r" --trunk main
   [ "$status" -eq 0 ]

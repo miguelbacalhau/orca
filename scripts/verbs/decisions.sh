@@ -72,9 +72,22 @@ archive_file="$out_dir/decisions.archive.md"
 # scanned, so a decision-shaped subject can never mint an entry. The
 # bullet grammar is the commit stage's contract — `- chose X over Y:
 # <reason>` — accepted with or without the leading dash (existing
-# history carries both spellings).
+# history carries both spellings), and a body-wrapped bullet is joined
+# back together with paragraph semantics: the bullet absorbs following
+# lines (indented or not — real bodies wrap both ways) until a blank
+# line, the next bullet, or the commit boundary, so a reason wrapped
+# at 72 columns (colon at end-of-line included) survives whole.
 entries="$(git -C "$root" log "$trunk" --format='@@C@@%h%x09%cs%x09%s%n%b' | awk '
+  function flush() {
+    if (open == "") return
+    count++
+    id = "D-" sha
+    if (count > 1) id = id "-" count
+    printf "- **%s** (%s, %s): %s\n", id, cdate, subj, open
+    open = ""
+  }
   /^@@C@@/ {
+    flush()
     line = substr($0, 6)
     n = split(line, a, "\t")
     sha = a[1]; cdate = a[2]
@@ -84,15 +97,18 @@ entries="$(git -C "$root" log "$trunk" --format='@@C@@%h%x09%cs%x09%s%n%b' | awk
   }
   {
     s = $0
-    sub(/^[ \t]*-[ \t]*/, "", s)
-    sub(/[ \t]+$/, "", s)
-    if (s ~ /^chose .+ over .+: /) {
-      count++
-      id = "D-" sha
-      if (count > 1) id = id "-" count
-      printf "- **%s** (%s, %s): %s\n", id, cdate, subj, s
+    stripped = s
+    sub(/^[ \t]*-[ \t]*/, "", stripped)
+    sub(/[ \t]+$/, "", stripped)
+    if (stripped ~ /^chose .+ over .+:/) { flush(); open = stripped; next }
+    if (open != "" && s !~ /^[ \t]*$/) {
+      sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s)
+      open = open " " s
+      next
     }
+    flush()
   }
+  END { flush() }
 ')"
 
 if [ -n "$entries" ]; then

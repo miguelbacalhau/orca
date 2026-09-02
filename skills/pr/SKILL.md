@@ -1,5 +1,5 @@
 ---
-description: Land a finished orca run's deliverable branch through a GitHub pull request instead of a local merge. Picks a delivered-but-unlanded run — a finished run whose `feature/<slug>` branch exists and is unmerged, from `triage snapshot` (newest by default, or the one named) — refuses unless the report says `**Deliverable state:** verified` with nothing blocked, composes the PR title and body from the run's `report.md` translated into an ordinary external-facing description (no run vocabulary, no mention of Claude, AI, agents, or orca anywhere, enforced by the same deterministic marker check as run commits), previews both with the user, and only on their confirmation pushes the branch and creates (or refreshes) the PR with the `gh` CLI. Report-only: a branch no run produced gets plain `gh pr create`, not this skill. Never merges, never edits the report, never touches the integration worktree.
+description: Land a finished orca run's deliverable branch through a GitHub pull request instead of a local merge. Picks a delivered-but-unlanded run — a finished run whose `feature/<slug>` branch exists and is unmerged, from `triage snapshot` (newest by default, or the one named) — refuses unless the report says `**Deliverable state:** verified` with nothing blocked, composes the PR title and body from the run's `report.md` translated into an ordinary external-facing description (no run vocabulary, no mention of Claude, AI, agents, or orca anywhere, enforced by the same deterministic marker check as run commits), previews both with the user, and only on their confirmation pushes the branch and creates the PR — always as a **draft**, for the user to mark ready on GitHub once they have read it — or refreshes an existing one, with the `gh` CLI. Report-only: a branch no run produced gets plain `gh pr create`, not this skill. Never merges, never edits the report, never touches the integration worktree.
 args: <optional run directory or slug fragment>
 user-invocable: true
 disable-model-invocation: true
@@ -10,6 +10,8 @@ disable-model-invocation: true
 The report template's Landing section ends at a local `git merge --no-ff` — right for a repo the user merges by hand, wrong for a repo that lands work through GitHub pull requests. This skill is the PR path: it takes a finished run's deliverable branch, composes a pull-request description from the run's own `report.md`, previews it with the user, and publishes it with the `gh` CLI. The report is the point — every fact in the PR body traces to a report section; nothing is re-derived from the diff. A branch no run produced has no report and is out of scope: plain `gh pr create` already covers it.
 
 The description the world sees reads as an ordinary human-authored PR. The report is internal vocabulary — run states, item counts, worktree paths, `/orca:*` pointers — and none of it survives translation. The no-attribution rule that governs every run commit extends verbatim to the PR title and body.
+
+**New PRs are always drafts.** Two different readinesses are in play, and the skill can only vouch for one. The guard below settles *run* readiness — the run finished and verified its own work. It cannot settle *social* readiness: at the moment this skill runs, no human has read the diff. A ready PR announces the opposite — auto-requesting the CODEOWNERS reviewers, notifying the team, releasing whatever CI and merge automation keys on non-draft — for a branch nobody has looked at. So the PR goes up as a draft and the user marks it ready on GitHub after their own pass, which is what the parting pointer at `/orca:review` has always been for. There is no flag: the wrong default in this direction costs one click, and in the other direction it costs a notification that cannot be recalled.
 
 ## Step 1: Triage
 
@@ -31,9 +33,9 @@ Carry forward the run directory, the head branch, and the trunk, exactly as emit
 
 ## Step 2: Guard
 
-Read the candidate's `<run-dir>/report.md`. Two gates, in order — a PR asserts "this is ready for review," and the report is the authority on whether that is true:
+Read the candidate's `<run-dir>/report.md`. Two gates, in order — even a draft PR asserts "the work is finished," and the report is the authority on whether that is true:
 
-- **`**Deliverable state:**` is not `verified`** → refuse in one line, quoting the report's own stated reason, and point at the owning skill: `unverified` from a died verifier or an interrupted run tail → `/orca:feature`'s resume; unmet or blocked work behind it → `/orca:retry`. No draft-PR fallback — a draft still publishes an unverified branch.
+- **`**Deliverable state:**` is not `verified`** → refuse in one line, quoting the report's own stated reason, and point at the owning skill: `unverified` from a died verifier or an interrupted run tail → `/orca:feature`'s resume; unmet or blocked work behind it → `/orca:retry`. Draft status is no fallback here — publishing as a draft is this skill's unconditional default, not an escape hatch, and it still pushes an unverified branch under a description claiming work the run never verified.
 - **`## Blocked` is anything other than "None"** → refuse and point at `/orca:retry`. A PR for a branch the run itself records as incomplete misrepresents the deliverable.
 
 ## Step 3: Compose
@@ -52,7 +54,7 @@ Translate the report into an external-facing description. The reader has never h
 
 ## Step 4: Preview
 
-Show the user exactly what will be published: the title, the full body, the base branch (the `TRUNK:` value), and the head branch. One confirmation gates everything outward-facing — the push and the PR creation ride on the same yes, interview-style, not AskUserQuestion. Requested edits are folded in and re-previewed, with the attribution check re-run after every edit; a declined confirmation ends the skill with nothing pushed.
+Show the user exactly what will be published: the title, the full body, the base branch (the `TRUNK:` value), the head branch, and — on the create path — that it goes up as a draft. One confirmation gates everything outward-facing — the push and the PR creation ride on the same yes, interview-style, not AskUserQuestion. Requested edits are folded in and re-previewed, with the attribution check re-run after every edit; a declined confirmation ends the skill with nothing pushed.
 
 ## Step 5: Publish
 
@@ -60,18 +62,21 @@ Only ever entered through the preview gate. In order:
 
 1. **Remote check:** `git remote get-url origin` — no `origin` → say there is nothing to push to and stop; adding a remote is the user's move, not the skill's.
 2. **Push:** `git push -u origin <head-branch>`.
-3. **Existing PR check:** `gh pr list --head <head-branch> --state open`. An open PR already exists → `gh pr edit` to refresh its title and body — same URL, no error. Otherwise:
+3. **Existing PR check:** `gh pr list --head <head-branch> --state open` (drafts are listed too — a draft is an open PR). An open PR already exists → `gh pr edit` to refresh its title and body — same URL, no error, **and draft status untouched**. Otherwise:
 
    ```bash
-   gh pr create --base <trunk> --head <head-branch> --title <title> --body-file <tmpfile>
+   gh pr create --draft --base <trunk> --head <head-branch> --title <title> --body-file <tmpfile>
    ```
 
    The body always travels via a temp file — never inline shell quoting; a multi-paragraph body through `--body` is a quoting bug waiting to happen.
-4. **Parting message:** the PR URL, and one line noting that `/orca:review` walks the same diff locally in their own editor if they want a pass before merging on GitHub.
+
+   **Draft is a creation-time choice only.** The refresh path never moves draft status in either direction, and `gh pr edit` cannot — that is `gh pr ready` / `gh pr ready --undo`, and neither belongs here. The user marks a PR ready when they have read it; a later refresh (after `/orca:retry`, say) must not undo that. Never "restore" the default by demoting a ready PR back to draft.
+4. **Parting message:** the PR URL, that it went up as a draft for them to mark ready on GitHub once they have had their pass (omit on the refresh path, which left the status alone), and one line noting that `/orca:review` walks the same diff locally in their own editor if they want that pass before promoting it.
 
 ## Guidelines
 
 - **The no-attribution rule is the commit rule, extended.** Nothing in the PR title or body may mention Claude, AI, agents, this orchestration process, or orca — no `Co-Authored-By`, no `Generated with` footer, including the harness's own default PR footer, which this skill explicitly suppresses. The deterministic marker check (`Claude`, `Anthropic`, `Co-Authored-By`, `Generated with`/`Generated by`, `orca`, case-insensitive) runs before the first preview and after every edit; keeping "AI" and "agent" out of ordinary prose is this skill's own writing discipline, since no regex can police those words without mangling honest descriptions.
+- **Draft on create, hands off on refresh.** Every PR this skill opens is a draft, unconditionally — no flag, no `.orca/config` key: the choice is the same on every invocation, so there is nothing to configure. Promotion is the user's, on GitHub, after their own pass. Should `gh pr create --draft` be rejected outright (drafts unavailable on the plan or the GitHub Enterprise Server version), fail loudly and say so — never silently retry without the flag. That retry would publish a ready, reviewer-notifying PR the user's one confirmation did not cover; opening it by hand is their call to make.
 - **Read-only toward the run.** The skill never edits `report.md`, never commits, never touches the integration worktree or any branch content. Its only writes are outward: the push and the PR.
 - **Publish only through the preview gate.** The push and the PR creation are outward-facing and share one confirmation; a denied confirmation ends the skill with nothing pushed and nothing created. Re-invocation later finds the same candidate through the same triage.
 - **Report-only, by design.** A deliverable branch with no run report has no source to compose from — that is plain `gh pr create` territory, and this skill says so rather than inventing a description from the diff.

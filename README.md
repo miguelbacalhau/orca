@@ -16,7 +16,7 @@ A [Claude Code](https://claude.com/claude-code) plugin for autonomous, multi-age
 /orca:review             # review a deliverable in your editor; your comments round-trip
                          # (addressed on consent, resolutions rendered inline next review)
 /orca:pr                 # land a delivered run through a GitHub pull request: the report
-                         # becomes an external-facing description, previewed, published via gh
+                         # becomes an external-facing description, previewed, opened as a draft
 /orca:retry              # finish a finished run's unmet items in the same run: audit against
                          # git, resolve the blocked decisions with you, relaunch the work loop
 /orca:followup           # turn a finished run's optional follow-ups into the next brief
@@ -139,7 +139,7 @@ MCP servers load at session start, so after installing or enabling the plugin, *
 #    or publish it as a GitHub pull request instead with /orca:pr.
 /orca:review
 git merge --no-ff feature/<slug>     # or fix/<slug>
-/orca:pr                             # the PR path: report → description, gh pr create
+/orca:pr                             # the PR path: report → description, draft PR via gh
 
 # 4. If the report left blocked items: resolve their recorded decisions
 #    and finish them inside the same run, on the same branch.
@@ -215,7 +215,9 @@ Two config keys govern it, set via `/orca:config`: `editor` (`nvim`|`vscode`|`no
 
 The PR path for landing — the report template's Landing section ends at a local `git merge --no-ff`, which is wrong for a repo that lands work through GitHub pull requests. This skill takes a **delivered-but-unlanded run** (a finished run whose deliverable branch exists and is unmerged, found via `triage snapshot` — newest by default, or the one the argument names) and publishes it with the `gh` CLI. It is report-driven by design: every fact in the PR body traces to a section of the run's `report.md`, nothing is re-derived from the diff — so a branch no run produced is out of scope (plain `gh pr create` already covers it).
 
-Two guards gate it, because a PR asserts "ready for review": the report must say `**Deliverable state:** verified`, and `## Blocked` must be "None" — anything else is refused with a pointer at the owning skill (`/orca:feature`'s resume, `/orca:retry`). No draft-PR fallback: a draft still publishes an unverified branch.
+Two guards gate it, because even a draft PR asserts "the work is finished": the report must say `**Deliverable state:** verified`, and `## Blocked` must be "None" — anything else is refused with a pointer at the owning skill (`/orca:feature`'s resume, `/orca:retry`). Draft status is no fallback there: it is the unconditional default, not an escape hatch, and it still pushes an unverified branch under a description claiming work the run never verified.
+
+**New PRs are always drafts**, because two readinesses are in play and the skill can only vouch for one. The guards settle *run* readiness — the run finished and verified its own work. *Social* readiness is yours: at publish time no human has read the diff, and a ready PR announces the opposite, auto-requesting CODEOWNERS reviewers and releasing whatever CI and merge automation keys on non-draft. So it goes up as a draft and you mark it ready on GitHub after your own pass — no flag and no config key, since the wrong default this way costs one click and the other way costs a notification you cannot recall. Draft is a creation-time choice only: refreshing an existing PR never moves its status in either direction, so a PR you already promoted stays promoted.
 
 Composition is translation: the reader has never heard of orca, so run vocabulary is dropped wholesale — Summary becomes an opening paragraph about what the branch *does*, Shipped becomes a Changes section (no item IDs, no hashes), Integration verification becomes Testing; run-dir paths, follow-ups, and every `/orca:*` pointer vanish. The no-attribution rule that governs run commits extends verbatim to the PR title and body, enforced by the same deterministic marker scan — explicitly overriding the harness habit of appending a "Generated with Claude Code" footer. You see the exact title, body, base, and head before anything happens; **one confirmation** gates both the push and the PR creation (re-running an existing PR refreshes it). It never merges, never edits the report, never touches the integration worktree.
 

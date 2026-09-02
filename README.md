@@ -28,7 +28,7 @@ A [Claude Code](https://claude.com/claude-code) plugin for autonomous, multi-age
 /orca:archive            # retire finished runs whose branches provably landed, so triage
                          # stops carrying the whole history (marker only — deletes nothing)
 /orca:init               # one-time repository layout setup      (interactive, consent per step)
-/orca:doctor             # one-time machine tooling setup        (interactive, consent per step)
+/orca:doctor             # machine tooling + repo readiness setup (interactive, consent per step)
 /orca:config             # optional per-repo reviewer & model/effort tuning
 ```
 
@@ -76,7 +76,7 @@ State lives in files, never in conversation memory: the brief, the spec with its
 | `MCP_TOOL_TIMEOUT` | Codex-only, like the Codex CLI row: set to `1200000` (~20 min) in a Claude Code settings `env` block, so Codex reviews are not killed at the default MCP tool timeout. A plugin cannot ship session env, so `/orca:doctor` writes it for you. |
 | Permission mode | Runs need `bypassPermissions` for the session — see [Permissions and autonomy](#permissions-and-autonomy). |
 
-Everything else — the nineteen stage agents and the codex MCP server registration — ships inside the plugin itself; there is nothing to install per repository beyond the layout.
+Everything else — the twenty stage agents and the codex MCP server registration — ships inside the plugin itself; there is nothing to install per repository beyond the layout.
 
 ## Installation
 
@@ -261,16 +261,22 @@ In every case it finishes by **root-linking**: symlinking the default worktree's
 
 Preconditions for conversion — it stops rather than improvising: a clean tree, no existing linked worktrees, no submodules.
 
-Layout only: machine-gate failures the pre-flight reports (Codex, the MCP timeout) are routed to `/orca:doctor`, not fixed here.
+It closes by offering, never defaulting, `/orca:doctor`'s [worktree provisioning](#worktree-provisioning) pass: the layout is fresh and no run worktrees exist yet, which is the cheapest moment to answer what a fresh worktree needs before the repo builds.
+
+Layout only: machine-gate failures the pre-flight reports (Codex, the MCP timeout) are routed to , not fixed here.
 
 ### `/orca:doctor`
 
-Interactive, consent-per-step machine and session tooling — the per-machine counterpart to `/orca:init`'s per-repo layout. It diagnoses with the same read-only pre-flight (or probes codex directly when run outside a repository), reports every gate plus the resolved reviewer in plain language, and fixes only what was flagged:
+Interactive, consent-per-step readiness on two axes: **machine and session tooling** — the per-machine counterpart to `/orca:init`'s per-repo layout — and **repo readiness**, whether a fresh worktree arrives provisioned. The line between doctor and `/orca:status` is one test: *would the answer change if no run had ever happened?* If no, it is readiness and belongs here; if it depends on what a run did, it is status's.
+
+It diagnoses with the same read-only pre-flight (or probes codex directly when run outside a repository), reports every gate plus the resolved reviewer in plain language, and fixes only what was flagged:
 
 - **Codex missing or stale** — points you at the official non-npm install (`brew install codex` or the release binaries; never npm). Installing is your action.
 - **Not authenticated** — suggests `codex login` and verifies with `codex login status`. Also yours.
 - **`MCP_TOOL_TIMEOUT` unset** — writes it into a settings `env` block (project or user level, your choice), merged, with the session-restart caveat.
 - **A stale orca status line** — earlier versions offered a `statusLine` settings block invoking the now-retired `orca.sh statusline` verb; if one is found, doctor offers to remove it (a leftover block breaks the status bar). A status line that never mentions orca is never touched.
+
+Inside a repository it also reads `orca.sh setup status` — milliseconds, creates nothing — and says whether run worktrees get provisioned at all: `absent` (they don't), `current` (a verified script, or a recorded "this repo needs nothing"), `drifted` with the manifest paths that moved since, or `unstamped` (hand-written, so its drift check is dead). Any of the last three earns an **offer**, never a default, of the deep pass: it creates a throwaway worktree under `.orca/doctor/`, runs a candidate install in it under your permissions, removes it, and takes a few minutes. On consent the `orca:doctor` agent derives and proves a candidate, doctor re-runs the verification itself rather than trusting the agent's account of it, shows you the script verbatim, and installs it only after you say so. See [Worktree provisioning](#worktree-provisioning).
 
 It is reviewer-aware: with a detected claude reviewer (codex not installed) there is nothing to fix — it says runs will use the Claude reviewer, explains that installing codex enables the stronger cross-model review, and offers to pin either choice via `/orca:config`. With claude pinned and codex present, it notes the codex gates were skipped by choice. A codex gate failing while the reviewer is codex is always a failure to fix — never a silent switch to the other reviewer.
 
@@ -382,8 +388,10 @@ What a repository looks like mid-run (`/orca:init` creates the top three entries
 ├── orca-proto-<slug>/            # prototype: the spike worktree (branch proto/<slug>) — yours to discard
 └── .orca/
     ├── config                         # optional per-repo reviewer & model/effort overrides
+    ├── setup                          # optional worktree provisioning script — run on every arrival (see below)
     ├── decisions.md                   # machine-local decision log, rendered from trunk history (see Project context)
     ├── secrets/                       # worktree secrets — a mirror tree linked into every run worktree (see below)
+    ├── doctor/                        # scratch for /orca:doctor's repo-readiness pass: the candidate setup script and its throwaway verification worktrees
     ├── feat-briefs/                   # unconsumed feature briefs (drafts/ for parked ones)
     ├── review-notes/<key>.json        # orca.nvim review comments per deliverable branch (round-trip state)
     ├── bug-cases/<slug>/              # open bug cases: case.md, repro.sh, ledger.md, evidence/
@@ -430,6 +438,33 @@ Two carve-outs to the usual `.orca/` story. Unlike `decisions.md`, **`secrets/` 
 
 Placement is least-privilege by stage: links go in where the work actually needs credentials (implement, fix, integrate, reproduce — builds, tests, repro scripts) and are stripped (`orca.sh secrets remove`, the resolved-target ownership test) before every independent review, the stage that consumes the run's most adversarial content and needs none. With the codex reviewer that separation also keeps secret values away from a different model provider. The recommendation compounds: keep the tree down to what runs actually need — every extra credential in `.orca/secrets/` widens the blast radius of any one compromised stage.
 
+### Worktree provisioning
+
+Secrets close half the gap `git worktree add` leaves. The other half is everything a repository builds rather than tracks: `node_modules`, generated code, compiled artifacts a build embeds. Without it every implement agent rediscovers the package manager, spends tokens and wall-clock on it, or silently skips it — eight times a run, differently each time.
+
+One optional script closes it: **`<repo-root>/.orca/setup`**. Machine-local like everything in `.orca/`, never committed, and run on **every worktree arrival** — right after the secrets go in, and again on the integration worktree before the run verifies the assembled feature, since items merging in change the dependency set. Reviews are the one exception: they read a diff, need no build, and already run stripped of secrets.
+
+The contract, which the script is written against:
+
+| | |
+|---|---|
+| Invocation | `bash .orca/setup` — never exec'd, so the exec bit is irrelevant |
+| Working directory | the worktree being provisioned |
+| `stdin` | `/dev/null` — a package manager that prompts dies instead of wedging a stage |
+| Output | both streams captured; on failure the tail reaches the agent, nothing else |
+| `ORCA_WORKTREE` | absolute path of the worktree (= cwd) |
+| `ORCA_REPO_ROOT` | the directory holding `.orca/` — for sharing a cache or linking build outputs across worktrees |
+| `ORCA_ARRIVAL` | `created` \| `branch_resumed` \| `reused` \| `integrate` |
+| Wall-clock cap | 15 minutes, then the whole process group is killed |
+
+And what it must be: **idempotent and cheap when warm** (`npm install`, not `npm ci` — it runs on every arrival), **safe with eight copies at once** (package managers already are; a hand-rolled write to one shared path is not), and **non-interactive** — no servers, no watchers, no fixed ports, no shared-database migrations. Dependency installs, codegen, and compile-to-artifacts belong in it; test suites do not, because that is the stage agent's job and it would cost eight times over.
+
+**Provisioning is advisory, never fatal.** A script that fails does not kill the item before its agent runs — the agent may be exactly what fixes the build. Instead the failure and the last 4 KB of its output are injected into that agent's prompt as a `Provisioning: FAILED` line, so the agent knows the tree is unprovisioned rather than guessing at a mystery build error.
+
+You can write the file by hand. The better path is `/orca:doctor`, which offers a consented deep pass: the `orca:doctor` agent derives a candidate from the repository's own evidence — an existing spawn-worktree script first, then `devcontainer.json`, then the CI steps between checkout and the first build, then manifests and lockfiles — proves it by creating a throwaway worktree, provisioning it, and running the repo's own build in it, and hands you the script to read before anything is installed. `/orca:init` offers the same pass at the end of a conversion. **"Needs nothing" is a real answer** and uses the same file: a body of `exit 0` under a header recording what was inspected. The file's presence means the question was answered; its fingerprint — taken over the repo's manifests, lockfiles, task runners, toolchain pins and CI at the trunk tip — is what lets `orca.sh setup status` say `drifted` and name the `pnpm-lock.yaml` that appeared six months later.
+
+Like `secrets place`, the ritual is runnable by hand on your own worktree: `orca.sh provision <repo-root>/main reused` places the secrets and runs the script. Runs never touch your worktree themselves.
+
 ## Project context
 
 Decisions are the one thing the code cannot tell a future run: what was *rejected*, and why. One machine-local file at the top of `.orca/` carries them — **`decisions.md`**, the decision log: one `chose X over Y: <reason>` entry per load-bearing decision, each with its date, the subject line of the commit that carries it, and a stable id derived from that commit's sha (`D-<short-sha>`). Consuming agents (spec, plan, hypothesize, diagnose, the interviews) read it first; a spec that silently contradicts a recorded decision is a bug, and one that deliberately reverses one says so.
@@ -442,7 +477,7 @@ Rule-shaped knowledge ("never install X via npm") never belongs in the log — i
 
 ## Stage agents
 
-Nineteen agents ship in the plugin (`agents/<stage>.md`, loaded as `orca:<stage>`). Each runs with its own context window and only the per-item values it needs; context passes between stages through artifact files, never relayed summaries.
+Twenty agents ship in the plugin (`agents/<stage>.md`, loaded as `orca:<stage>`). Each runs with its own context window and only the per-item values it needs; context passes between stages through artifact files, never relayed summaries.
 
 The first eleven serve feature runs — and, the spec stage's three excepted (`spec`, `spec-review-codex`, `spec-review-claude`: the diagnose agent writes the fix tail's contract, so no spec stage ever runs there), the fix tail of a diagnose-and-fix debug run:
 
@@ -493,9 +528,15 @@ And one serves `/orca:retry` and `/orca:followup`, spawned conversationally over
 |---|---|---|---|
 | `audit` | Read-only reconciliation of a finished run — report claims vs. work breakdown vs. git ground truth; extracts unfinished items, escalated decisions, and reusable artifacts | opus | high |
 
+And one serves `/orca:doctor`'s repo-readiness pass and `/orca:init`'s last step, spawned conversationally and only on consent:
+
+| Stage | Role | Default model | Default effort |
+|---|---|---|---|
+| `doctor` | Derives the repository's [worktree provisioning](#worktree-provisioning) script from its own evidence — an existing spawn-worktree script, `devcontainer.json`, CI, manifests — proves it in a throwaway worktree, and returns a candidate for the user to approve | opus | high |
+
 A run uses exactly one of `review-codex` / `review-claude`, chosen by the resolved reviewer at launch. The `/orca:config` stage key for both is `review` — the overrides apply to whichever reviewer agent is active. The same resolved reviewer also picks the spec reviewer (`spec-review-codex` / `spec-review-claude`): a run that reviews its code with codex reviews its spec with codex, with no separate knob.
 
-Override any of these per repository with [`/orca:config`](#orcaconfig-assignments--reset) — except `address`, `audit`, and the spec reviewers (`spec-review-codex` / `spec-review-claude`), which, like the workflow's internal helper agents (reconciliation, escalation), are not configurable: their cost/judgment profiles are part of the design. The `research` key is configurable and applies at the next research spawn rather than a run launch — the feature interview, `/orca:iterate`, and `/orca:followup` each read it fresh; the `prototype` key likewise applies at the next `/orca:prototype` launch.
+Override any of these per repository with [`/orca:config`](#orcaconfig-assignments--reset) — except `address`, `audit`, `doctor`, and the spec reviewers (`spec-review-codex` / `spec-review-claude`), which, like the workflow's internal helper agents (reconciliation, escalation), are not configurable: their cost/judgment profiles are part of the design. The `research` key is configurable and applies at the next research spawn rather than a run launch — the feature interview, `/orca:iterate`, and `/orca:followup` each read it fresh; the `prototype` key likewise applies at the next `/orca:prototype` launch.
 
 ## Configuration
 
@@ -568,6 +609,7 @@ Every agent call in the work loop is journaled, and the workflow `runId` is pers
 | Run pauses on a permission prompt | The session wasn't in `bypassPermissions` mode. Enable it (Shift+Tab) and re-invoke the verb — triage offers the resume from the journal — rather than restarting the run. |
 | Debug run stopped at the repro gate (`no-repro`) | The bug could not be reproduced deterministically — the gate is hard by design, and there is no evidence-only fallback. The case is still open with the attempt recorded in its ledger; improve the case (repro steps, environment, evidence) and re-invoke `/orca:debug` — triage finds it. |
 | Debug run ended `not-fixed` (or `undiagnosed` with a `fixBranch` in the result) | A committed fix (and its one internal retry) left `repro.sh` red — or exited 125, leaving the fix unverified (the returned `notes` say which). The case is open, the failed diffs sit in the history of `fix/<slug>` as ledger evidence, and re-invoking `/orca:debug` starts a smarter run: refuted hypotheses excluded, inconclusive ones first. |
+| An agent reports an unprovisioned tree, or a run logs `Provisioning: FAILED` | The repository has no `.orca/setup`, or the one it has broke. Run `/orca:doctor` — its repo-readiness pass derives one from the repo's own evidence and proves it in a throwaway worktree before you approve it. See [Worktree provisioning](#worktree-provisioning). |
 | `git fetch` does nothing in a bare clone made by hand | Bare clones get no fetch refspec. `/orca:init`'s clone path sets `remote.origin.fetch` — do the same, or re-clone through it. |
 
 ## Migrating from the pre-plugin skills
@@ -593,7 +635,7 @@ This repository previously shipped the same workflow as symlink-installed skills
 | `scripts/debug-loop.workflow.js` | The deterministic debug loop: repro gate, hypothesis fan-out, verification, diagnosis, nested fix, repro check. |
 | `scripts/research.workflow.js`, `scripts/prototype.workflow.js` | The one-agent workflows — single stage spawns routed through the Workflow tool instead of the Agent tool, which is what gives them the same `{model, effort}` override surface as every workflow-spawned stage: the research step and the prototype build. |
 | `scripts/spec.workflow.js` | The gated spec stage: `orca:spec` authors the spec, the run's reviewer adversarially reviews it against the brief and a clean checkout, Critical/High findings drive one final revise round — no re-review — and reviewer failures fail open. Started as a one-agent workflow and keeps that family's `{model, effort}` override surface for the spec agent. |
-| `agents/` | The nineteen stage agents, loaded as `orca:<stage>` (the item reviewers are `review-codex` and `review-claude`, the spec reviewers `spec-review-codex` and `spec-review-claude`; the debug stages are `reproduce`, `hypothesize`, `verify`, `diagnose`; `prototype` builds `/orca:prototype`'s spike; `audit` reconciles a finished run for `/orca:retry` and `/orca:followup`). |
+| `agents/` | The twenty stage agents, loaded as `orca:<stage>` (the item reviewers are `review-codex` and `review-claude`, the spec reviewers `spec-review-codex` and `spec-review-claude`; the debug stages are `reproduce`, `hypothesize`, `verify`, `diagnose`; `prototype` builds `/orca:prototype`'s spike; `audit` reconciles a finished run for `/orca:retry` and `/orca:followup`; `doctor` derives and proves a repository's `.orca/setup` for `/orca:doctor` and `/orca:init`). |
 | `.github/workflows/version-bump.yml`, `.github/scripts/version-bump.sh` | Version-bump guard, run by GitHub Actions on every push to main: if shipped files (`skills/`, `agents/`, `scripts/`, `.claude-plugin/`, `.mcp.json`) changed since the commit that introduced the current manifest version, the action commits a bump to main — sized by Conventional Commits across the uncovered range (`!`/`BREAKING CHANGE` → major, `feat` → minor, else patch). The plugin updater keys its install cache on that version, so an unbumped push makes updates silently serve stale code. The check is stateless, so a missed run self-heals on the next push; a manual bump of any size covers the changes that land with it. Pull after pushing shipped changes to pick up the bot's bump commit. |
 | [orca.nvim](https://github.com/miguelbacalhau/orca.nvim) *(separate repository)* | The Neovim companion: `:OrcaReview` reviews a branch's merge-base diff in your own editor — opened by `/orca:review`. Dependency-free, installs like any plugin; `/orca:doctor` checks it and prescribes the install. |
 | [orca.vscode](https://github.com/miguelbacalhau/orca.vscode) *(separate repository)* | The VS Code companion: an "Orca: Review" session walks the same merge-base diff — one native diff at a time, ✓ checkboxes in the Source Control sidebar — opened by `/orca:review` via `code --open-url`. Installed from the release VSIX; `/orca:doctor` checks it and prescribes the install. |
@@ -617,6 +659,8 @@ That single invocation shape is the point: **one allowlist entry — `bash */scr
 | `init-link check\|apply` | `/orca:init`'s root-linking step: `check` reports each name's state (`LINKABLE`, `LINKED`, `NO_SOURCE`, `CONFLICT`), `apply` symlinks the default worktree's `.claude` and `CLAUDE.md` at the repo root, giving bare-root sessions the conventions the harness auto-injects into stage agents. |
 | `review discover\|open\|probe\|wait\|notes` | The deterministic spine of `/orca:review` — deliverable discovery, editor/terminal resolution, probes, and the launch; the skill converses, the script executes. |
 | `secrets place\|remove` | Links `.orca/secrets/` (the mirror-tree secrets convention) into a worktree as relative symlinks — run by the loops and skills after every `worktree add`, and runnable by hand on your own worktree. |
+| `setup run\|verify\|status\|install` | Sole owner of `.orca/setup`, the [worktree provisioning](#worktree-provisioning) script: `run` executes it under the safety envelope (closed stdin, captured output, a process-group watchdog at 15 minutes), `verify` proves a candidate in a throwaway worktree with the repo's own build as the check, `status` is the cheap drift read `/orca:doctor` opens with, and `install` is the only writer — it computes the fingerprint and stamps the provenance header the drift check reads. |
+| `provision` | The composite arrival ritual — `secrets place`, then `setup run`, in that order because an install often needs the `.npmrc` placement provides. One relay call per worktree arrival; advisory by contract, so a failed install rides the frame instead of failing the caller. |
 | `worktree-item`, `commit-verify`, `merge-finalize` | The relay verbs the work loops spawn per item: the whole worktree-arrival ritual, the commit decision table, and merge finalization — results reported through the `@@ORCA@@` frame. |
 | `self-test` | Smoke verb — proves dispatch, lib loading, and the frame path without touching a repository. |
 

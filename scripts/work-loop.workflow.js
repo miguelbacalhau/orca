@@ -495,7 +495,10 @@ const verb = async (argline, keys, label, ph) => {
     }
   }
 }
-const WORKTREE_KEYS = ['rc', 'arrival', 'head']
+const WORKTREE_KEYS = ['rc', 'arrival', 'head',
+  'setup', 'setup_stamped', 'setup_rc', 'setup_seconds', 'setup_tail.b64']
+const PROVISION_KEYS = ['rc', 'arrival',
+  'setup', 'setup_stamped', 'setup_rc', 'setup_seconds', 'setup_tail.b64']
 const COMMIT_VERIFY_KEYS = ['rc', 'action', 'hash', 'message.b64']
 const MERGE_FINALIZE_KEYS = ['rc', 'tip', 'commit', 'attribution', 'ledger', 'cleanup']
 
@@ -623,6 +626,30 @@ const reviewAgentType = reviewer === 'codex' ? 'orca:review-codex' : 'orca:revie
 const secretsStage = async (mode, wt, label) => {
   try { await sh(`bash "${pluginRoot}/scripts/orca.sh" secrets ${mode} "${wt}"`, label, 'Review') }
   catch (err) { log(`secrets ${mode} failed (non-fatal) for ${wt}: ${String((err && err.message) || err)}`) }
+}
+// Post-review re-placement stays `secrets place`, never `provision`: the
+// tree was provisioned at arrival, and `secrets remove` deletes links, not
+// node_modules.
+
+// ---------- provisioning: advisory, and loud in the prompt ----------
+// `.orca/setup` runs on every worktree arrival (verbs/provision.sh). A
+// failure must not kill an item before its agent runs — the agent may be
+// what fixes the build — but the agent has to be TOLD, and log() lines are
+// invisible mid-run (anthropics/claude-code#74419), so the prompt is the
+// only channel that reaches anyone in time.
+const provisionNote = f => {
+  const tail = f.setup_tail ? `\nLast output:\n${f.setup_tail}` : ''
+  if (f.setup === 'failed')
+    return `Provisioning: FAILED — .orca/setup exited ${f.setup_rc} after ${f.setup_seconds}s, so this worktree may lack dependencies or build artifacts.${tail}`
+  if (f.setup === 'timeout')
+    return `Provisioning: TIMED OUT — .orca/setup was killed after ${f.setup_seconds}s, so this worktree may lack dependencies or build artifacts.${tail}`
+  return ''
+}
+const logProvision = (id, f) => {
+  if (f.setup === 'ok') log(`${id}: provisioned by .orca/setup in ${f.setup_seconds}s`)
+  else if (f.setup === 'failed') log(`${id}: provisioning FAILED (rc ${f.setup_rc}, ${f.setup_seconds}s) — the agent was told; it may install what it needs`)
+  else if (f.setup === 'timeout') log(`${id}: provisioning TIMED OUT (${f.setup_seconds}s) — the agent was told; it may install what it needs`)
+  if (f.setup_stamped === 'no') log(`${id}: .orca/setup carries no provenance header — hand-written, or edited past 'orca.sh setup install'`)
 }
 
 const review = async (id, worktree, round, mode, ownedFiles = []) => {
@@ -769,8 +796,10 @@ const buildItem = async item => {
   // walks up from it — possibly into an enclosing repo. The integration
   // worktree always resolves to the right bare repo.
   // One relay call for the whole ritual: the worktree-item verb owns the
-  // three arrivals, the bounded index.lock retry, and the chained secrets
-  // placement (idempotent — a resumed worktree's links are all-OK output).
+  // three arrivals, the bounded index.lock retry, and the chained
+  // provisioning — secrets placement then `.orca/setup` (idempotent — a
+  // resumed worktree's links are all-OK output and a setup script is
+  // required to be cheap when warm).
   // Its frame reports the worktree head, held as commit-verify's base: valid
   // only because implement/fix agents are forbidden to commit or stage
   // (agents/implement.md, agents/fix.md), so HEAD cannot move between here
@@ -787,11 +816,12 @@ const buildItem = async item => {
   for (const line of wtRes.raw.split('\n').map(l => l.trim()))
     if (/^(UNIGNORED|SKIPPED_EXISTS|SKIPPED_ERROR):/.test(line))
       log(`${item.id}: secrets ${line.replace(/\t/g, ' ')}`)
+  logProvision(item.id, wtRes.frame)
 
   const impl = must(await agent(
     [`Worktree: ${wt}`, `Run directory: ${runDir}`,
      `Item: ${item.id} — ${item.title}`, `Owned files: ${item.files.join(', ')}`,
-     objectionForImplement(item.id)]
+     provisionNote(wtRes.frame), objectionForImplement(item.id)]
       .filter(Boolean).join('\n'),
     tuned('implement', { agentType: 'orca:implement', label: `implement:${item.id}`, phase: 'Build', schema: IMPLEMENT })),
     `implement:${item.id}`)
@@ -1401,9 +1431,24 @@ let integration = { features: [], fixesApplied: false, gaps: ['skipped: no items
 // "completed deliverable" from the mere presence of a branch.
 let deliverableState = 'built'
 if (shipped.length) {
+  // Re-provision before verifying: every item that merged may have changed
+  // the dependency set, and the integration worktree was last provisioned
+  // when it was created — possibly hours and a dozen merges ago. Advisory
+  // like every other provisioning, so a failure here is a prompt line and
+  // a log line, never a reason to skip verification.
+  let integrationNote = ''
+  try {
+    const prov = await verb(`provision "${integrationWt}" integrate`,
+      PROVISION_KEYS, 'provision:integration', 'Integrate')
+    logProvision('integration', prov.frame)
+    integrationNote = provisionNote(prov.frame)
+  } catch (err) {
+    log(`integration worktree not provisioned (non-fatal): ${String((err && err.message) || err)}`)
+  }
   try {
     integration = must(await agent(
-      [`Integration worktree: ${integrationWt}`, `Run directory: ${runDir}`].join('\n'),
+      [`Integration worktree: ${integrationWt}`, `Run directory: ${runDir}`, integrationNote]
+        .filter(Boolean).join('\n'),
       tuned('integrate', { agentType: 'orca:integrate', label: 'integration-verify', schema: INTEGRATION })),
       'integration-verify')
     deliverableState = 'verified'

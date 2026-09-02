@@ -67,10 +67,10 @@ Create the worktree on a fresh branch off the trunk tip, then place secrets:
 
 ```bash
 git worktree add <repo-root>/orca-proto-<slug> -b proto/<slug> <trunk>
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh secrets place <repo-root>/orca-proto-<slug>
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh provision <repo-root>/orca-proto-<slug> created
 ```
 
-The `proto/` branch namespace (vs `feature/`) is half the "do not land this" stamp — the report's `**Deliverable state:** prototype` line is the other half. If `worktree add -b` fails because `proto/<slug>` already exists, pick a new slug and retry — never reuse an existing branch. The `place` call is idempotent and best-effort: relay any `UNIGNORED:`/`SKIPPED_EXISTS:` lines as one-way status, never stop for them.
+The `proto/` branch namespace (vs `feature/`) is half the "do not land this" stamp — the report's `**Deliverable state:** prototype` line is the other half. If `worktree add -b` fails because `proto/<slug>` already exists, pick a new slug and retry — never reuse an existing branch. The `provision` call places the secrets and then runs `<repo-root>/.orca/setup` if the repo has one, so the spike starts with its dependencies installed; it is idempotent and best-effort, so relay any `UNIGNORED:`/`SKIPPED_EXISTS:` lines and a `setup=failed|timeout` frame as one-way status, and never stop for them — a spike whose tree is unprovisioned is the agent's problem to solve, not a reason to refuse the run.
 
 ## Step 4: Launch
 

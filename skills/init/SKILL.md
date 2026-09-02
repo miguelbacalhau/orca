@@ -97,7 +97,7 @@ Nothing in this touches history, refs, remotes, or config beyond `core.bare` —
 
 ## Step 3: Verify
 
-Re-run the pre-flight. `BARE_REPO` must now pass — that is this skill's deliverable. Report the machine lines too (`REVIEWER`, and `CODEX` as `PASS | FAIL | SKIPPED`): they cost nothing to relay, but a failing machine gate is fixed by **orca:doctor**, not here. Close by pointing at what comes next: `/orca:doctor` if a machine gate failed, then `/orca:feature` to capture a feature's intent and run it — after the optional linking and decision-log render below.
+Re-run the pre-flight. `BARE_REPO` must now pass — that is this skill's deliverable. Report the machine lines too (`REVIEWER`, and `CODEX` as `PASS | FAIL | SKIPPED`): they cost nothing to relay, but a failing machine gate is fixed by **orca:doctor**, not here. Close by pointing at what comes next: `/orca:doctor` if a machine gate failed, then `/orca:feature` to capture a feature's intent and run it — after the optional linking, decision-log render, and worktree provisioning below.
 
 ## Step 4: Link agent context to the root (optional, consented)
 
@@ -126,6 +126,14 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh decisions render <repo-root> --trunk 
 ```
 
 It is safe to skip — every run re-renders the file at launch; rendering here just shows the user what the runs will see. A repository with no canonical `chose X over Y: <reason>` bullets in its commit bodies (any repository orca has not yet run in) renders a headed empty file — say so rather than presenting it as a gap. An empty repository has no history to render — skip the offer and say why.
+
+## Step 6: Provision worktrees (optional, consented)
+
+The layout is fresh, no run worktrees exist yet, and the user is already in a consent-per-step conversation — the cheapest moment there will ever be to answer the question runs are about to ask eight times each: *what does a fresh worktree need before this repo builds?* `git worktree add` materializes tracked files only, `orca.sh secrets place` adds the untracked credentials, and `<repo-root>/.orca/setup` is the third piece — the script that installs dependencies and builds artifacts in every worktree a run creates.
+
+This is **orca:doctor's Step 4**, run here rather than duplicated: read `${CLAUDE_PLUGIN_ROOT}/skills/doctor/SKILL.md` and apply that step by reference — the cost sentence, the `orca:doctor` agent spawn (with "init" as the asking skill), the verbatim presentation, this skill's own re-verification, and the consented `setup install`. Offer it; never default to it. A conversion is already a long conversation, and "later, via `/orca:doctor`" is a perfectly good answer — say so when offering.
+
+It does not violate this skill's never-install-tooling guideline: the deep pass installs nothing on the machine and writes exactly one file, `<repo-root>/.orca/setup`, after the user has read it.
 
 ## Guidelines
 

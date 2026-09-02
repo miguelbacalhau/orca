@@ -21,14 +21,23 @@
 # index.lock at exactly the wrong moment — one bounded retry on a
 # lock-shaped failure, then a typed WORKTREE_FAILED.
 #
-# Every arrival chains secrets placement (idempotent — a resumed
-# worktree's existing links are all-OK output); placement's typed lines
-# pass through for the caller to log. The frame reports the worktree's
-# head sha, which the caller holds as commit-verify's <base-sha> —
-# valid only because implement/fix agents are forbidden to commit or
-# stage, so HEAD cannot move between here and the commit stage.
+# Every arrival chains the provisioning ritual (verbs/provision.sh:
+# secrets placement, then `.orca/setup`), idempotent by the same
+# construction — a resumed worktree's existing links are all-OK output
+# and a setup script is required to be cheap when warm. Both verbs' typed
+# lines pass through for the caller to log. provision.sh is SOURCED in
+# library mode rather than dispatched: it emits a frame of its own, and
+# two frames in one output is one frame to the relay decoder.
 #
-# Frame keys: rc, arrival=reused|branch_resumed|created, head=<40-hex>
+# The frame reports the worktree's head sha, which the caller holds as
+# commit-verify's <base-sha> — valid only because implement/fix agents
+# are forbidden to commit or stage, so HEAD cannot move between here and
+# the commit stage.
+#
+# Frame keys: rc, arrival=reused|branch_resumed|created, head=<40-hex>,
+# setup=absent|ok|failed|timeout, setup_stamped, setup_rc, setup_seconds,
+# and setup_tail.b64 when provisioning failed — the loops turn the last
+# into the `Provisioning: FAILED` line in the implement agent's prompt.
 
 [ $# -eq 4 ] || fail BAD_ARGS "usage: orca.sh worktree-item <context-dir> <worktree> <branch> <base-ref>"
 wti_ctx="$1"
@@ -72,13 +81,26 @@ if ! wti_arrive >"$wti_errlog" 2>&1; then
 fi
 rm -f "$wti_errlog"
 
-# Placement's typed lines (LINKED/UNIGNORED/SKIPPED_*) pass through;
-# its own misuse FAIL line is the typed failure, so no re-wrapping.
-bash "$orca_scripts_dir/orca.sh" secrets place "$wti_wt" || exit 1
+# The ritual's own typed lines (LINKED/UNIGNORED/SKIPPED_*, SETUP:) pass
+# through; a chained verb's misuse FAIL line is the typed failure, so no
+# re-wrapping. Provisioning itself is advisory and never fails here.
+# shellcheck disable=SC2034  # read by provision.sh as it is sourced below
+ORCA_PROVISION_LIB=1
+# shellcheck source=provision.sh disable=SC1091
+source "$orca_scripts_dir/verbs/provision.sh"
+provision_ritual "$wti_wt" "$wti_arrival" || exit 1
 
 wti_head="$(git -C "$wti_wt" rev-parse HEAD)" \
   || fail GIT_ERROR "could not read HEAD in $wti_wt"
 [[ $wti_head =~ ^[0-9a-f]{40}$ ]] \
   || fail GIT_ERROR "HEAD of $wti_wt is not a commit sha: $wti_head"
 
-emit_frame rc=0 "arrival=$wti_arrival" "head=$wti_head"
+if [ -n "$provision_tail" ]; then
+  emit_frame rc=0 "arrival=$wti_arrival" "head=$wti_head" "setup=$provision_setup" \
+    "setup_stamped=$provision_stamped" "setup_rc=$provision_rc" \
+    "setup_seconds=$provision_seconds" "setup_tail.b64=$provision_tail"
+else
+  emit_frame rc=0 "arrival=$wti_arrival" "head=$wti_head" "setup=$provision_setup" \
+    "setup_stamped=$provision_stamped" "setup_rc=$provision_rc" \
+    "setup_seconds=$provision_seconds"
+fi

@@ -363,7 +363,21 @@ const verb = async (argline, keys, label, ph) => {
     }
   }
 }
-const WORKTREE_KEYS = ['rc', 'arrival', 'head']
+const WORKTREE_KEYS = ['rc', 'arrival', 'head',
+  'setup', 'setup_stamped', 'setup_rc', 'setup_seconds', 'setup_tail.b64']
+
+// `.orca/setup` runs on every worktree arrival (verbs/provision.sh), and a
+// failure is advisory — the verify agent's oracle is repro.sh, which is
+// exactly the thing an unprovisioned tree makes exit 125, so the agent is
+// told rather than blocked.
+const provisionNote = f => {
+  const tail = f.setup_tail ? `\nLast output:\n${f.setup_tail}` : ''
+  if (f.setup === 'failed')
+    return `Provisioning: FAILED — .orca/setup exited ${f.setup_rc} after ${f.setup_seconds}s, so this worktree may lack dependencies or build artifacts.${tail}`
+  if (f.setup === 'timeout')
+    return `Provisioning: TIMED OUT — .orca/setup was killed after ${f.setup_seconds}s, so this worktree may lack dependencies or build artifacts.${tail}`
+  return ''
+}
 
 // ---------- per-run lease (codex F-03; same design as work-loop) ----------
 // The claim/release pair lives in the CLI (triage.sh), the lease's single
@@ -447,8 +461,9 @@ const verifyOne = async (h, hypPath) => {
   // work loop): three arrivals — a worktree or branch left by an
   // interrupted run is resumed, not a collision — the bounded index.lock
   // retry (up to 8 hypothesis worktrees are added concurrently off one git
-  // dir), and chained secrets placement. -C the case worktree — the repo
-  // root is only a git context via its .git pointer file.
+  // dir), and the chained provisioning ritual — secrets placement, then
+  // `.orca/setup`. -C the case worktree — the repo root is only a git
+  // context via its .git pointer file.
   // Least-privilege note: unlike the work loop's review stage, every stage
   // that runs in a hypothesis worktree (reproduce, verify) executes
   // repro.sh, which needs the credentials — so placement stays.
@@ -459,6 +474,8 @@ const verifyOne = async (h, hypPath) => {
   for (const line of wtRes.raw.split('\n').map(l => l.trim()))
     if (/^(UNIGNORED|SKIPPED_EXISTS|SKIPPED_ERROR):/.test(line))
       log(`${h.id}: secrets ${line.replace(/\t/g, ' ')}`)
+  if (wtRes.frame.setup === 'failed' || wtRes.frame.setup === 'timeout')
+    log(`${h.id}: provisioning ${wtRes.frame.setup} (rc ${wtRes.frame.setup_rc}, ${wtRes.frame.setup_seconds}s) — the agent was told; repro.sh may exit 125 until it provisions by hand`)
 
   const v = await agent(
     [`Worktree: ${wt}`,
@@ -467,8 +484,9 @@ const verifyOne = async (h, hypPath) => {
      `Hypothesis: ${h.id} — ${h.statement}`,
      `Hypotheses file: ${hypPath} — your hypothesis's full entry (causal story, killing evidence, falsification experiment) is there${h.fileId && h.fileId !== h.id ? ` under the id "${h.fileId}"` : ''}.`,
      `Verdict artifact path: ${runDir}/verdicts/${h.id}.json`,
-     `Repro command: ${reproCmd} — run from the worktree root; exit 0 = bug absent, 1-127 = bug present, 125 = cannot test (git-bisect-run compatible).`]
-      .join('\n'),
+     `Repro command: ${reproCmd} — run from the worktree root; exit 0 = bug absent, 1-127 = bug present, 125 = cannot test (git-bisect-run compatible).`,
+     provisionNote(wtRes.frame)]
+      .filter(Boolean).join('\n'),
     tuned('verify', { agentType: 'orca:verify', label: `verify:${h.id}`, phase: 'Verify', schema: VERDICT }))
   if (v === null || v === undefined) return null
 

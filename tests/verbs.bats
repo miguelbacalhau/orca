@@ -90,6 +90,46 @@ commit_in() { # <wt> <message>
   [ "$status" -eq 0 ]
   has_line $'LINKED:\t.env'
   [ -L "$BATS_TEST_TMPDIR/r/wt1/.env" ]
+  # No .orca/setup: the provisioning half is a clean no-op, and its keys
+  # are still in the frame — the loops declare them, and an undeclared key
+  # line would be swallowed as a continuation of `head`.
+  [ "$(frame_get setup)" = absent ]
+  [ "$(frame_get setup_rc)" = '-' ]
+}
+
+@test "worktree-item: provisioning rides both arrivals and its failure rides the frame" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  mkdir -p "$BATS_TEST_TMPDIR/r/.orca/secrets"
+  echo 'SECRET=1' >"$BATS_TEST_TMPDIR/r/.orca/secrets/.env"
+  printf 'test -f .env && echo "provisioned $ORCA_ARRIVAL" >>prov.log\n' >"$BATS_TEST_TMPDIR/cand"
+  ( cd "$BATS_TEST_TMPDIR/r" &&
+    bash "$SCRIPTS/orca.sh" setup install "$BATS_TEST_TMPDIR/cand" --sources - ) >/dev/null
+
+  run orca worktree-item "$BATS_TEST_TMPDIR/r/int" "$BATS_TEST_TMPDIR/r/wt1" feature/x-W1 feature/x
+  [ "$status" -eq 0 ]
+  has_line 'arrival=created'
+  [ "$(frame_get setup)" = ok ]
+  [ "$(frame_get setup_stamped)" = yes ]
+  [ "$(cat "$BATS_TEST_TMPDIR/r/wt1/prov.log")" = 'provisioned created' ]
+
+  # A re-run is the `reused` arrival, and it provisions again — a resumed
+  # worktree may be days stale.
+  run orca worktree-item "$BATS_TEST_TMPDIR/r/int" "$BATS_TEST_TMPDIR/r/wt1" feature/x-W1 feature/x
+  has_line 'arrival=reused'
+  [ "$(frame_get setup)" = ok ]
+  [ "$(tail -1 "$BATS_TEST_TMPDIR/r/wt1/prov.log")" = 'provisioned reused' ]
+
+  # A failing script is advisory: the arrival still succeeds, with the tail
+  # in the frame for the loop to put in the agent's prompt.
+  printf 'echo wrecked >&2\nexit 4\n' >"$BATS_TEST_TMPDIR/cand2"
+  ( cd "$BATS_TEST_TMPDIR/r" &&
+    bash "$SCRIPTS/orca.sh" setup install "$BATS_TEST_TMPDIR/cand2" --sources - ) >/dev/null
+  run orca worktree-item "$BATS_TEST_TMPDIR/r/int" "$BATS_TEST_TMPDIR/r/wt2" feature/x-W2 feature/x
+  [ "$status" -eq 0 ]
+  [[ "$(frame_get head)" =~ ^[0-9a-f]{40}$ ]]
+  [ "$(frame_get setup)" = failed ]
+  [ "$(frame_get setup_rc)" = 4 ]
+  [[ "$(frame_get setup_tail.b64 | base64 --decode)" == *wrecked* ]]
 }
 
 # ---- commit-verify -----------------------------------------------------

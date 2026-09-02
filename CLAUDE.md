@@ -7,7 +7,7 @@ A Claude Code plugin for autonomous multi-agent development: `/orca:feature` tak
 ## Layout
 
 - `skills/<name>/SKILL.md` — the thirteen user-facing skills (`feature`, `debug`, `review`, …). Interview instructions live beside them (`skills/feature/interview.md`).
-- `agents/<stage>.md` — the nineteen stage agents, loaded as `orca:<stage>`.
+- `agents/<stage>.md` — the twenty stage agents, loaded as `orca:<stage>`.
 - `scripts/` — the deterministic core:
   - `orca.sh` + `lib.sh` + `verbs/*.sh` — the orca CLI: one case-statement dispatcher, a shared lib, one sourced file per verb. Every shell operation the plugin performs goes through this.
   - `*.workflow.js` — the Workflow-tool scripts (work loop, debug loop, spec gate, research, prototype). Plain JS, no Node APIs, no TypeScript.
@@ -18,7 +18,7 @@ A Claude Code plugin for autonomous multi-agent development: `/orca:feature` tak
 ## Design rules
 
 - **Determinism in scripts, judgment in agents.** Scheduling, retries, gating, and git plumbing are code (workflow scripts, shell verbs); anything requiring judgment is a schema'd agent call whose reasoning lands in run artifacts. Don't move logic from scripts into prose instructions or vice versa.
-- **State lives in files** under the target repo's `.orca/` (brief, spec, plans, findings, report), never in conversation memory.
+- **State lives in files** under the target repo's `.orca/` (brief, spec, plans, findings, report), never in conversation memory. Three of them are *configuration* rather than run state — `config`, `secrets/`, `setup` — and readiness questions about those belong to `/orca:doctor`, never `/orca:status`.
 - **Shell conventions** (see the header comment in `scripts/lib.sh`): typed failures via `fail`, framed output, base64 relay encoding, absolute-path sourcing, sentinel guard against double-sourcing. Runtime envelope is bash 3.2 + git ≥ 2.31 + coreutils — nothing else.
 - No commit produced by an orca run may mention Claude, AI, agents, or orca (`is_banned` in `lib.sh` enforces this).
 

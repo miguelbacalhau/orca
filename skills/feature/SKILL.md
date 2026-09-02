@@ -217,12 +217,12 @@ Create the integration worktree at the repo root, on a fresh branch. The base is
 
 ```bash
 git worktree add <repo-root>/orca-<slug> -b feature/<slug> <base-branch, or the trunk when the brief names none>
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh secrets place <repo-root>/orca-<slug>
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh provision <repo-root>/orca-<slug> created
 ```
 
 The branch is `feature/<slug>` — a neutral namespace that reads as ordinary dev work on GitHub and leaves no orca trace in git history; the slug keeps it collision-unlikely. In the no-base case, `worktree add -b` fails loudly if `feature/<slug>` already exists, never silently reusing it — if it does, pick a different slug and retry rather than reusing the existing branch. (With a `**Base branch:**`, the new branch name must still be fresh — the same rule applies to it, not to the base.)
 
-The `place` call links the user's secrets (`<repo-root>/.orca/secrets/`, the mirror-tree convention — the README documents it) into the fresh worktree as relative symlinks, so integration builds and tests find their `.env`s. It is idempotent and best-effort: a missing or empty secrets tree is a clean `OK` no-op, and per-file problems are typed skips, never a reason to stop the run — relay any `UNIGNORED:` or `SKIPPED_EXISTS:` lines to the user as one-way status.
+The `provision` call is the worktree-arrival ritual every run worktree gets, in two halves. It links the user's secrets (`<repo-root>/.orca/secrets/`, the mirror-tree convention — the README documents it) into the fresh worktree as relative symlinks, so integration builds and tests find their `.env`s; then it runs `<repo-root>/.orca/setup` if the repo has one, installing the dependencies and build artifacts `git worktree add` cannot materialize. Both halves are idempotent and best-effort: a missing secrets tree is a clean `OK` no-op, a missing setup script is `SETUP: absent`, and per-file problems are typed skips, never a reason to stop the run — relay any `UNIGNORED:`/`SKIPPED_EXISTS:` lines and a `setup=failed|timeout` frame to the user as one-way status. A repo with no `.orca/setup` is worth one sentence pointing at `/orca:doctor`, which derives one.
 
 Completed items are merged into this branch, and `feature/<slug>` is the run's deliverable — the user lands it onto trunk themselves at the end. The run never checks out or writes the user's own worktree.
 

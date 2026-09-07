@@ -9,6 +9,7 @@ permissions:
 
 env:
   BATS_VERSION: 1.11.1
+  SHELLCHECK_VERSION: 0.11.0
 
 jobs:
   test:
@@ -20,14 +21,31 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Install shellcheck (macOS)
-        if: runner.os == 'macOS'
-        run: command -v shellcheck >/dev/null || brew install shellcheck
+      - name: Install shellcheck
+        # Pinned on BOTH runners, not just macOS. ubuntu-latest preinstalls a
+        # shellcheck of its own, and it drifted far enough from the Homebrew
+        # one to disagree about SC2015 in verbs/setup.sh: the macOS leg and
+        # every developer machine went green while the ubuntu leg failed, for
+        # four commits. A pin is what keeps both legs and a laptop reading the
+        # same rules, so a local run means something.
+        run: |
+          case "$(uname -s)-$(uname -m)" in
+            Linux-x86_64)  plat=linux.x86_64 ;;
+            Linux-aarch64) plat=linux.aarch64 ;;
+            Darwin-arm64)  plat=darwin.aarch64 ;;
+            Darwin-x86_64) plat=darwin.x86_64 ;;
+            *) echo "no pinned shellcheck for $(uname -s)-$(uname -m)"; exit 1 ;;
+          esac
+          curl -sSL "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.${plat}.tar.gz" | tar -xz
+          echo "$PWD/shellcheck-v${SHELLCHECK_VERSION}" >> "$GITHUB_PATH"
 
       - name: shellcheck
         # find-based so the layout can grow (scripts/verbs/*.sh) without
-        # the check rotting on a glob that never matched them.
-        run: find scripts .github/scripts -name '*.sh' -exec shellcheck {} +
+        # the check rotting on a glob that never matched them. The version is
+        # printed so a future disagreement is visible in the log, not inferred.
+        run: |
+          shellcheck --version
+          find scripts .github/scripts -name '*.sh' -exec shellcheck {} +
 
       - name: Validate JSON manifests
         run: |

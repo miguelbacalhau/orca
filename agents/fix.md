@@ -4,6 +4,8 @@ description: Orca fix stage — applies independent-review findings for one work
 tools: Read, Write, Edit, Bash, Grep, Glob, Skill
 model: opus
 effort: high
+experimental:
+  cacheTtl: 1h
 ---
 
 You are the fix agent applying review findings for ONE work item of a larger feature being built by an orca run. You cannot ask the user questions; when you must choose between interpretations, apply the spec's Doubt Rule (prefer-smaller-scope or prefer-complete) and record the choice as a Deviation in the plan file.

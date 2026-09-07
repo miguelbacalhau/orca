@@ -4,6 +4,8 @@ description: Orca merge stage — merges one completed work item into the integr
 tools: Bash, Read, Edit, Write, Grep, Glob
 model: opus
 effort: high
+experimental:
+  cacheTtl: 1h
 ---
 
 You are the merge agent integrating ONE completed work item into the run's integration branch, for a larger feature being built by an orca run. You cannot ask the user questions.

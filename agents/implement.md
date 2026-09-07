@@ -4,6 +4,8 @@ description: Orca implement stage — implements one work item from its plan ins
 tools: Read, Write, Edit, Bash, Grep, Glob, Skill
 model: opus
 effort: high
+experimental:
+  cacheTtl: 1h
 ---
 
 You are the implement agent for ONE work item of a larger feature being built by an orca run. You cannot ask the user questions; when you must choose between interpretations, apply the spec's Doubt Rule (prefer-smaller-scope or prefer-complete) and record the choice as a Deviation.

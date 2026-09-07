@@ -68,7 +68,7 @@ State the cost before asking, in one sentence: *it creates a throwaway worktree 
 
 On consent, spawn the **`orca:doctor`** agent with a task message carrying: the repository root, the trunk branch (the preflight's `TRUNK_CANDIDATE:`), the scratch directory `<repo-root>/.orca/doctor/`, the **plugin root** — the substituted value of `${CLAUDE_PLUGIN_ROOT}`, spelled out, because that substitution does not reach a subagent's shell and the agent runs the verb itself — the current `.orca/setup` **verbatim with its header** when one exists, the `orca.sh setup status` output from Step 1, and which skill is asking (doctor). One report contract serves doctor and init alike.
 
-It returns a report and leaves a candidate at `<scratch>/candidate`. Then:
+It returns a report and leaves a candidate at `<scratch>/candidate`. The spawn runs in the background: wait for its task notification, and never fabricate the result — the steps below present and re-verify that candidate, and taking them before the agent finishes verifies a missing or half-written script. Then:
 
 1. **Present the candidate body verbatim**, followed by the report — the `What it excluded, and why` section especially. A script that would run migrations against a shared database, launch servers, or write to a path eight worktrees share is exactly what the user is here to catch, and they can only catch it by reading it.
 2. **Re-run the verification yourself**, on the final candidate, rather than trusting the agent's account of it:

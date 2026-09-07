@@ -1409,7 +1409,7 @@ const leaseNote = `orca work loop; slug=${slug}; branch=${integrationBranch}`
 await sh(`bash "${pluginRoot}/scripts/orca.sh" triage claim '${sq(runDir)}' '${sq(leaseNote)}'`,
   'run-lease', 'Plan')
 const releaseLease = async () => {
-  try { await sh(`bash "${pluginRoot}/scripts/orca.sh" triage release '${sq(runDir)}'`, 'run-lease-release', 'Context') }
+  try { await sh(`bash "${pluginRoot}/scripts/orca.sh" triage release '${sq(runDir)}'`, 'run-lease-release', 'Integrate') }
   catch (err) { log(`run lease not released (non-fatal): ${String((err && err.message) || err)}`) }
 }
 

@@ -49,7 +49,7 @@ jobs:
 
       - name: Validate JSON manifests
         run: |
-          for f in .claude-plugin/plugin.json .claude-plugin/marketplace.json .mcp.json; do
+          for f in .claude-plugin/plugin.json .claude-plugin/marketplace.json scripts/codex-findings.schema.json; do
             python3 -m json.tool "$f" >/dev/null || { echo "invalid JSON: $f"; exit 1; }
           done
 

@@ -53,9 +53,13 @@ make_bare_layout() {
   mkdir -p "$1/.orca"
 }
 
-# make_codex_stub <bindir> <version> <ok|denied> — a fake codex CLI whose
-# --version and `login status` behavior the test controls. Prepend
-# <bindir> to PATH; an empty version models a broken/absent binary.
+# make_codex_stub <bindir> <version> <ok|denied> [legacy] — a fake codex
+# CLI whose --version, `login status`, and `exec --help` behavior the test
+# controls. Prepend <bindir> to PATH; an empty version models a
+# broken/absent binary. A fourth argument of `legacy` makes `codex exec
+# --help` advertise none of the flags orca.sh codex drives — the shape of
+# the real 0.155.1 break, where version and auth both looked fine and only
+# the interface had moved.
 make_codex_stub() {
   mkdir -p "$1"
   cat >"$1/codex" <<EOF
@@ -63,6 +67,17 @@ make_codex_stub() {
 case "\$1" in
   --version) echo "codex-cli $2" ;;
   login)     [[ "$3" == ok ]] && exit 0 || exit 1 ;;
+  exec)
+    if [[ "${4:-modern}" == legacy ]]; then
+      echo "Usage: codex exec [OPTIONS] [PROMPT]"
+    else
+      echo "Usage: codex exec [OPTIONS] [PROMPT]"
+      echo "  -s, --sandbox <SANDBOX_MODE>"
+      echo "  -C, --cd <DIR>"
+      echo "      --output-schema <FILE>"
+      echo "  -o, --output-last-message <FILE>"
+    fi
+    ;;
 esac
 EOF
   chmod +x "$1/codex"

@@ -59,7 +59,7 @@ Three design choices carry the whole system:
 
 **Double isolation.** Every stage — spec, plan, implement, review, fix, commit, merge, integrate on the feature side; reproduce, hypothesize, verify, diagnose on the debug side — runs in a dedicated subagent with its own context window, and every unit of parallel work (a feature's work item, a debug run's hypothesis) gets its own git worktree off a shared bare repository. Heavy context — codebase exploration, diffs, instrumented runs, test output — lives and dies inside subagents; the main conversation only reads artifact files and the workflow's structured result. Parallel items can never corrupt each other's files: overlap surfaces as an explicit merge conflict, resolved by a merge agent holding both items' plans.
 
-**Independent review.** Claude implements; a separate reviewer attacks the result before anything is committed. The featured default is cross-model: [Codex](https://openai.com/codex/) reviews, through an MCP registration the plugin bundles for the global `codex` binary (`codex mcp-server`), driven adversarially over each item's diff by a dedicated courier agent — an independent second opinion from a different model family, one that does not share the implementer's blind spots. The review explicitly attacks the tests, since the same model family wrote the code and the tests. With `reviewer=claude` — the detected default wherever codex isn't installed, or an explicit pin via `/orca:config` — a dedicated Claude review agent performs the same adversarial review itself: it keeps fresh-context independence (a separate agent, only the artifacts and the diff), but it is same-model, so it may share the implementer's blind spots. That trade-off is stated wherever the choice is made; cross-model stays the stronger design.
+**Independent review.** Claude implements; a separate reviewer attacks the result before anything is committed. The featured default is cross-model: [Codex](https://openai.com/codex/) reviews, run non-interactively by the plugin's own CLI (`orca.sh codex` → `codex exec`) against the global `codex` binary, driven adversarially over each item's diff by a dedicated courier agent — an independent second opinion from a different model family, one that does not share the implementer's blind spots. The review explicitly attacks the tests, since the same model family wrote the code and the tests. With `reviewer=claude` — the detected default wherever codex isn't installed, or an explicit pin via `/orca:config` — a dedicated Claude review agent performs the same adversarial review itself: it keeps fresh-context independence (a separate agent, only the artifacts and the diff), but it is same-model, so it may share the implementer's blind spots. That trade-off is stated wherever the choice is made; cross-model stays the stronger design.
 
 **A deterministic work loop.** The long autonomous middle of a run is one bundled script executed through Claude Code's Workflow tool, not conversational orchestration. Scheduling, retry bounds, review throttling, merge serialization, and the commit-attribution check are code, so the guarantees are structural rather than model discipline that decays over a long context. Judgment calls (plan reconciliation, escalation, review verdicts) stay in agents, but as schema'd calls whose reasons land in the run's artifacts. Every agent call is journaled, so an interrupted run resumes where it stopped. One honest caveat: the workflow sandbox has no shell, so even "deterministic" git plumbing runs through a small model relay — exit-status markers and marker-delimited output make mis-relay detectable-and-retryable rather than impossible, a probabilistic guarantee by design.
 
@@ -70,13 +70,13 @@ State lives in files, never in conversation memory: the brief, the spec with its
 | Requirement | Detail |
 |---|---|
 | Claude Code | A harness with the **Workflow tool** (the work loop runs through it). `/orca:feature` checks and refuses without it. |
-| Codex CLI | Required only **when the reviewer is codex** (the default wherever it is installed): the **global `codex` binary on PATH**, version **≥ 0.142.5**, authenticated via `codex login`. **Never install codex via npm** — use `brew install codex` or the official release binaries. With `reviewer=claude`, the codex rows don't apply. |
+| Codex CLI | Required only **when the reviewer is codex** (the default wherever it is installed): the **global `codex` binary on PATH**, version **≥ 0.142.5**, authenticated via `codex login`, and still carrying the `codex exec` flags orca drives (`--output-schema`, `--output-last-message`, `--sandbox`, `--cd`) — the pre-flight asks the binary directly, because a version number does not tell you the interface has not moved. **Never install codex via npm** — use `brew install codex` or the official release binaries. With `reviewer=claude`, the codex rows don't apply. |
 | Repository layout | Bare-repo-with-worktrees (`.bare/` + peer worktrees). `/orca:init` sets this up, including converting an existing conventional checkout in place. |
 | git | ≥ 2.31 (`rev-parse --path-format` — every orca script's repository resolution; older gits get a typed `OLD_GIT` failure naming the upgrade, never a misdiagnosis); ≥ 2.42 for `worktree add --orphan` when `/orca:init` creates a brand-new repository. |
-| `MCP_TOOL_TIMEOUT` | Codex-only, like the Codex CLI row: set to `1200000` (~20 min) in a Claude Code settings `env` block, so Codex reviews are not killed at the default MCP tool timeout. A plugin cannot ship session env, so `/orca:doctor` writes it for you. |
+| `BASH_MAX_TIMEOUT_MS` | Codex-only, like the Codex CLI row: set to `1200000` (~20 min) in a Claude Code settings `env` block, so Codex reviews are not killed at the default Bash tool timeout. A plugin cannot ship session env, so `/orca:doctor` writes it for you. |
 | Permission mode | Runs need `bypassPermissions` for the session — see [Permissions and autonomy](#permissions-and-autonomy). |
 
-Everything else — the twenty stage agents and the codex MCP server registration — ships inside the plugin itself; there is nothing to install per repository beyond the layout.
+Everything else — the twenty stage agents and the CLI that drives codex — ships inside the plugin itself; there is nothing to install per repository beyond the layout.
 
 ## Installation
 
@@ -106,7 +106,7 @@ For local development on the plugin itself, load a checkout directly for a singl
 claude --plugin-dir /path/to/this/repo
 ```
 
-MCP servers load at session start, so after installing or enabling the plugin, **start a fresh session** before running — when the reviewer is codex, `/orca:feature` verifies live that the codex MCP tool resolves and stops if it does not.
+Plugins load at session start, so after installing or enabling one, **start a fresh session** before running. There is nothing session-scoped left to verify for the reviewer: codex is reached by running the binary, and `/orca:feature`'s pre-flight checks it from a shell.
 
 ## Quick start
 
@@ -117,7 +117,7 @@ MCP servers load at session start, so after installing or enabling the plugin, *
 /orca:init
 
 # 1b. One-time per machine, only if the pre-flight flags it: Codex CLI
-#     install/auth guidance and the MCP timeout settings write. Skippable
+#     install/auth guidance and the review timeout settings write. Skippable
 #     outright if you'll run with the Claude reviewer.
 /orca:doctor
 
@@ -263,7 +263,7 @@ Preconditions for conversion — it stops rather than improvising: a clean tree,
 
 It closes by offering, never defaulting, `/orca:doctor`'s [worktree provisioning](#worktree-provisioning) pass: the layout is fresh and no run worktrees exist yet, which is the cheapest moment to answer what a fresh worktree needs before the repo builds.
 
-Layout only: machine-gate failures the pre-flight reports (Codex, the MCP timeout) are routed to , not fixed here.
+Layout only: machine-gate failures the pre-flight reports (Codex, the review timeout) are routed to , not fixed here.
 
 ### `/orca:doctor`
 
@@ -273,7 +273,8 @@ It diagnoses with the same read-only pre-flight (or probes codex directly when r
 
 - **Codex missing or stale** — points you at the official non-npm install (`brew install codex` or the release binaries; never npm). Installing is your action.
 - **Not authenticated** — suggests `codex login` and verifies with `codex login status`. Also yours.
-- **`MCP_TOOL_TIMEOUT` unset** — writes it into a settings `env` block (project or user level, your choice), merged, with the session-restart caveat.
+- **`codex exec` interface moved** — names the flags this codex no longer has, and says whether the fix is an upgrade or an orca update; offers `reviewer=claude` as the unblocking pin either way.
+- **`BASH_MAX_TIMEOUT_MS` unset** — writes it into a settings `env` block (project or user level, your choice), merged, with the session-restart caveat.
 - **A stale orca status line** — earlier versions offered a `statusLine` settings block invoking the now-retired `orca.sh statusline` verb; if one is found, doctor offers to remove it (a leftover block breaks the status bar). A status line that never mentions orca is never touched.
 
 Inside a repository it also reads `orca.sh setup status` — milliseconds, creates nothing — and says whether run worktrees get provisioned at all: `absent` (they don't), `current` (a verified script, or a recorded "this repo needs nothing"), `drifted` with the manifest paths that moved since, or `unstamped` (hand-written, so its drift check is dead). Any of the last three earns an **offer**, never a default, of the deep pass: it creates a throwaway worktree under `.orca/doctor/`, runs a candidate install in it under your permissions, removes it, and takes a few minutes. On consent the `orca:doctor` agent derives and proves a candidate, doctor re-runs the verification itself rather than trusting the agent's account of it, shows you the script verbatim, and installs it only after you say so. See [Worktree provisioning](#worktree-provisioning).
@@ -307,7 +308,7 @@ Valid stage values — models `haiku` | `sonnet` | `opus` | `fable`, efforts `lo
    │
    ├─ 0. Triage                     resume an interrupted run · run a queued brief
    │                                · or interview → brief, then run now or queue
-   ├─ 1. Pre-flight + confirm       orca.sh preflight gates, Workflow tool, live MCP
+   ├─ 1. Pre-flight + confirm       orca.sh preflight gates, Workflow tool
    │                                check, bypassPermissions; ONE user confirmation
    ├─ 2. Spec (orca:spec)           read-only codebase exploration → spec.md with
    │                                Interfaces + a 2–8 item dependency-ordered
@@ -327,7 +328,7 @@ Valid stage values — models `haiku` | `sonnet` | `opus` | `fable`, efforts `lo
                                     knowledge worth promoting, landing
 ```
 
-**Pre-flight** (`scripts/orca.sh preflight`, read-only, also run early during the interview) prints one machine-readable line per gate: `BARE_REPO`, a `REVIEWER: codex|claude (pinned|detected)` line resolving which reviewer the run uses, `CODEX` (binary ≥ 0.142.5, authenticated, `MCP_TOOL_TIMEOUT` set — checked only when the resolved reviewer is codex, `SKIPPED` otherwise), an informational `TRUNK_CANDIDATE`, and a final `RESULT` mirrored by the exit code. On any `FAIL` the run does not start; remediation goes through `/orca:init` for the layout gate and `/orca:doctor` for the machine gates.
+**Pre-flight** (`scripts/orca.sh preflight`, read-only, also run early during the interview) prints one machine-readable line per gate: `BARE_REPO`, a `REVIEWER: codex|claude (pinned|detected)` line resolving which reviewer the run uses, `CODEX` (binary ≥ 0.142.5, authenticated, `codex exec` still carrying the flags orca drives, `BASH_MAX_TIMEOUT_MS` set — checked only when the resolved reviewer is codex, `SKIPPED` otherwise), an informational `TRUNK_CANDIDATE`, and a final `RESULT` mirrored by the exit code. On any `FAIL` the run does not start; remediation goes through `/orca:init` for the layout gate and `/orca:doctor` for the machine gates.
 
 **Spec** is written once, by a dedicated read-only agent, from the confirmed brief. Its two load-bearing sections: **Interfaces Between Work Items** — the contracts (type shapes, signatures, file ownership, naming) that let items build in parallel without inventing incompatible seams — and the **Work Breakdown**, which becomes the workflow's item list verbatim, each item carrying a one-line acceptance criterion checkable from the integration worktree. If the requested scope cannot be split cleanly against the codebase, the run surfaces that and stops rather than launching against a spec known to be wrong.
 
@@ -484,11 +485,11 @@ The first eleven serve feature runs — and, the spec stage's three excepted (`s
 | Stage | Role | Default model | Default effort |
 |---|---|---|---|
 | `spec` | Explores the codebase; writes the spec and work breakdown (once, at the start — plus at most one review-gated revise round) | fable | high |
-| `spec-review-codex` | Courier that drives the Codex spec review — spec vs. brief vs. codebase, before launch — via MCP and files the findings verbatim | sonnet | medium |
+| `spec-review-codex` | Courier that drives the Codex spec review — spec vs. brief vs. codebase, before launch — via `orca.sh codex`, which files the findings verbatim | sonnet | medium |
 | `spec-review-claude` | Performs the independent spec review itself — same charter and artifact schema as the Codex path | opus | high |
 | `plan` | Read-only planner for one item; writes a plan a cheaper implementer can follow | fable | high |
 | `implement` | Builds one item in its worktree, checking off and amending its plan | opus | high |
-| `review-codex` | Courier that drives the Codex review via MCP and files the findings verbatim | sonnet | medium |
+| `review-codex` | Courier that drives the Codex review via `orca.sh codex`, which files the findings verbatim | sonnet | medium |
 | `review-claude` | Performs the independent review itself — same adversarial contract and artifact schema as the Codex path | opus | high |
 | `fix` | Applies review findings; escalates findings rooted in the plan, spec, or other items | opus | high |
 | `commit` | One Conventional Commit per item, staged by name, carrying the item's decisions, no attribution | haiku | low |
@@ -552,21 +553,25 @@ agents.implement.model=opus
 
 A present `reviewer` key **pins** the choice; an absent key means each launch **detects** (codex on PATH at the minimum version → codex, else claude). `editor` (`nvim`|`vscode`|`none`) and `terminal` (`tmux`|`none`) carry the identical contract for `/orca:review` — absent detects (orca.nvim probe first, then orca.vscode's; `$TMUX`), a pin turns a missing dependency into a loud failure, `none` opts out to a printed command. They are machine preferences in a repo file — a deliberate trade: `.orca/` sits outside every worktree (effectively personal), detection means most users never set them, and one config surface beats a user-level layer for two keys. The `agents` overrides sit on top of the agent defaults. One block serves both verbs — the feature stages and the debug stages (`reproduce`, `hypothesize`, `verify`, `diagnose`) live side by side, and each run applies its own verb's keys while validating and ignoring the other's. The `research` key belongs to no run: it applies whenever a skill spawns the research agent (the feature interview, `/orca:iterate`, `/orca:followup`), and both runs validate and ignore it — as they do `prototype`, which `/orca:prototype` reads at its own launch.
 
-**`MCP_TOOL_TIMEOUT`** — codex-only: client-side session env governing MCP tool-call timeouts; a plugin cannot ship it, so `/orca:doctor` writes it into the `env` block of `.claude/settings.local.json` (or `~/.claude/settings.json`):
+**`BASH_MAX_TIMEOUT_MS`** — codex-only: reviews run the codex binary through the Bash tool, whose default cap is well under a cold adversarial review, and only client-side session env can raise it. A plugin cannot ship session env, so `/orca:doctor` writes it into the `env` block of `.claude/settings.local.json` (or `~/.claude/settings.json`):
 
 ```json
-{ "env": { "MCP_TOOL_TIMEOUT": "1200000" } }
+{ "env": { "BASH_MAX_TIMEOUT_MS": "1200000" } }
 ```
 
-~20 minutes is deliberate: the workflow retries reviews at two levels, so this value multiplies into the per-item worst case (~80 minutes at this setting; an hour would balloon it to several). Settings env loads at **session start** — restart the session after writing it.
+~20 minutes is deliberate: the workflow retries reviews at two levels, so this value multiplies into the per-item worst case (~80 minutes at this setting; an hour would balloon it to several). `orca.sh codex` caps codex at eighteen minutes itself — deliberately inside that deadline, not equal to it, so a wedged review dies there with a reported reason instead of the outer kill landing mid-report. Settings env loads at **session start** — restart the session after writing it.
 
-**Bundled `.mcp.json`** — registers the codex MCP server as the global PATH binary, nothing else. Note what that means: the server runs **whatever `codex` is first on `$PATH`** in the session's environment — a shadowed or tampered binary there runs with the review's permissions, so treat PATH hygiene as part of the review trust story:
+If an older `/orca:doctor` wrote **`MCP_TOOL_TIMEOUT`** into your settings, it is dead weight now and safe to delete: through orca 0.32.0 the reviewer was an MCP server, and it no longer is.
 
-```json
-{ "mcpServers": { "orca-codex": { "command": "codex", "args": ["mcp-server"] } } }
-```
+### How codex is reached
 
-The server is deliberately named `orca-codex`, not `codex`, so it can never collide with a user's own `codex` registration. A harsher failure mode has nothing to do with names: as of Claude Code 2.1.202, a project that carries any MCP config of its own — a `.mcp.json` at the repo root, or local-scope servers from `claude mcp add` — loads **none** of a plugin's bundled MCP servers (upstream bug; verified with installed plugins and `--plugin-dir` alike). The live MCP gate and `/orca:doctor` both diagnose it; the fix is removing the project-level registration (a leftover `codex` entry is redundant — the plugin bundles the server) or pinning `reviewer=claude` until the project's own MCP servers can coexist with plugins.
+`orca.sh codex` runs `codex exec` non-interactively: the prompt on stdin (a multi-KB review prompt cannot survive argv quoting intact), `--sandbox read-only` with the item's worktree as `--cd`, `--output-schema` making the findings shape a contract Codex enforces rather than a plea in the prompt, and `--output-last-message` writing the payload straight to disk — so the artifact is **verbatim by construction**: no agent transcribes it, so no agent can corrupt it. The verb writes to the artifact and round-archive paths only after the payload passes its checks; a review that fails lands nowhere and comes back as a retryable reason.
+
+The pre-flight checks the *value* of `BASH_MAX_TIMEOUT_MS`, not just its presence: a key set to `1000` would otherwise pass the gate and kill every review a second in.
+
+It runs **whatever `codex` is first on `$PATH`** — a shadowed or tampered binary there runs with the review's permissions, so treat PATH hygiene as part of the review trust story.
+
+Before 0.33.0 this went over MCP, through a bundled `.mcp.json` registering `codex mcp-server`. The Codex CLI removed that subcommand (gone by 0.155.1) without deprecating it, and because an unknown subcommand is read as a prompt for the interactive TUI, the server died with `Error: stdin is not a terminal` — surfacing as "Connection closed" while the version and auth gates both passed. That is why the pre-flight now probes `codex exec --help` for the flags orca actually drives: a version number does not tell you the interface has not moved.
 
 ## Permissions and autonomy
 
@@ -600,11 +605,11 @@ Every agent call in the work loop is journaled, and the workflow `runId` is pers
 | `BARE_REPO: FAIL: conventional checkout` | The repo isn't in the bare-with-worktrees layout. Run `/orca:init` — it converts interactively, preserving untracked files. |
 | `CODEX: FAIL: codex not on PATH` / version too old | Install or upgrade the Codex CLI from the official non-npm distribution (`brew install codex` or the release binaries) — `/orca:doctor` walks it through. **Never `npm i -g @openai/codex`.** |
 | `CODEX: FAIL: not authenticated` | Run `codex login` (interactive; your action, not the agent's). Verify with `codex login status`. `/orca:doctor` guides and re-checks. |
-| `CODEX: FAIL: MCP_TOOL_TIMEOUT not set` | Run `/orca:doctor` to write it into a settings env block, then start a fresh session. |
+| `CODEX: FAIL: BASH_MAX_TIMEOUT_MS not set` | Run `/orca:doctor` to write it into a settings env block, then start a fresh session. |
+| `CODEX: FAIL: codex … has no 'codex exec' …` | This codex's interface moved out from under orca. Upgrade the Codex CLI if it is behind; if it is current, orca needs updating — pin `reviewer=claude` via `/orca:config` to unblock meanwhile. |
 | Run used the Claude reviewer unexpectedly | The reviewer key is absent and codex wasn't detected — missing or below the minimum version. Fix codex via `/orca:doctor`, or pin `reviewer=codex` via `/orca:config` so a broken codex fails the pre-flight loudly instead. |
 | `REVIEWER: FAIL: invalid reviewer` | The `reviewer` key in `.orca/config` is not `codex`/`claude` (or appears twice). Fix it with `/orca:config` — the pre-flight never guesses. |
 | `PLUGIN_ROOT: FAIL: NO_PLUGIN_ROOT` (or the workflow refuses launch with `NO_PLUGIN_ROOT`) | The plugin-shipped CLI (`scripts/orca.sh`) isn't where the install put the rest of the plugin — the work loop's worktree/commit/merge rituals run through it, so nothing can commit. Reinstall the plugin; there is no inline fallback by design. |
-| `/orca:feature` says the codex MCP tool doesn't resolve | Two causes. If the project has any MCP config of its own (a `.mcp.json` at the repo root, or local-scope servers — `claude mcp list` shows both), a Claude Code bug (as of 2.1.202) loads none of the plugin's bundled MCP servers: remove the redundant registration, or pin `reviewer=claude` if the project's own servers must stay. Otherwise check the plugin is installed and enabled — MCP servers load at session start, so the session may simply predate the install or enablement. Either way, start a fresh session in the project. |
 | `/orca:feature` says the harness has no Workflow tool | The work loop needs a Claude Code harness with workflows; there is no conversational fallback. |
 | Run pauses on a permission prompt | The session wasn't in `bypassPermissions` mode. Enable it (Shift+Tab) and re-invoke the verb — triage offers the resume from the journal — rather than restarting the run. |
 | Debug run stopped at the repro gate (`no-repro`) | The bug could not be reproduced deterministically — the gate is hard by design, and there is no evidence-only fallback. The case is still open with the attempt recorded in its ledger; improve the case (repro steps, environment, evidence) and re-invoke `/orca:debug` — triage finds it. |
@@ -627,16 +632,16 @@ This repository previously shipped the same workflow as symlink-installed skills
 | Path | Contents |
 |---|---|
 | `.claude-plugin/plugin.json` | The plugin manifest (`orca`). |
-| `.mcp.json` | Bundled codex MCP server registration — the global PATH `codex` binary, never npm. |
 | `skills/feature/`, `skills/debug/`, `skills/prototype/`, `skills/review/`, `skills/pr/`, `skills/retry/`, `skills/followup/`, `skills/iterate/`, `skills/status/`, `skills/archive/`, `skills/init/`, `skills/doctor/`, `skills/config/` | The thirteen skills. |
 | `skills/feature/interview.md`, `skills/debug/interview.md` | The interview instructions, loaded only when a verb's triage lands on a new interview. |
 | `scripts/orca.sh`, `scripts/lib.sh`, `scripts/verbs/` | The orca CLI — the plugin's entire shell surface behind one invocation shape (see [The orca CLI](#the-orca-cli) below): a case-statement dispatcher, the shared lib (typed failures, framed output, base64 relay encoding, repository resolution, the config parser/writer, the banned-attribution regex), and one sourced file per verb. |
+| `scripts/codex-findings.schema.json` | The findings shape `orca.sh codex` hands Codex as `--output-schema`, making the review's JSON a contract Codex enforces rather than a plea in the prompt. Shared by the item and spec reviewers. |
 | `scripts/work-loop.workflow.js` | The deterministic feature work loop, run through the Workflow tool — also nested by debug runs for the fix tail. |
 | `scripts/debug-loop.workflow.js` | The deterministic debug loop: repro gate, hypothesis fan-out, verification, diagnosis, nested fix, repro check. |
 | `scripts/research.workflow.js`, `scripts/prototype.workflow.js` | The one-agent workflows — single stage spawns routed through the Workflow tool instead of the Agent tool, which is what gives them the same `{model, effort}` override surface as every workflow-spawned stage: the research step and the prototype build. |
 | `scripts/spec.workflow.js` | The gated spec stage: `orca:spec` authors the spec, the run's reviewer adversarially reviews it against the brief and a clean checkout, Critical/High findings drive one final revise round — no re-review — and reviewer failures fail open. Started as a one-agent workflow and keeps that family's `{model, effort}` override surface for the spec agent. |
 | `agents/` | The twenty stage agents, loaded as `orca:<stage>` (the item reviewers are `review-codex` and `review-claude`, the spec reviewers `spec-review-codex` and `spec-review-claude`; the debug stages are `reproduce`, `hypothesize`, `verify`, `diagnose`; `prototype` builds `/orca:prototype`'s spike; `audit` reconciles a finished run for `/orca:retry` and `/orca:followup`; `doctor` derives and proves a repository's `.orca/setup` for `/orca:doctor` and `/orca:init`). |
-| `.github/workflows/version-bump.yml`, `.github/scripts/version-bump.sh` | Version-bump guard, run by GitHub Actions on every push to main: if shipped files (`skills/`, `agents/`, `scripts/`, `.claude-plugin/`, `.mcp.json`) changed since the commit that introduced the current manifest version, the action commits a bump to main — sized by Conventional Commits across the uncovered range (`!`/`BREAKING CHANGE` → major, `feat` → minor, else patch). The plugin updater keys its install cache on that version, so an unbumped push makes updates silently serve stale code. The check is stateless, so a missed run self-heals on the next push; a manual bump of any size covers the changes that land with it. Pull after pushing shipped changes to pick up the bot's bump commit. |
+| `.github/workflows/version-bump.yml`, `.github/scripts/version-bump.sh` | Version-bump guard, run by GitHub Actions on every push to main: if shipped files (`skills/`, `agents/`, `scripts/`, `.claude-plugin/`) changed since the commit that introduced the current manifest version, the action commits a bump to main — sized by Conventional Commits across the uncovered range (`!`/`BREAKING CHANGE` → major, `feat` → minor, else patch). The plugin updater keys its install cache on that version, so an unbumped push makes updates silently serve stale code. The check is stateless, so a missed run self-heals on the next push; a manual bump of any size covers the changes that land with it. Pull after pushing shipped changes to pick up the bot's bump commit. |
 | [orca.nvim](https://github.com/miguelbacalhau/orca.nvim) *(separate repository)* | The Neovim companion: `:OrcaReview` reviews a branch's merge-base diff in your own editor — opened by `/orca:review`. Dependency-free, installs like any plugin; `/orca:doctor` checks it and prescribes the install. |
 | [orca.vscode](https://github.com/miguelbacalhau/orca.vscode) *(separate repository)* | The VS Code companion: an "Orca: Review" session walks the same merge-base diff — one native diff at a time, ✓ checkboxes in the Source Control sidebar — opened by `/orca:review` via `code --open-url`. Installed from the release VSIX; `/orca:doctor` checks it and prescribes the install. |
 
@@ -657,6 +662,7 @@ That single invocation shape is the point: **one allowlist entry — `bash */scr
 | `triage discover\|status\|snapshot\|archive\|unarchive\|claim\|release` | Discovery spine, the per-run lease, and run retirement. Read-only: interrupted/unlaunched runs with byte-exact resume handles, lease verdicts (`LEASE: live\|stale\|none\|unknown`), queued briefs, open cases (`discover`), the git-footprint join (`status`), both domains folded with a ranked `ACTION:` list and `--run` fragment matching (`snapshot`), and the retirement gate (`archive --scan`). The report-body enrichment (`BLOCKED:`/`FOLLOWUP:`) is opt-in behind `--reports`, since it grows with run history and only `/orca:status` renders it. Mutating: the lease's writer pair — `claim [--steal] [--runid]` (atomic mkdir; steal is rename-first) and `release` — and the archived marker's writer pair, `archive <run-dir>` (re-gated at write time) and `unarchive`. |
 | `init-convert check\|convert\|cleanup\|recover` | The mechanical core of `/orca:init`'s conventional-to-bare conversion — gates, NUL-safe untracked moves, crash journal with signal traps, `recover`, and the manifest-checked `cleanup`. |
 | `init-link check\|apply` | `/orca:init`'s root-linking step: `check` reports each name's state (`LINKABLE`, `LINKED`, `NO_SOURCE`, `CONFLICT`), `apply` symlinks the default worktree's `.claude` and `CLAUDE.md` at the repo root, giving bare-root sessions the conventions the harness auto-injects into stage agents. |
+| `codex` | The cross-model reviewer's transport: runs `codex exec` read-only over a prompt file, under a twenty-minute process-group watchdog, with the bundled findings schema enforced and the payload written straight to the artifact (and round-archive) path — verbatim by construction. A review that fails writes nothing and frames a status the loops retry on. |
 | `review discover\|open\|probe\|wait\|notes` | The deterministic spine of `/orca:review` — deliverable discovery, editor/terminal resolution, probes, and the launch; the skill converses, the script executes. |
 | `secrets place\|remove` | Links `.orca/secrets/` (the mirror-tree secrets convention) into a worktree as relative symlinks — run by the loops and skills after every `worktree add`, and runnable by hand on your own worktree. |
 | `setup run\|verify\|status\|install` | Sole owner of `.orca/setup`, the [worktree provisioning](#worktree-provisioning) script: `run` executes it under the safety envelope (closed stdin, captured output, a process-group watchdog at 15 minutes), `verify` proves a candidate in a throwaway worktree with the repo's own build as the check, `status` is the cheap drift read `/orca:doctor` opens with, and `install` is the only writer — it computes the fingerprint and stamps the provenance header the drift check reads. |

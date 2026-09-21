@@ -23,8 +23,7 @@
 # bit is irrelevant (preflight's `test -f` reasoning) — with:
 #   cwd            the worktree being provisioned
 #   stdin          </dev/null, so a package manager that prompts dies
-#                  instead of wedging a workflow stage until the MCP
-#                  timeout
+#                  instead of wedging a workflow stage until its cap
 #   stdout+stderr  captured to a log; only the tail crosses a relay, and
 #                  only base64-encoded
 #   ORCA_WORKTREE  absolute path of the worktree (= cwd)
@@ -124,7 +123,7 @@
 # minutes each, a devserver build under one) sum to well under five;
 # eight worktrees contending for CPU and disk can plausibly triple that.
 # Fifteen minutes keeps headroom over a fat cold install while still
-# failing a hung one before a review's ~20-minute MCP_TOOL_TIMEOUT would.
+# failing a hung one before a review's ~20-minute cap would.
 # Not per-repo configurable: the config grammar cannot carry a number, and
 # a script that needs longer should be moving cold work into a shared
 # cache — the doctor's measured `seconds` is what says a repo is near it.

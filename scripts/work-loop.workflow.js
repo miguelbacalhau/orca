@@ -57,7 +57,7 @@
 // }
 //
 // Review prompts are not inputs: the reviewer agent (orca:review-codex driving
-// Codex through the plugin-bundled orca-codex MCP server, or orca:review-claude
+// Codex through the orca CLI's `codex` verb, or orca:review-claude
 // reviewing itself) carries the adversarial review contract in its own
 // definition, receiving only the run directory, artifact paths, and owned
 // files — nothing has to be written into <runDir>/reviews/ before this
@@ -603,10 +603,10 @@ const survivingObjections = () => Object.keys(objections)
   .map(id => ({ id, issues: objections[id].slice() }))
 
 // One review pass by the run's configured reviewer: with codex, an
-// orca:review-codex agent drives Codex through the plugin-bundled orca-codex
-// MCP server (its own
-// definition carries the review template and the retry rules for transient
-// failures and timeouts) and writes the findings JSON verbatim; with claude,
+// orca:review-codex agent drives Codex through the orca CLI's `codex` verb
+// (its own definition carries the review template and the retry rules for
+// transient failures and timeouts) and the verb lands the findings JSON
+// verbatim; with claude,
 // an orca:review-claude agent performs the review itself and writes findings
 // in the identical schema. Either way the agent writes the artifact and the
 // round archive, counts the findings it wrote, and returns the counts via
@@ -662,7 +662,11 @@ const review = async (id, worktree, round, mode, ownedFiles = []) => {
       [`Worktree: ${worktree}`, `Run directory: ${runDir}`, `Item: ${id}`, `Mode: ${mode}`,
        `Artifact path: ${artifact}`, `Round archive path: ${archive}`,
        mode === 'item' ? `Owned files: ${ownedFiles.join(', ') || 'the files its plan names'}` : '',
-       mode === 'item' ? objectionForReview(id) : '']
+       mode === 'item' ? objectionForReview(id) : '',
+       // Only the codex courier shells out (orca.sh codex) and so needs the
+       // plugin's path; the claude reviewer's prompt stays byte-identical to
+       // what it has always been.
+       reviewer === 'codex' ? `Plugin root: ${pluginRoot}` : '']
         .filter(Boolean).join('\n'),
       tuned('review', { agentType: reviewAgentType, schema: REVIEW,
         label: `review:${id}#${round}${attempt > 1 ? '~retry' : ''}`, phase: 'Review' }))

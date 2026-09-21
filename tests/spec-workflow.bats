@@ -15,45 +15,62 @@ run_wf() {
   run node "$ORCA_ROOT/tests/run-workflow.js" "$SCRIPTS/spec.workflow.js" "$1" "$2"
 }
 
-ARGS='{"prompt":"SPEC TASK","runDir":"/run","reviewWorktree":"/wt","reviewer":"codex"}'
+ARGS='{"prompt":"SPEC TASK","runDir":"/run","reviewWorktree":"/wt","reviewer":"codex","pluginRoot":"/plug"}'
 CLEAN='{"written":true,"total":0,"criticalHigh":0,"reason":""}'
 
 @test "rejects a missing prompt at launch" {
-  run_wf '{"runDir":"/run","reviewWorktree":"/wt","reviewer":"codex"}' '[]'
+  run_wf '{"runDir":"/run","reviewWorktree":"/wt","reviewer":"codex","pluginRoot":"/plug"}' '[]'
   [[ "$output" == *'"ok":false'* ]]
   [[ "$output" == *'args.prompt must be a non-empty string'* ]]
   [[ "$output" == *'"calls":[]'* ]]
 }
 
 @test "rejects a relative runDir and reviewWorktree at launch" {
-  run_wf '{"prompt":"p","runDir":"run","reviewWorktree":"/wt","reviewer":"codex"}' '[]'
+  run_wf '{"prompt":"p","runDir":"run","reviewWorktree":"/wt","reviewer":"codex","pluginRoot":"/plug"}' '[]'
   [[ "$output" == *'args.runDir must be an absolute path'* ]]
-  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"wt","reviewer":"codex"}' '[]'
+  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"wt","reviewer":"codex","pluginRoot":"/plug"}' '[]'
   [[ "$output" == *'args.reviewWorktree must be an absolute path'* ]]
 }
 
+@test "rejects a missing or relative pluginRoot at launch" {
+  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"codex"}' '[]'
+  [[ "$output" == *'"ok":false'* ]]
+  [[ "$output" == *'NO_PLUGIN_ROOT'* ]]
+  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"codex","pluginRoot":"plug"}' '[]'
+  [[ "$output" == *'NO_PLUGIN_ROOT'* ]]
+}
+
+# The codex courier shells out to orca.sh and so must be told where the
+# plugin is; the claude reviewer never does, and its prompt stays as it was.
+@test "the plugin root reaches the codex reviewer and only it" {
+  run_wf "$ARGS" '["s",'"$CLEAN"']'
+  [[ "$output" == *'Plugin root: /plug'* ]]
+  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"claude","pluginRoot":"/plug"}' '["s",'"$CLEAN"']'
+  [[ "$output" != *'Plugin root:'* ]]
+}
+
 @test "rejects a reviewer outside codex|claude at launch" {
-  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"gemini"}' '[]'
+  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"gemini","pluginRoot":"/plug"}' '[]'
   [[ "$output" == *'"ok":false'* ]]
   [[ "$output" == *'args.reviewer must be \"codex\" or \"claude\"'* ]]
 }
 
 @test "rejects a model or effort outside the shared vocabulary" {
-  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"codex","model":"gpt5"}' '[]'
+  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"codex","pluginRoot":"/plug","model":"gpt5"}' '[]'
   [[ "$output" == *'args.model must be one of'* ]]
-  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"codex","effort":"extreme"}' '[]'
+  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"codex","pluginRoot":"/plug","effort":"extreme"}' '[]'
   [[ "$output" == *'args.effort must be one of'* ]]
 }
 
 @test "rejects an empty or relative amendPath at launch" {
-  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"codex","amendPath":""}' '[]'
+  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"codex","pluginRoot":"/plug","amendPath":""}' '[]'
   [[ "$output" == *'args.amendPath must be a non-empty string'* ]]
-  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"codex","amendPath":"run/spec.amendment.md"}' '[]'
+  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"codex","pluginRoot":"/plug","amendPath":"run/spec.amendment.md"}' '[]'
   [[ "$output" == *'args.amendPath must be an absolute path'* ]]
 }
 
 @test "amend round: spec-amend artifact name and the Amendment path line in the review message" {
-  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"codex","amendPath":"/run/spec.amendment.md"}' \
+  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"codex","pluginRoot":"/plug","amendPath":"/run/spec.amendment.md"}' \
     '["s",'"$CLEAN"']'
   [[ "$output" == *'Amendment path: /run/spec.amendment.md'* ]]
   [[ "$output" == *'/run/reviews/spec-amend-codex.json'* ]]
@@ -62,7 +79,7 @@ CLEAN='{"written":true,"total":0,"criticalHigh":0,"reason":""}'
 }
 
 @test "amend round: the revise prompt rewrites the amendment file, not spec.md" {
-  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"claude","amendPath":"/run/spec.amendment.md"}' \
+  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"claude","pluginRoot":"/plug","amendPath":"/run/spec.amendment.md"}' \
     '["s1",{"written":true,"total":1,"criticalHigh":1,"reason":""},"s2"]'
   [[ "$output" == *'Rewrite /run/spec.amendment.md in place'* ]]
   [[ "$output" != *'Rewrite /run/spec.md in place'* ]]
@@ -91,13 +108,13 @@ CLEAN='{"written":true,"total":0,"criticalHigh":0,"reason":""}'
 }
 
 @test "reviewer claude selects the claude spec reviewer and its artifact paths" {
-  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"claude"}' '["s",'"$CLEAN"']'
+  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"claude","pluginRoot":"/plug"}' '["s",'"$CLEAN"']'
   [[ "$output" == *'"agentType":"orca:spec-review-claude"'* ]]
   [[ "$output" == *'/run/reviews/spec-claude.json'* ]]
 }
 
 @test "spec overrides tune the spec agent, never the reviewer" {
-  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"codex","model":"opus","effort":"max"}' \
+  run_wf '{"prompt":"p","runDir":"/run","reviewWorktree":"/wt","reviewer":"codex","pluginRoot":"/plug","model":"opus","effort":"max"}' \
     '["s",'"$CLEAN"']'
   [[ "$output" == *'"label":"spec","phase":"Spec","model":"opus","effort":"max"'* ]]
   # the override appears exactly once — on the spec call, never the reviewer's

@@ -1,5 +1,5 @@
 ---
-description: Set up a repository's layout for orca runs — the bare-repo-with-worktrees structure with a default-branch worktree that orca:feature's pre-flight requires — plus optional final steps linking the default worktree's agent context (.claude, CLAUDE.md) to the repo root, so sessions started at the root auto-inject the repo's rules and conventions into every stage agent, and rendering the machine-local decision log (.orca/decisions.md) from commit history. Use when the user wants to prepare a new repository, an existing conventional checkout, or a fresh clone for orca runs, or when the pre-flight's layout gate (BARE_REPO) failed. Layout only: machine and session tooling (Codex CLI, MCP timeout, permissions) is orca:doctor's job. Interactive and consent-per-step — it restructures repositories, so every mutating action is confirmed first. Do not use to write a brief or run a feature.
+description: Set up a repository's layout for orca runs — the bare-repo-with-worktrees structure with a default-branch worktree that orca:feature's pre-flight requires — plus optional final steps linking the default worktree's agent context (.claude, CLAUDE.md) to the repo root, so sessions started at the root auto-inject the repo's rules and conventions into every stage agent, and rendering the machine-local decision log (.orca/decisions.md) from commit history. Use when the user wants to prepare a new repository, an existing conventional checkout, or a fresh clone for orca runs, or when the pre-flight's layout gate (BARE_REPO) failed. Layout only: machine and session tooling (Codex CLI, review timeout, permissions) is orca:doctor's job. Interactive and consent-per-step — it restructures repositories, so every mutating action is confirmed first. Do not use to write a brief or run a feature.
 args: <path or clone URL, optional>
 user-invocable: true
 disable-model-invocation: true
@@ -11,7 +11,7 @@ Give a repository the layout orca:feature's pre-flight requires — fixed once p
 
 The temperament is the opposite of an orca:feature run's: interactive throughout, consent per step, no autonomy. It runs once, so there is nothing to gain by not asking.
 
-Layout only: machine and session tooling — the Codex CLI, the MCP tool timeout, permission modes — belongs to **orca:doctor**, and the subagent definitions and codex MCP server registration ship inside the orca plugin itself, so any session with the plugin has them.
+Layout only: machine and session tooling — the Codex CLI, the review timeout, permission modes — belongs to **orca:doctor**, and the subagent definitions ship inside the orca plugin itself, so any session with the plugin has them.
 
 ## Step 1: Diagnose
 

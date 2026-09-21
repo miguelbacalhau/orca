@@ -56,7 +56,6 @@ The confirmed change goes to the spec workflow — `orca:spec` in an amend round
 - **Environment pre-flight:** `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh preflight` — on any `FAIL`, relay the failing gate's remediation from `${CLAUDE_PLUGIN_ROOT}/skills/feature/SKILL.md` Step 1 and stop. Hold its `REVIEWER:` line.
 - **Config read:** `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh config validate` — hold the resolved JSON for the rest of the invocation; a typed `FAIL:` stops before anything is spent, pointing at orca:config. **The run's reviewer** is the held JSON's `reviewer` when present, else the preflight's `REVIEWER:` value; the held `agents` block travels to both workflow launches. No later step re-reads the config.
 - **Workflow tool:** this step and Step 5 both run through it; if the session lacks it, stop and say so.
-- **Live MCP gate**, when the resolved reviewer is codex: ToolSearch `select:mcp__plugin_orca_orca-codex__codex`; if it does not resolve, diagnose and stop per feature Step 1's live MCP gate.
 
 **Compose the amend prompt** from:
 
@@ -77,7 +76,7 @@ git worktree add --detach <repo-root>/orca-<slug>-specreview feature/<slug>
 
 No branch, no `secrets place` — clean by construction. Every spec-workflow invocation is bracketed by this create and the matching remove.
 
-**Invoke the Workflow tool** with `scriptPath: "${CLAUDE_PLUGIN_ROOT}/scripts/spec.workflow.js"` and `args: { prompt, model?, effort?, runDir, reviewWorktree, reviewer, amendPath }` — `model`/`effort` from the held `agents.spec` block, each passed only when set; `runDir`, `reviewWorktree`, and `amendPath` (`<run-dir>/spec.amendment.md`) absolute; `reviewer` the held value. It runs in the background — wait for its task notification, never fabricate the result; the runId is throwaway, never persisted. The review artifact lands as `reviews/spec-amend-<reviewer>.json` — the original run's spec review is never clobbered; across iteration rounds it is latest-wins, like `report.md`.
+**Invoke the Workflow tool** with `scriptPath: "${CLAUDE_PLUGIN_ROOT}/scripts/spec.workflow.js"` and `args: { prompt, model?, effort?, runDir, reviewWorktree, reviewer, amendPath, pluginRoot }` — `model`/`effort` from the held `agents.spec` block, each passed only when set; `runDir`, `reviewWorktree`, and `amendPath` (`<run-dir>/spec.amendment.md`) absolute; `reviewer` the held value; `pluginRoot` `${CLAUDE_PLUGIN_ROOT}` substituted (the codex reviewer shells out to `orca.sh codex`). It runs in the background — wait for its task notification, never fabricate the result; the runId is throwaway, never persisted. The review artifact lands as `reviews/spec-amend-<reviewer>.json` — the original run's spec review is never clobbered; across iteration rounds it is latest-wins, like `report.md`.
 
 It returns `{ summary, died, review }`. **Remove the review worktree first** — `git worktree remove <repo-root>/orca-<slug>-specreview` — on every path out. Then branch on the result, feature's gate semantics verbatim:
 
@@ -101,7 +100,7 @@ All persistent writes happen here, in the main conversation, in this order, so a
 
 This is a fresh workflow launch, not a resume, so launch-time config legitimately applies — the config and reviewer were read and held in Step 3; nothing re-reads them here. Reuse `/orca:feature`'s launch machinery **by reference, not by copy** — read `${CLAUDE_PLUGIN_ROOT}/skills/feature/SKILL.md` and apply:
 
-- **The permissions pre-flight** from its Step 1 (`bypassPermissions`, with the graceful decline — the amended spec waits on disk; post-archive the run reads interrupted, which is the self-healing state Step 4 documents, and enabling bypass and re-invoking `/orca:iterate` or resuming via `/orca:feature` picks it back up). The environment pre-flight, config read, and MCP gate already ran in Step 3 — reuse the held values.
+- **The permissions pre-flight** from its Step 1 (`bypassPermissions`, with the graceful decline — the amended spec waits on disk; post-archive the run reads interrupted, which is the self-healing state Step 4 documents, and enabling bypass and re-invoking `/orca:iterate` or resuming via `/orca:feature` picks it back up). The environment pre-flight and config read already ran in Step 3 — reuse the held values.
 - **Integration worktree check:** the run's report names the exact path in its `**Integration worktree:**` field (read it from the just-archived `report.round<N>.md`). The directory exists → reuse it. Gone — reviewed and removed, machine cleaned → re-add it on the existing branch, the same re-add `/orca:review` offers:
 
   ```bash

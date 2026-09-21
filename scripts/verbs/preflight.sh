@@ -15,11 +15,11 @@
 # plus informational TRUNK_CANDIDATE, REVIEWER, and CONFIG lines and a
 # final RESULT line.
 #
-# No AGENTS gate and no MCP-registration checks: the subagent definitions
-# and the codex MCP server registration ship inside the orca plugin, so a
-# session that can run this skill has them by construction. What only the
-# live session can check — the codex MCP tool actually resolving — is
-# SKILL.md Step 1's job.
+# No AGENTS gate: the subagent definitions ship inside the orca plugin, so
+# a session that can run this skill has them by construction. Nor is there
+# anything left for the live session to check — the reviewer is reached by
+# running the codex binary through orca.sh, not over MCP, so every codex
+# gate is a shell question and all of them are answered here.
 #
 # Does NOT check bypassPermissions mode — that is not observable from a shell
 # and stays a conversational gate in SKILL.md.
@@ -146,20 +146,27 @@ if [[ -n "$reviewer" ]]; then
   echo "REVIEWER: $reviewer ($reviewer_provenance)"
 fi
 
-# --- CODEX: the cross-model reviewer is the GLOBAL codex binary's MCP server, ---
-# --- registered by the plugin's bundled .mcp.json — checked only when the     ---
-# --- resolved reviewer is codex                                               ---
+# --- CODEX: the cross-model reviewer is the GLOBAL codex binary, run       ---
+# --- non-interactively by orca.sh codex — checked only when the resolved   ---
+# --- reviewer is codex                                                     ---
 # Codex is never installed via npm — the only supported codex is the system
 # install on PATH (official non-npm distribution: Homebrew or the release
-# binaries). The gate checks: binary on PATH at >= the minimum version this
-# skill's MCP usage was verified against, valid auth, and the MCP_TOOL_TIMEOUT
-# env knob. The timeout check survives the plugin migration because it is a
-# CLIENT-side setting: the plugin's .mcp.json registers the server, but a
-# plugin cannot set the session env that governs MCP tool-call timeouts, so
-# it still lives in a settings env block (project or user) that orca:doctor
-# writes. Nothing here can check what is LOADED in the current session —
-# the live check (does the codex MCP tool resolve?) is SKILL.md Step 1's
-# job, in the session itself.
+# binaries). Four checks: binary on PATH at >= the minimum version, valid
+# auth, the `codex exec` flags the transport depends on, and the
+# BASH_MAX_TIMEOUT_MS env knob.
+#
+# The FLAGS check is the lesson of the 0.155.1 break. orca reached Codex
+# over MCP until then, via `codex mcp-server`; the CLI removed that
+# subcommand without a deprecation, and because an unknown subcommand is
+# taken as a TUI prompt the server died with "stdin is not a terminal" —
+# a version-and-auth gate that passed, and every review failing deep inside
+# a run. A version floor cannot see that: what matters is not the number
+# but whether this codex still speaks the interface orca drives. So the
+# gate asks the binary directly.
+#
+# The TIMEOUT knob is CLIENT-side and cannot ship in a plugin: reviews run
+# through the Bash tool, whose default cap is well under a cold review, and
+# only a settings env block can raise it. orca:doctor writes it.
 # Project settings can live in the worktree the session runs in or beside
 # the bare repo at the root; both are checked, then the user scope.
 settings_files=(
@@ -180,15 +187,38 @@ elif [[ "$codex_binary_ok" -ne 1 ]]; then
 elif ! codex login status >/dev/null 2>&1 </dev/null; then
   codex_fail "not authenticated — run 'codex login' (orca:doctor walks this through)"
 else
+  codex_exec_help="$(codex exec --help 2>&1 </dev/null || true)"
+  missing_flags=""
+  for flag in --output-schema --output-last-message --sandbox --cd; do
+    case "$codex_exec_help" in
+      *"$flag"*) ;;
+      *) missing_flags="${missing_flags:+$missing_flags, }$flag" ;;
+    esac
+  done
+  # The VALUE, not just the key: a settings file carrying
+  # "BASH_MAX_TIMEOUT_MS": "1000" would pass a presence check and then
+  # kill every review after a second, with CODEX: PASS on the record. The
+  # first file in precedence order that carries the key decides. A key
+  # whose value this cannot parse as a number is treated as set rather
+  # than as a failure — misreading an exotic-but-valid settings file into
+  # a hard FAIL would be worse than the check it replaces.
+  codex_min_timeout=1200000
   timeout_set=0
+  timeout_value=""
   for sf in "${settings_files[@]}"; do
     [[ -f "$sf" ]] || continue
-    if grep -q '"MCP_TOOL_TIMEOUT"' "$sf"; then
-      timeout_set=1
-    fi
+    grep -q '"BASH_MAX_TIMEOUT_MS"' "$sf" || continue
+    timeout_set=1
+    timeout_value="$(grep -o '"BASH_MAX_TIMEOUT_MS"[[:space:]]*:[[:space:]]*"\{0,1\}[0-9]\{1,\}' "$sf" \
+      | grep -oE '[0-9]+$' | head -1)"
+    break
   done
-  if [[ "$timeout_set" -eq 0 ]]; then
-    codex_fail "MCP_TOOL_TIMEOUT not set in a settings env block — orca:doctor writes it (~20 minutes); reviews would be killed at the default tool timeout"
+  if [[ -n "$missing_flags" ]]; then
+    codex_fail "codex ${codex_version:-unknown} has no 'codex exec' $missing_flags — this codex cannot be driven by orca.sh codex; upgrade the Codex CLI, or pin reviewer=claude via orca:config (orca:doctor walks this through)"
+  elif [[ "$timeout_set" -eq 0 ]]; then
+    codex_fail "BASH_MAX_TIMEOUT_MS not set in a settings env block — orca:doctor writes it (~20 minutes); reviews would be killed at the default Bash tool timeout"
+  elif [[ -n "$timeout_value" ]] && [[ "$timeout_value" -lt "$codex_min_timeout" ]]; then
+    codex_fail "BASH_MAX_TIMEOUT_MS is $timeout_value, below the $codex_min_timeout (~20 minutes) a review needs — raise it (orca:doctor writes it); reviews would be killed mid-flight"
   else
     echo "CODEX: PASS"
   fi

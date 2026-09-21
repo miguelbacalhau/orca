@@ -4,8 +4,8 @@
 load helpers
 
 # Run preflight with a controlled codex stub prepended to PATH.
-preflight_with_codex() { # <version> <ok|denied>
-  make_codex_stub "$BATS_TEST_TMPDIR/stub" "$1" "$2"
+preflight_with_codex() { # <version> <ok|denied> [legacy]
+  make_codex_stub "$BATS_TEST_TMPDIR/stub" "$1" "$2" "${3:-modern}"
   PATH="$BATS_TEST_TMPDIR/stub:$PATH" run bash "$SCRIPTS/orca.sh" preflight
 }
 
@@ -46,7 +46,7 @@ preflight_with_codex() { # <version> <ok|denied>
   make_bare_layout "$BATS_TEST_TMPDIR/r"
   cd "$BATS_TEST_TMPDIR/r"
   mkdir -p .claude
-  printf '{"env":{"MCP_TOOL_TIMEOUT":"1200000"}}\n' >.claude/settings.json
+  printf '{"env":{"BASH_MAX_TIMEOUT_MS":"1200000"}}\n' >.claude/settings.json
   preflight_with_codex 999.0.0 ok
   [ "$status" -eq 0 ]
   has_line 'REVIEWER: codex (detected)'
@@ -82,13 +82,53 @@ preflight_with_codex() { # <version> <ok|denied>
   has_line 'CODEX: FAIL: not authenticated'
 }
 
-@test "pinned codex without MCP_TOOL_TIMEOUT fails the codex gate" {
+@test "pinned codex without BASH_MAX_TIMEOUT_MS fails the codex gate" {
   make_bare_layout "$BATS_TEST_TMPDIR/r"
   cd "$BATS_TEST_TMPDIR/r"
   printf 'reviewer=codex\n' >.orca/config
   preflight_with_codex 999.0.0 ok
   [ "$status" -eq 1 ]
-  has_line 'CODEX: FAIL: MCP_TOOL_TIMEOUT'
+  has_line 'CODEX: FAIL: BASH_MAX_TIMEOUT_MS'
+}
+
+# A key that is present but too small is the silent version of the same
+# failure: CODEX: PASS, and every review killed seconds in.
+@test "a BASH_MAX_TIMEOUT_MS below the review budget fails the codex gate" {
+  make_bare_layout "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  printf 'reviewer=codex\n' >.orca/config
+  mkdir -p .claude
+  printf '{"env":{"BASH_MAX_TIMEOUT_MS":"1000"}}\n' >.claude/settings.json
+  preflight_with_codex 999.0.0 ok
+  [ "$status" -eq 1 ]
+  has_line 'CODEX: FAIL: BASH_MAX_TIMEOUT_MS is 1000, below the 1200000'
+}
+
+# An unquoted number is just as valid in settings.json, and must pass.
+@test "an unquoted BASH_MAX_TIMEOUT_MS at the budget passes" {
+  make_bare_layout "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  printf 'reviewer=codex\n' >.orca/config
+  mkdir -p .claude
+  printf '{"env":{"BASH_MAX_TIMEOUT_MS": 1200000}}\n' >.claude/settings.json
+  preflight_with_codex 999.0.0 ok
+  [ "$status" -eq 0 ]
+  has_line 'CODEX: PASS'
+}
+
+# The 0.155.1 regression in miniature: a new, authenticated codex whose
+# `codex exec` no longer carries the flags orca.sh codex drives. Version
+# and auth pass; only asking the binary what it speaks catches it.
+@test "a codex whose exec interface moved fails the codex gate" {
+  make_bare_layout "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  printf 'reviewer=codex\n' >.orca/config
+  mkdir -p .claude
+  printf '{"env":{"BASH_MAX_TIMEOUT_MS":"1200000"}}\n' >.claude/settings.json
+  preflight_with_codex 999.0.0 ok legacy
+  [ "$status" -eq 1 ]
+  has_line 'CODEX: FAIL: codex 999.0.0 has no '"'"'codex exec'"'"' --output-schema, --output-last-message, --sandbox, --cd'
+  has_line 'RESULT: FAIL'
 }
 
 @test "an invalid reviewer value fails loud, gate unresolvable" {
@@ -128,7 +168,7 @@ preflight_with_codex() { # <version> <ok|denied>
   make_bare_layout "$BATS_TEST_TMPDIR/r"
   printf 'reviewer=codex\n' >"$BATS_TEST_TMPDIR/r/.orca/config"
   mkdir -p "$BATS_TEST_TMPDIR/r/.claude"
-  printf '{"env":{"MCP_TOOL_TIMEOUT":"1200000"}}\n' >"$BATS_TEST_TMPDIR/r/.claude/settings.json"
+  printf '{"env":{"BASH_MAX_TIMEOUT_MS":"1200000"}}\n' >"$BATS_TEST_TMPDIR/r/.claude/settings.json"
   mkdir -p "$BATS_TEST_TMPDIR/r/main/src"
   cd "$BATS_TEST_TMPDIR/r/main/src"
   preflight_with_codex 999.0.0 ok

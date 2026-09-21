@@ -97,7 +97,7 @@ if (typeof parsedArgs === 'string') {
 }
 if (typeof parsedArgs !== 'object' || parsedArgs === null)
   throw new Error(`args must be a JSON object (got ${JSON.stringify(args)}) — pass it as a real object, not a JSON-encoded string`)
-const { prompt, model, effort, runDir, reviewWorktree, reviewer, amendPath } = parsedArgs
+const { prompt, model, effort, runDir, reviewWorktree, reviewer, amendPath, pluginRoot } = parsedArgs
 for (const [k, v] of Object.entries({ prompt, runDir, reviewWorktree }))
   if (typeof v !== 'string' || !v)
     throw new Error(`args.${k} must be a non-empty string (got ${JSON.stringify(v)})`)
@@ -111,6 +111,13 @@ for (const [k, v] of Object.entries(amendPath !== undefined
     throw new Error(`args.${k} must be an absolute path (got ${JSON.stringify(v)})`)
 if (reviewer !== 'codex' && reviewer !== 'claude')
   throw new Error(`args.reviewer must be "codex" or "claude" (got ${JSON.stringify(reviewer)}) — the run skill resolves it before launch`)
+// The codex reviewer reaches Codex through the orca CLI (orca.sh codex), so
+// it needs the installed plugin's path — nothing in a subagent's shell
+// environment carries it, and the task message is the only channel. Required
+// unconditionally rather than only for codex: one rule, and a claude run that
+// is later retried as codex cannot then be missing it.
+if (typeof pluginRoot !== 'string' || !pluginRoot.startsWith('/'))
+  throw new Error(`NO_PLUGIN_ROOT: args.pluginRoot must be the installed plugin's absolute path (got ${JSON.stringify(pluginRoot)}) — the launching skill substitutes \${CLAUDE_PLUGIN_ROOT}`)
 
 // MODELS/EFFORTS are part of the ONE shared vocabulary kept in lockstep
 // across six holders — scripts/lib.sh, work-loop.workflow.js,
@@ -169,7 +176,10 @@ const review = async () => {
     const r = await agent(
       [`Review worktree: ${reviewWorktree}`, `Run directory: ${runDir}`,
        ...(amendPath ? [`Amendment path: ${amendPath}`] : []),
-       `Artifact path: ${artifact}`].join('\n'),
+       `Artifact path: ${artifact}`,
+       // Only the codex courier shells out; the claude reviewer's prompt
+       // stays byte-identical to what it has always been.
+       ...(reviewer === 'codex' ? [`Plugin root: ${pluginRoot}`] : [])].join('\n'),
       { agentType: reviewAgentType, schema: REVIEW,
         label: `spec-review${attempt > 1 ? '~retry' : ''}`, phase: 'Review' })
     if (r === null || r === undefined) { lastReason = 'review agent was skipped or died'; continue }

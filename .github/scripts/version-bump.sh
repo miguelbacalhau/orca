@@ -16,7 +16,7 @@
 set -euo pipefail
 
 MANIFEST=".claude-plugin/plugin.json"
-SHIPPED=(skills agents scripts .claude-plugin .mcp.json)
+SHIPPED=(skills agents scripts .claude-plugin)
 
 version_at() {
   git show "$1:$MANIFEST" 2>/dev/null | sed -n 's/.*"version": *"\([^"]*\)".*/\1/p'

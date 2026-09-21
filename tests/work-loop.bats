@@ -195,3 +195,33 @@ $WT_FRAME,{\"die\":true},$FAIL,$OK]"
   [[ "$output" != *'did NOT amend'* ]]
   [ "$(count_calls 'plan:W1#rebuild')" = 1 ]
 }
+
+# ---------- the fix loop's entry gate ----------
+# One item built to its first review: worktree frame, a completed implement,
+# the secrets-remove relay, then the review verdict. What follows the verdict
+# is the assertion.
+IMPLEMENTED='{"completed":true,"summary":"done"}'
+
+@test "medium and low findings alone do not open the fix loop" {
+  local verdict='{"written":true,"total":3,"criticalHigh":0,"reason":""}'
+  # After the verdict the item goes straight to commit; its first commit relay
+  # fails, which is the shortest way to end the item there.
+  run_wf "{$BASE,\"items\":$ONE_ITEM}" \
+    "[$OK,\"p1\",$WT_FRAME,$IMPLEMENTED,$OK,$verdict,$FAIL,$FAIL,$OK]"
+  [[ "$output" == *'"ok":true'* ]]
+  [[ "$output" == *'review:W1#0'* ]]
+  [[ "$output" != *'fix:W1#1'* ]]
+  [[ "$output" != *'review:W1#1'* ]]
+  # Blocked three stages later, at the scripted commit failure — not at review.
+  [[ "$output" == *'"id":"W1","reason":"commit'* ]]
+}
+
+@test "a critical or high finding opens the fix loop" {
+  local verdict='{"written":true,"total":1,"criticalHigh":1,"reason":""}'
+  # secrets-place, then a dead fix agent ends the item inside the loop.
+  run_wf "{$BASE,\"items\":$ONE_ITEM}" \
+    "[$OK,\"p1\",$WT_FRAME,$IMPLEMENTED,$OK,$verdict,$OK,{\"die\":true},$FAIL,$OK]"
+  [[ "$output" == *'"ok":true'* ]]
+  [[ "$output" == *'fix:W1#1'* ]]
+  [[ "$output" == *'"id":"W1","reason":"fix:W1#1: agent was skipped or returned no result"'* ]]
+}

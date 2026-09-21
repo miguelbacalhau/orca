@@ -835,11 +835,14 @@ const buildItem = async item => {
   if (!impl.completed) throw specRooted(`implementation infeasible: ${impl.summary}`)
 
   // Review → fix → re-review, max 2 fix rounds, gate on Critical/High (SKILL: bounded loops).
-  // A first review with no findings at all has nothing to fix and skips the
-  // loop. Keyed on BOTH counts: review() rejects criticalHigh > total as a
-  // mis-report, but the gate still refuses to lean on that invariant.
+  // Entry and exit share one severity: only a Critical/High finding opens the
+  // loop, and only a clear Critical/High count closes it. Entering on any
+  // finding bought a fix agent plus a full re-review for items the exit gate
+  // could never fail — two thirds of all fix rounds across a 29-run corpus
+  // (plans/run-corpus-analysis.md §1). Medium/Low findings stay on record in
+  // the review artifact for the commit and the report; they are not a gate.
   const first = await review(item.id, wt, 0, 'item', item.files)
-  if (first.total > 0 || first.criticalOrHigh > 0) {
+  if (first.criticalOrHigh > 0) {
     for (let round = 1; ; round++) {
       // The fixer runs tests — it needs the credentials the review stripped.
       await secretsStage('place', wt, `secrets-place:${item.id}#${round}`)

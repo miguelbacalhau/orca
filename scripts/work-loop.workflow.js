@@ -734,6 +734,30 @@ const archivePlan = async (i, tag) => {
     await sh(`n=0 ; while [ -e '${p}.round'"$n"'.md' ] ; do n=$((n+1)) ; done ; mv '${p}.md' '${p}.round'"$n"'.md'`,
       `plan-archive:${i.id}${tag}`, 'Plan')
   } catch (e) { log(`${i.id}: superseded plan not archived (${String((e && e.message) || e)}) — replanning over it`) }
+  await archiveReviews(i, tag)
+}
+
+// The superseded attempt's review files go with its plan. review() writes
+// fixed round<N> names, so a relaunch's round0 overwrote the old one while
+// the old round1/round2 survived beside it — and a stale round2 carrying
+// Critical/High next to a fresh clean round0 reads, to orca:audit and to
+// anyone counting, as an item that exhausted its fix rounds when it never
+// did (15 phantom exhaustions across the corpus, plans/run-corpus-analysis.md
+// §6). Same shape as /orca:retry's archive: everything named <ID>-* under
+// reviews/ moves into the first prev<N>/ holding nothing of this item, so a
+// retry's snapshot and an in-run replan's never collide and the round<N>
+// name keeps meaning "fix round N of the attempt it sits beside". An item
+// replanned before its first review has nothing to move. Fail-soft like the
+// plan: a missed move degrades the archive, never the wave.
+const archiveReviews = async (i, tag) => {
+  const d = sq(`${runDir}/reviews`)
+  const id = sq(i.id)
+  try {
+    await sh(`set -- '${d}/${id}-'* ; if [ -e "$1" ] ; then n=0 ; ` +
+      `while ls '${d}/prev'"$n"'/${id}-'* >/dev/null 2>&1 ; do n=$((n+1)) ; done ; ` +
+      `mkdir -p '${d}/prev'"$n" && mv '${d}/${id}-'* '${d}/prev'"$n"'/' ; fi`,
+      `review-archive:${i.id}${tag}`, 'Plan')
+  } catch (e) { log(`${i.id}: superseded reviews not archived (${String((e && e.message) || e)}) — relaunching over them`) }
 }
 
 // Commit with the attribution rule enforced against the repository itself,

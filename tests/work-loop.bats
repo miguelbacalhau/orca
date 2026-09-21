@@ -93,7 +93,7 @@ count_calls() {
   local esc='{"replan":["W1"],"cut":[],"blocked":[],"addDeps":[]}'
   local dirty2='{"clean":false,"issues":["W1 still contradicts the defined shape"]}'
   run_wf "{$BASE,\"items\":$TWO_ITEMS}" \
-    "[$OK,\"p1\",\"p2\",$HASH_A,$dirty,$HASH_A,$esc,$HASH_A,$OK,\"p1b\",$dirty2,\
+    "[$OK,\"p1\",\"p2\",$HASH_A,$dirty,$HASH_A,$esc,$HASH_A,$OK,$OK,\"p1b\",$dirty2,\
 $WT_FRAME,$WT_FRAME,{\"die\":true},{\"die\":true},$FAIL,$FAIL,$OK]"
   [[ "$output" == *'"ok":true'* ]]
   # The spec hash never moved across the escalation, so the replan note must
@@ -113,7 +113,7 @@ $WT_FRAME,$WT_FRAME,{\"die\":true},{\"die\":true},$FAIL,$FAIL,$OK]"
   local dirty='{"clean":false,"issues":["W1 and W2 assume different shapes for the cache key"]}'
   local esc='{"replan":["W1"],"cut":[],"blocked":[],"addDeps":[]}'
   run_wf "{$BASE,\"items\":$TWO_ITEMS}" \
-    "[$OK,\"p1\",\"p2\",$HASH_A,$dirty,$HASH_A,$esc,$HASH_B,$OK,\"p1b\",$CLEAN,$FAIL,$FAIL,$FAIL,$FAIL,$OK]"
+    "[$OK,\"p1\",\"p2\",$HASH_A,$dirty,$HASH_A,$esc,$HASH_B,$OK,$OK,\"p1b\",$CLEAN,$FAIL,$FAIL,$FAIL,$FAIL,$OK]"
   [[ "$output" == *'"ok":true'* ]]
   [[ "$output" == *'spec.md was amended in response'* ]]
   [[ "$output" != *'NOT amended'* ]]
@@ -125,7 +125,7 @@ $WT_FRAME,$WT_FRAME,{\"die\":true},{\"die\":true},$FAIL,$FAIL,$OK]"
   local esc='{"replan":["W1"],"cut":[],"blocked":[],"addDeps":[]}'
   # Every hash read fails (nonzero exit), so the gate assumes the spec moved.
   run_wf "{$BASE,\"items\":$TWO_ITEMS}" \
-    "[$OK,\"p1\",\"p2\",$FAIL,$dirty,$FAIL,$dirty,$esc,$FAIL,$OK,\"p1b\",$CLEAN,$FAIL,$FAIL,$FAIL,$FAIL,$OK]"
+    "[$OK,\"p1\",\"p2\",$FAIL,$dirty,$FAIL,$dirty,$esc,$FAIL,$OK,$OK,\"p1b\",$CLEAN,$FAIL,$FAIL,$FAIL,$FAIL,$OK]"
   [[ "$output" == *'"ok":true'* ]]
   [[ "$output" == *'reconcile~serial:W1+W2'* ]]
   [[ "$output" == *'spec.md was amended in response'* ]]
@@ -157,10 +157,15 @@ $WT_FRAME,{\"die\":true},$FAIL,$OK]"
   # replan note — so the superseded plan has to be off disk.
   local esc='{"replan":[],"cut":[],"blocked":[],"addDeps":[{"id":"W2","dependsOn":["W1"]}]}'
   run_wf "{$BASE,\"items\":$TWO_ITEMS}" \
-    "[$OK,\"p1\",\"p2\",$HASH_A,$dirty,$HASH_A,$esc,$HASH_A,$OK,$CLEAN,\
+    "[$OK,\"p1\",\"p2\",$HASH_A,$dirty,$HASH_A,$esc,$HASH_A,$OK,$OK,$CLEAN,\
 $WT_FRAME,{\"die\":true},$FAIL,$OK]"
   [[ "$output" == *'"ok":true'* ]]
   [[ "$output" == *'plan-archive:W2#deferred'* ]]
+  # Its review files go with it — into the first prev<N>/ holding nothing of
+  # W2, never overwritten in place by the relaunch's round0.
+  [[ "$output" == *'review-archive:W2#deferred'* ]]
+  [[ "$output" == *"mv '/run/reviews/W2-'* '/run/reviews/prev'"* ]]
+  [[ "$output" == *"while ls '/run/reviews/prev'\\"\$n\\"'/W2-'*"* ]]
   [[ "$output" == *'"id":"W2","reason":"dependency blocked: W1"'* ]]
 }
 
@@ -172,7 +177,7 @@ $WT_FRAME,{\"die\":true},$FAIL,$OK]"
   # mid-build escalation answers "rebuild" over a spec.md hash that never moved.
   run_wf "{$BASE,\"items\":$TWO_ITEMS}" \
     "[$OK,\"p1\",\"p2\",$HASH_A,$dirty,$HASH_A,$esc,$HASH_A,$dirty2,\
-$WT_FRAME,$INFEASIBLE,$HASH_A,$REBUILD,$HASH_A,$OK,\"p1r\",$WT_FRAME,{\"die\":true},$FAIL,$OK]"
+$WT_FRAME,$INFEASIBLE,$HASH_A,$REBUILD,$HASH_A,$OK,$OK,\"p1r\",$WT_FRAME,{\"die\":true},$FAIL,$OK]"
   [[ "$output" == *'"ok":true'* ]]
   # "rebuild" is the action, not evidence the file moved — the note says what
   # the hash saw, and sends nobody hunting for a Decisions bullet.
@@ -188,7 +193,7 @@ $WT_FRAME,$INFEASIBLE,$HASH_A,$REBUILD,$HASH_A,$OK,\"p1r\",$WT_FRAME,{\"die\":tr
   # One item, so no gate at all: the hash reads here are the escalation
   # bracket's and nothing else. The second one differs — spec.md moved.
   run_wf "{$BASE,\"items\":$ONE_ITEM}" \
-    "[$OK,\"p1\",$WT_FRAME,$INFEASIBLE,$HASH_A,$REBUILD,$HASH_B,$OK,\"p1r\",\
+    "[$OK,\"p1\",$WT_FRAME,$INFEASIBLE,$HASH_A,$REBUILD,$HASH_B,$OK,$OK,\"p1r\",\
 $WT_FRAME,{\"die\":true},$FAIL,$OK]"
   [[ "$output" == *'"ok":true'* ]]
   [[ "$output" == *'spec-rooted and amended spec.md in response'* ]]

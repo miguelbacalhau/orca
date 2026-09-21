@@ -149,13 +149,16 @@ set -m
     - <"$codex_prompt"
 ) >"$codex_log" 2>&1 &
 codex_child=$!
-( sleep "$codex_cap" ; : >"$codex_flag" ; kill -TERM -"$codex_child" 2>/dev/null ; \
+( sleep "$codex_cap" ; trap '' TERM ; : >"$codex_flag" ; kill -TERM -"$codex_child" 2>/dev/null ; \
   sleep 5 ; kill -KILL -"$codex_child" 2>/dev/null ) &
 codex_watcher=$!
 set +m
 wait "$codex_child" 2>/dev/null
 codex_rc=$?
-kill -TERM -"$codex_watcher" 2>/dev/null
+# Once the deadline fires, finish the KILL escalation even if Codex itself
+# exits on TERM: its children may still be alive. The watcher's TERM trap
+# also protects the race between checking the flag and cancelling it.
+[ -e "$codex_flag" ] || kill -TERM -"$codex_watcher" 2>/dev/null
 wait "$codex_watcher" 2>/dev/null
 codex_seconds=$(( $(date +%s) - codex_start ))
 [ -e "$codex_flag" ] && codex_rc=124
@@ -176,25 +179,13 @@ elif [ ! -s "$codex_payload" ]; then
   codex_give_up no_output
 fi
 
-# Shape check. --output-schema already made Codex emit a conforming
-# object, so this is not a second validator — it is the guard against the
-# payload being something else entirely (a refusal in prose) or arriving
-# cut off (a killed write, a truncated stream). Three cheap facts, in
-# bash: it opens as an object, it closes as one, and it carries a
-# findings ARRAY. Anything subtler belongs to the review agent, which
-# parses the artifact properly; the runtime envelope here has no JSON
-# parser and will not grow one.
-codex_head="$(head -c 200 "$codex_payload" | tr -d ' \t\n')"
-case "$codex_head" in
-  '{'*) ;;
-  *) codex_give_up bad_payload ;;
-esac
-codex_last="$(tail -c 200 "$codex_payload" | tr -d ' \t\n')"
-case "$codex_last" in
-  *'}') ;;
-  *) codex_give_up bad_payload ;;
-esac
-tr -d ' \t\n' <"$codex_payload" | grep -q '"findings":\[' || codex_give_up bad_payload
+# Validate the entire JSON document before replacing either destination.
+# An inner object's closing brace is not evidence that the document is
+# complete. Codex enforces the finding schema; this portable awk guard
+# checks JSON syntax and the top-level findings array without changing
+# bytes or counting findings (which remains the review agent's job).
+LC_ALL=C awk -f "$orca_scripts_dir/codex-payload.awk" "$codex_payload" \
+  || codex_give_up bad_payload
 
 # Publish by rename, never by writing into the destination. A cp into
 # the final path can truncate an existing artifact if it is interrupted

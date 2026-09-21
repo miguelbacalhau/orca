@@ -5,6 +5,12 @@
 
 load helpers
 
+teardown() {
+  if [ -f "$BATS_TEST_TMPDIR/child.pid" ]; then
+    kill -KILL "$(cat "$BATS_TEST_TMPDIR/child.pid")" 2>/dev/null || true
+  fi
+}
+
 # A fake codex whose `exec` behavior one argument selects. It parses
 # --output-last-message the way the real CLI does, so the verb's contract
 # with that flag is exercised, not assumed.
@@ -14,6 +20,7 @@ load helpers
 #   halfjson  — writes a JSON object with no findings key
 #   crash     — exits 3 with a message on stderr
 #   hang      — sleeps past any sane cap
+#   fixture   — copies PAYLOAD_FIXTURE verbatim
 make_codex_exec_stub() { # <bindir> <behavior>
   mkdir -p "$1"
   cat >"$1/codex" <<EOF
@@ -47,6 +54,7 @@ case "$2" in
   halfjson) printf '{"error":"no"}' >"\$out" ;;
   crash)    echo "codex: stream error" >&2; exit 3 ;;
   hang)     sleep 30 ;;
+  fixture)  cp "\$PAYLOAD_FIXTURE" "\$out" ;;
 esac
 EOF
   chmod +x "$1/codex"
@@ -125,6 +133,35 @@ run_codex() {
   [ ! -e "$OUT" ]
 }
 
+@test "timeout finishes killing children after the codex parent exits on TERM" {
+  mkdir -p "$BATS_TEST_TMPDIR/stub" "$BATS_TEST_TMPDIR/wt"
+  cat >"$BATS_TEST_TMPDIR/stub/codex" <<'STUB'
+#!/usr/bin/env bash
+bash -c '
+  trap "" TERM
+  echo $$ >"$WATCHDOG_DIR/child.pid"
+  for ((i=0; i<300; i++)); do
+    printf x >>"$WATCHDOG_DIR/heartbeat"
+    sleep 0.1
+  done
+' &
+wait
+STUB
+  chmod +x "$BATS_TEST_TMPDIR/stub/codex"
+  printf 'review\n' >"$BATS_TEST_TMPDIR/prompt.md"
+  WATCHDOG_DIR="$BATS_TEST_TMPDIR" PATH="$BATS_TEST_TMPDIR/stub:$PATH" \
+    run bash "$SCRIPTS/orca.sh" codex "$BATS_TEST_TMPDIR/prompt.md" \
+    --cwd "$BATS_TEST_TMPDIR/wt" --out "$BATS_TEST_TMPDIR/out.json" --timeout 1
+  has_line 'status=timeout'
+  [ ! -e "$BATS_TEST_TMPDIR/out.json" ]
+  # A heartbeat tests actual execution, including on systems where a dead
+  # orphan remains a zombie briefly and kill -0 would still succeed.
+  [ -s "$BATS_TEST_TMPDIR/heartbeat" ]
+  cp "$BATS_TEST_TMPDIR/heartbeat" "$BATS_TEST_TMPDIR/stopped"
+  sleep 0.3
+  cmp -s "$BATS_TEST_TMPDIR/stopped" "$BATS_TEST_TMPDIR/heartbeat"
+}
+
 # The "lands verbatim or lands nowhere" contract is only interesting when
 # something is already there — a re-review round's destination usually is.
 @test "a failed review leaves an existing artifact untouched" {
@@ -152,6 +189,60 @@ STUB
     "$BATS_TEST_TMPDIR/prompt.md" --cwd "$BATS_TEST_TMPDIR/wt" --out "$BATS_TEST_TMPDIR/o.json"
   has_line 'status=bad_payload'
   [ ! -e "$BATS_TEST_TMPDIR/o.json" ]
+}
+
+@test "malformed JSON never replaces an existing artifact or archive" {
+  run_codex ok --archive "$BATS_TEST_TMPDIR/reviews/W-01-codex.round1.json"
+  has_line 'status=ok'
+  cp "$OUT" "$BATS_TEST_TMPDIR/original.json"
+  export PAYLOAD_FIXTURE="$BATS_TEST_TMPDIR/payload.json"
+  local payload
+  while IFS= read -r payload; do
+    printf '%s' "$payload" >"$PAYLOAD_FIXTURE"
+    run_codex fixture --archive "$ARCHIVE"
+    has_line 'status=bad_payload'
+    cmp -s "$OUT" "$BATS_TEST_TMPDIR/original.json"
+    cmp -s "$ARCHIVE" "$BATS_TEST_TMPDIR/original.json"
+  done <<'PAYLOADS'
+{"findings":[{"severity":"High","file":"a","line":1,"title":"t","body":"b","fix_location":"local code"}
+{"findings":[{"body":"unterminated }]}
+{"findings":[{"body":"bad\q"}]}
+{"findings":[{"body":"bad\u123"}]}
+{"findings":[{"line":01}]}
+{"findings":[{"line":1.}]}
+{"findings":[{"severity" "High"}]}
+{"findings":[{"severity":"High" "body":"b"}]}
+{"findings":[{"severity":"High",}]}
+{"findings":[,]}
+{"findings":[],}
+{"findings":[]}{"findings":[]}
+{"findings":[]} trailing
+{"nested":{"findings":[]}}
+{"findings":null}
+{"findings":[],"findings":null}
+PAYLOADS
+}
+
+@test "complete JSON with escaped strings and CRLF lands verbatim" {
+  export PAYLOAD_FIXTURE="$BATS_TEST_TMPDIR/payload.json"
+  cat >"$PAYLOAD_FIXTURE" <<'PAYLOAD'
+{
+  "\u0066indings": [{
+    "severity": "High", "file": null, "line": 123,
+    "title": "Quotes: \" and backslashes: \\",
+    "body": "Literal delimiters: } ] { [ ; escapes: \n\t\r\b\f\/\u00e9 ; UTF-8: café 🐋",
+    "fix_location": "local code"
+  }]
+}
+PAYLOAD
+  # Valid trailing whitespace is not limited to the last 200 bytes.
+  printf '%300s\r\n' '' >>"$PAYLOAD_FIXTURE"
+  awk '{ printf "%s\r\n", $0 }' "$PAYLOAD_FIXTURE" >"$BATS_TEST_TMPDIR/crlf.json"
+  PAYLOAD_FIXTURE="$BATS_TEST_TMPDIR/crlf.json"
+  run_codex fixture --archive "$BATS_TEST_TMPDIR/reviews/W-01-codex.round1.json"
+  has_line 'status=ok'
+  cmp -s "$OUT" "$PAYLOAD_FIXTURE"
+  cmp -s "$ARCHIVE" "$PAYLOAD_FIXTURE"
 }
 
 # A relative prompt path is opened by the child AFTER it has changed into

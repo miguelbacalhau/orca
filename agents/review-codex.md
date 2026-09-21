@@ -54,14 +54,16 @@ and interface boundaries the suite does NOT exercise.
 For each finding report: severity (Critical/High/Medium/Low), the file
 and line when the finding has one location — set them to null for
 cross-cutting findings rather than inventing one — what is wrong, and
-where the fix belongs: local code, the plan's approach, the spec
-interfaces, or another work item. Do not modify files; report only.
+where the fix belongs, as exactly one of the four fix_location values
+below (local code, the plan's approach, the spec interfaces, or another
+work item) — how to fix it goes in the body, never in that field. Do not
+modify files; report only.
 
 Respond with ONLY a JSON object — no prose before or after it, no code
 fences — in exactly this shape:
 {"findings": [{"severity": "Critical|High|Medium|Low",
 "file": "path-or-null", "line": integer-or-null, "title": "…",
-"body": "…", "fix_location": "…"}]}
+"body": "…", "fix_location": "local code|plan approach|spec interfaces|another work item"}]}
 An empty findings array is a legitimate clean pass.
 ```
 

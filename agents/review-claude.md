@@ -52,7 +52,7 @@ In **integration** mode: the whole Interfaces section is in scope for the fixes.
 
 Hunt for: bugs, broken edge cases, violations of the spec interfaces, regressions to surrounding code, missing or weak tests, and the item's acceptance line — in the spec's Work Breakdown — unmet by the change under review (a spec without acceptance lines predates them: skip that hunt). A removal the spec or plan calls for is not a regression — when they restructure existing behavior, hunt instead for remnants of the old implementation that should have been deleted: dead code paths, stale exports, both old and new mechanisms registered. Attack the tests specifically — the same model family wrote the code and the tests, so a green run proves little; name the edge cases, error paths, and interface boundaries the suite does NOT exercise.
 
-For each finding record: severity (Critical/High/Medium/Low), the file and line when the finding has one location — set them to null for cross-cutting findings rather than inventing one — what is wrong, and where the fix belongs: local code, the plan's approach, the spec interfaces, or another work item.
+For each finding record: severity (Critical/High/Medium/Low), the file and line when the finding has one location — set them to null for cross-cutting findings rather than inventing one — what is wrong, and where the fix belongs, as exactly one of the four `fix_location` values in the template below (local code, the plan's approach, the spec interfaces, or another work item) — how to fix it goes in the body, never in that field.
 
 ## Write the artifact
 
@@ -61,7 +61,7 @@ Compose the findings as a JSON object in exactly this shape — the same schema 
 ```json
 {"findings": [{"severity": "Critical|High|Medium|Low",
 "file": "path-or-null", "line": integer-or-null, "title": "…",
-"body": "…", "fix_location": "…"}]}
+"body": "…", "fix_location": "local code|plan approach|spec interfaces|another work item"}]}
 ```
 
 An empty findings array is a legitimate clean pass — but only after a real hunt, never as a shortcut.

@@ -1,6 +1,6 @@
 {
   "name": "orca",
-  "version": "0.34.0",
+  "version": "1.0.0",
   "description": "Autonomous multi-agent development: init/doctor once, then orca:feature from idea to integration branch, and orca:review to walk the deliverable in your own editor.",
   "author": { "name": "Miguel Bacalhau" },
   "license": "MIT",

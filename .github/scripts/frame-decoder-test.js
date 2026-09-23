@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Tests the relay codec block (base64 + UTF-8 + frame decoder) that each
+// Tests the relay codec block (base64 + UTF-8 + frame decoder) that the
 // verb-calling workflow script carries as a literal copy. The sandboxed
 // scripts cannot be imported (top-level workflow calls), so the block is
 // extracted by its `relay codec` markers and evaluated standalone — CI

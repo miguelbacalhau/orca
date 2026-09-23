@@ -6,7 +6,7 @@
     {
       "name": "orca",
       "source": "./",
-      "description": "Autonomous multi-agent development: init/doctor once, then orca:feature from idea to integration branch, orca:debug from symptom to diagnosis and fix, and orca:review to walk the deliverable in your own editor."
+      "description": "Autonomous multi-agent development: init/doctor once, then orca:feature from idea to integration branch, and orca:review to walk the deliverable in your own editor."
     }
   ]
 }

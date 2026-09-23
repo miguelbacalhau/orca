@@ -1,7 +1,6 @@
 # shellcheck shell=bash
 #
-# orca triage — the discovery spine of orca:feature's and orca:debug's
-# Step 0, orca:status's dashboard, and the home of the per-run lease.
+# orca triage — the discovery spine of orca:feature's Step 0, orca:status's dashboard, and the home of the per-run lease.
 # The read-only boundary runs PER SUBCOMMAND: `discover`, `status`,
 # `snapshot`, and `archive --scan` never write anything; `claim` and
 # `release` are the lease's writer pair — the ONLY writers of
@@ -24,9 +23,8 @@
 # TAB-separated:
 #
 #   RUN:<TAB><run-dir><TAB>interrupted|unlaunched
-#       Feature runs: .orca/*/spec.md at depth 1 (feat-briefs/ has none;
-#       debug runs keep theirs nested at fix/spec.md) with no sibling
-#       report.md. interrupted -> the workflow launched; followed by:
+#       Feature runs: .orca/*/spec.md at depth 1 (feat-briefs/ has none)
+#       with no sibling report.md. interrupted -> the workflow launched; followed by:
 #         RUNID:<TAB><id|absent>         the LAST **Workflow run:** line
 #                                        (absent when its value is empty —
 #                                        a hand-mangled record)
@@ -55,10 +53,8 @@
 #       still gets retry offered — the audit is the real check, this marker
 #       is routing sugar. Followed by BLOCKED:/FOLLOWUP: enrichment (below).
 #   LEASE:<TAB>live|stale|none|unknown<TAB>pid:<n|-><TAB>since:<iso|->
-#       Follows every RUN:, DONE:, and CASE: line — the lease reader's
-#       verdict on that run directory's .lock (for a CASE, the last
-#       launch's run dir; `none` when the case never launched, `unknown`
-#       when the recorded args name no run dir to inspect):
+#       Follows every RUN: and DONE: line — the lease reader's verdict on
+#       that run directory's .lock:
 #         none    — no .lock.
 #         live    — host matches, the pid is running, and its start time
 #                   matches verbatim: AN OPEN SESSION ON THIS HOST OWNS
@@ -96,11 +92,6 @@
 #   BRIEF:<TAB><path>
 #       Queued briefs: .orca/feat-briefs/*.md, top level only (drafts/
 #       does not count).
-#   CASE:<TAB><slug><TAB>interrupted|ready
-#       Open cases: .orca/bug-cases/<slug>/case.md. interrupted -> the LAST
-#       **Workflow run:**/**Workflow args:** pair names a run dir with no
-#       report.md; followed by the same RUNID:/ARGS: lines. ready -> never
-#       launched, or the last run completed and left the case open.
 #
 #   Exit 0 always — empty output means nothing is waiting. The only typed
 #   failures: FAIL:<TAB>NOT_GIT<TAB><detail> and FAIL:<TAB>OLD_GIT<TAB><detail> (git < 2.31), exit 1.
@@ -130,8 +121,7 @@
 #       means a lossless prune; unmerged corroborates a kept blocked item.
 #   WORKTREE:<TAB><path><TAB><branch|detached><TAB><run-dir|orphan>
 #       orca-* worktree directories only: orca-<slug>[-W<N>] joins its
-#       feature run dir (*-feat-<slug>), orca-bug-<slug>[-H<N>] and
-#       orca-fix-<slug> join their debug run dir (*-bug-<slug>).
+#       feature run dir (*-feat-<slug>).
 #
 #   Read-only, exit 0 always — empty output (beyond TRUNK:) means git holds
 #   no orca footprint. Shares discover's typed failures, FAIL: NOT_GIT / OLD_GIT.
@@ -147,9 +137,9 @@
 #   ACTION:<TAB><rank><TAB><slug><TAB><owner-skill|-><TAB><target><TAB><b64 evidence>
 #       The routing conclusion, ranked mechanically: interrupted →
 #       queued → recovery → housekeeping. Slugs: resume-run, requeue-brief,
-#       run-brief, finish-unmet, review-deliverable, followup, debug-case,
+#       run-brief, finish-unmet, review-deliverable, followup,
 #       prune-branch, prune-worktree, inspect-orphan. The owner tag is the
-#       skill that acts on the line (feature, debug, retry, followup,
+#       skill that acts on the line (feature, retry, followup,
 #       review; `-` = user housekeeping) so each caller filters its own.
 #       These are ordered CANDIDATES, not commands — the skills present,
 #       never force. A run whose lease reads live gets NO resume action:
@@ -471,14 +461,14 @@ collect_discover() {
 
   # --- runs that died between brief consumption and the spec write ---
   # brief.md present, spec.md not yet: without this, the consumed brief is
-  # invisible to every discovery surface. feat-briefs/ and bug-cases/ are
+  # invisible to every discovery surface. feat-briefs/ is
   # excluded — a queued brief named brief.md is not a run directory — and so
   # are *-proto-* dirs: a prototype run's brief.md is not a resumable run.
   local briefmd bdir
   for briefmd in "$orca"/*/brief.md; do
     [[ -f "$briefmd" ]] || continue
     bdir="$(dirname "$briefmd")"
-    case "$(basename "$bdir")" in feat-briefs | bug-cases | *-proto-*) continue ;; esac
+    case "$(basename "$bdir")" in feat-briefs | *-proto-*) continue ;; esac
     [[ -f "$bdir/spec.md" ]] && continue
     printf 'RUN:\t%s\tunlaunched\n' "$bdir"
     emit_lease "$bdir"
@@ -491,40 +481,6 @@ collect_discover() {
     printf 'BRIEF:\t%s\n' "$brief"
   done
 
-  # --- open cases: interrupted iff the last launch's run dir lacks report.md ---
-  local casemd casedir rundir
-  for casemd in "$orca"/bug-cases/*/case.md; do
-    [[ -f "$casemd" ]] || continue
-    casedir="$(dirname "$casemd")"
-    run_ln="$(last_run_line "$casemd")"
-    if [[ -z "$run_ln" ]]; then
-      printf 'CASE:\t%s\tready\n' "$(basename "$casedir")"
-      printf 'LEASE:\tnone\n'
-      continue
-    fi
-    runid="$(record_value "$casemd" "Workflow run" "$run_ln")"
-    args="$(record_value "$casemd" "Workflow args" "$run_ln")"
-    # The recorded args carry the run dir; the sole writer's canonical JSON
-    # makes the grep safe. A pair with no locatable run dir stays
-    # interrupted — never guessed ready.
-    rundir="$(printf '%s' "$args" \
-      | grep -o '"runDir"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 \
-      | sed 's/^.*:[[:space:]]*"//; s/"$//')"
-    if [[ -n "$rundir" && -f "$rundir/report.md" ]]; then
-      printf 'CASE:\t%s\tready\n' "$(basename "$casedir")"
-      emit_lease "$rundir"
-      continue
-    fi
-    printf 'CASE:\t%s\tinterrupted\n' "$(basename "$casedir")"
-    printf 'RUNID:\t%s\n' "${runid:-absent}"
-    printf 'ARGS:\t%s\n' "${args:-absent}"
-    if [[ -n "$rundir" ]]; then
-      emit_lease "$rundir"
-    else
-      # No run dir to inspect — the caveat survives, honestly.
-      printf 'LEASE:\tunknown\tpid:-\tsince:-\n'
-    fi
-  done
 }
 
 cmd_discover() {
@@ -547,31 +503,31 @@ cmd_discover() {
 # a working directory at all.
 g() { git --git-dir="$common_dir" "$@"; }
 
-# Newest .orca run dir whose basename ends in -<verb>-<slug>; `orphan` when
+# Newest .orca run dir whose basename ends in -feat-<slug>; `orphan` when
 # none survives. Timestamped names make directory order chronological, so
 # the last glob match is the newest (a rerun after a full cleanup joins its
 # own dir, older same-slug dirs render on their .orca facts alone). The
-# feat fallback without the verb marker covers pre-plugin run dirs, and
-# skips anything carrying either verb's marker so a bare suffix never
-# cross-joins another slug's run.
-run_join() { # <slug> <feat|bug>
+# fallback without the verb marker covers pre-plugin run dirs, and skips
+# anything carrying the marker so a bare suffix never cross-joins another
+# slug's run.
+run_join() { # <slug>
   local d name prefix match=""
   # Anchored: the glob alone would let slug "alpha" claim slug "x-alpha"'s
   # run dir (*-feat-alpha matches ...-feat-x-alpha). The prefix before
-  # -<verb>-<slug> must be the timestamp — digits and dashes only —
+  # -feat-<slug> must be the timestamp — digits and dashes only —
   # checked literally, never through a regex the slug could corrupt.
-  for d in "$repo_root/.orca/"*"-$2-$1"; do
+  for d in "$repo_root/.orca/"*"-feat-$1"; do
     [[ -d "$d" ]] || continue
     name="${d##*/}"
-    prefix="${name%-"$2"-"$1"}"
+    prefix="${name%-feat-"$1"}"
     [[ "$prefix" != "$name" && "$prefix" =~ ^[0-9]+(-[0-9]+)*$ ]] && match="$d"
   done
-  if [[ -z "$match" && "$2" == feat ]]; then
+  if [[ -z "$match" ]]; then
     for d in "$repo_root/.orca/"*"-$1"; do
       name="${d##*/}"
       prefix="${name%-"$1"}"
       [[ -d "$d" && "$prefix" != "$name" && "$prefix" =~ ^[0-9]+(-[0-9]+)*$ \
-        && "$name" != *"-feat-"* && "$name" != *"-bug-"* ]] && match="$d"
+        && "$name" != *"-feat-"* ]] && match="$d"
     done
   fi
   printf '%s' "${match:-orphan}"
@@ -614,7 +570,7 @@ collect_status() {
         target="$trunk"
       fi
       printf 'ITEMBR:\t%s\t%s\t%s\n' \
-        "$ref" "$(merged_state "$ref" "$target")" "$(run_join "$slug" feat)"
+        "$ref" "$(merged_state "$ref" "$target")" "$(run_join "$slug")"
     else
       slug="${ref#feature/}"
       state="$(merged_state "$ref" "$trunk")"
@@ -624,12 +580,12 @@ collect_status() {
         ahead="$(g rev-list --count "$trunk..$ref" 2>/dev/null || echo unknown)"
       fi
       printf 'BRANCH:\t%s\t%s\tahead:%s\t%s\n' \
-        "$ref" "$state" "$ahead" "$(run_join "$slug" feat)"
+        "$ref" "$state" "$ahead" "$(run_join "$slug")"
     fi
   done < <(g for-each-ref --format='%(refname:short)' refs/heads/feature/)
 
   # --- orca-* worktrees, joined by the slug their directory name carries ---
-  local line wt_path="" wt_branch="detached" name verb
+  local line wt_path="" wt_branch="detached" name
   while IFS= read -r line; do
     case "$line" in
       "worktree "*)
@@ -640,24 +596,13 @@ collect_status() {
       "")
         name="$(basename "${wt_path:-/}")"
         if [[ -n "$wt_path" && "$name" == orca-* ]]; then
-          if [[ "$name" =~ ^orca-bug-(.+)-H[0-9]+$ ]]; then
+          if [[ "$name" =~ ^orca-(.+)-W[0-9]+$ ]]; then
             slug="${BASH_REMATCH[1]}"
-            verb=bug
-          elif [[ "$name" =~ ^orca-bug-(.+)$ ]]; then
-            slug="${BASH_REMATCH[1]}"
-            verb=bug
-          elif [[ "$name" =~ ^orca-fix-(.+)$ ]]; then
-            slug="${BASH_REMATCH[1]}"
-            verb=bug
-          elif [[ "$name" =~ ^orca-(.+)-W[0-9]+$ ]]; then
-            slug="${BASH_REMATCH[1]}"
-            verb=feat
           else
             slug="${name#orca-}"
-            verb=feat
           fi
           printf 'WORKTREE:\t%s\t%s\t%s\n' \
-            "$wt_path" "$wt_branch" "$(run_join "$slug" "$verb")"
+            "$wt_path" "$wt_branch" "$(run_join "$slug")"
         fi
         wt_path=""
         ;;
@@ -863,11 +808,6 @@ emit_actions() { # <discover-output> <status-output>
         cur_dir="$f2"
         cur_state="$f3"
         ;;
-      CASE:)
-        cur_kind=case
-        cur_dir="$f2"
-        cur_state="$f3"
-        ;;
       BRIEF:)
         cur_kind=""
         t2+="run-brief"$'\t'"feature"$'\t'"$f2"$'\t'"queued brief"$'\n'
@@ -883,14 +823,6 @@ emit_actions() { # <discover-output> <status-output>
               t2+="run-brief"$'\t'"feature"$'\t'"$cur_dir"$'\t'"consumed brief, never launched — rerunnable in place"$'\n'
             else
               t3+="requeue-brief"$'\t'"-"$'\t'"$cur_dir"$'\t'"unlaunched, not resumable — re-queue $cur_dir/brief.md"$'\n'
-            fi
-            ;;
-          case)
-            if [[ "$cur_state" == interrupted ]]; then
-              [[ "$f2" != live ]] \
-                && t1+="debug-case"$'\t'"debug"$'\t'"$cur_dir"$'\t'"interrupted debug run; lease $f2"$'\n'
-            else
-              t2+="debug-case"$'\t'"debug"$'\t'"$cur_dir"$'\t'"open case, ready to run"$'\n'
             fi
             ;;
           done)

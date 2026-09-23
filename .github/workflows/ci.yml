@@ -60,7 +60,7 @@ jobs:
         run: node .github/scripts/parse-workflow.js scripts/*.workflow.js
 
       - name: Relay codec and frame decoder
-        run: node .github/scripts/frame-decoder-test.js scripts/work-loop.workflow.js scripts/debug-loop.workflow.js
+        run: node .github/scripts/frame-decoder-test.js scripts/work-loop.workflow.js
 
       - name: Install bats
         run: |

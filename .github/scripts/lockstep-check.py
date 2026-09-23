@@ -3,8 +3,7 @@
 config validators: scripts/lib.sh (the sole write path, used by
 the config verb), and the sandboxed workflow scripts that carry literal
 copies because they cannot read files (scripts/work-loop.workflow.js,
-scripts/debug-loop.workflow.js, and — MODELS/EFFORTS only — the
-one-agent workflows scripts/spec.workflow.js,
+and — MODELS/EFFORTS only — the one-agent workflows scripts/spec.workflow.js,
 scripts/research.workflow.js, and scripts/prototype.workflow.js, which
 validate their spawn's overrides at launch). A value accepted by one validator but rejected by another
 bricks launches until the config file is hand-edited — so CI fails
@@ -19,7 +18,6 @@ MODELS_ONLY = ('MODELS', 'EFFORTS')
 FILES = {
     'lib.sh': ('scripts/lib.sh', ALL),
     'work-loop': ('scripts/work-loop.workflow.js', ALL),
-    'debug-loop': ('scripts/debug-loop.workflow.js', ALL),
     'spec': ('scripts/spec.workflow.js', MODELS_ONLY),
     'research': ('scripts/research.workflow.js', MODELS_ONLY),
     'prototype': ('scripts/prototype.workflow.js', MODELS_ONLY),
@@ -67,37 +65,10 @@ def sh_vocab(path, keys):
     return vocab
 
 
-# The relay codec (base64 + UTF-8 + frame decoder) is a literal copy in
-# each verb-calling workflow script — the sandbox reads no files. The
-# copies get the lockstep check, not just the lockstep risk: any drift
-# fails CI. (frame-decoder-test.js separately proves the block WORKS;
-# this proves the copies are the same block.)
-CODEC_FILES = [
-    'scripts/work-loop.workflow.js',
-    'scripts/debug-loop.workflow.js',
-]
-
-
-def codec_block(path):
-    src = open(path).read()
-    m = re.search(r"// -+ relay codec[^\n]*\n(.*?)// -+ end relay codec",
-                  src, re.S)
-    if not m:
-        sys.exit(f"lockstep: no relay codec block found in {path}")
-    return m.group(1)
-
-
 vocabs = {}
 for name, (path, keys) in FILES.items():
     reader = sh_vocab if path.endswith('.sh') else js_vocab
     vocabs[name] = reader(path, keys)
-
-codec_copies = {p: codec_block(p) for p in CODEC_FILES}
-if len(set(codec_copies.values())) != 1:
-    print("lockstep: the relay codec copies drifted:")
-    for p, block in codec_copies.items():
-        print(f"  {p}: {len(block)} chars")
-    sys.exit(1)
 
 ok = True
 for key in ALL:
@@ -115,4 +86,3 @@ if not ok:
 for name, v in vocabs.items():
     counts = ", ".join(f"{len(v[k])} {k.lower()}" for k in ALL if k in v)
     print(f"lockstep: {name}: {counts} — in lockstep")
-print(f"lockstep: relay codec: {len(CODEC_FILES)} identical copies")

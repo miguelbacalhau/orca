@@ -1,16 +1,14 @@
 # orca
 
-A Claude Code plugin for autonomous multi-agent development: `/orca:feature` takes an idea to a committed integration branch, `/orca:debug` takes a symptom to a verified diagnosis and fix. Runs happen in isolated git worktrees, every stage runs in its own subagent, and an independent reviewer (Codex by default, Claude as fallback) attacks each result before it is committed. The README is the authoritative deep description.
-
-**`/orca:debug` is abandoned for now** — it is not being used or worked on. Its skill, agents (`reproduce`, `hypothesize`, `verify`, `diagnose`), and `debug-loop.workflow.js` remain in the tree but should not receive new work unless explicitly asked.
+A Claude Code plugin for autonomous multi-agent development: `/orca:feature` takes an idea to a committed integration branch. Runs happen in isolated git worktrees, every stage runs in its own subagent, and an independent reviewer (Codex by default, Claude as fallback) attacks each result before it is committed. The README is the authoritative deep description.
 
 ## Layout
 
-- `skills/<name>/SKILL.md` — the thirteen user-facing skills (`feature`, `debug`, `review`, …). Interview instructions live beside them (`skills/feature/interview.md`).
-- `agents/<stage>.md` — the twenty stage agents, loaded as `orca:<stage>`.
+- `skills/<name>/SKILL.md` — the twelve user-facing skills (`feature`, `review`, `iterate`, …). Interview instructions live beside them (`skills/feature/interview.md`).
+- `agents/<stage>.md` — the sixteen stage agents, loaded as `orca:<stage>`.
 - `scripts/` — the deterministic core:
   - `orca.sh` + `lib.sh` + `verbs/*.sh` — the orca CLI: one case-statement dispatcher, a shared lib, one sourced file per verb. Every shell operation the plugin performs goes through this.
-  - `*.workflow.js` — the Workflow-tool scripts (work loop, debug loop, spec gate, research, prototype). Plain JS, no Node APIs, no TypeScript.
+  - `*.workflow.js` — the Workflow-tool scripts (work loop, spec gate, research, prototype). Plain JS, no Node APIs, no TypeScript.
 - `tests/*.bats` — Bats suite with hermetic git fixtures (`tests/helpers.bash`). Run with `bats tests/`.
 - `plans/` — design docs for features of orca itself; not shipped.
 - `.claude-plugin/plugin.json` — the manifest.

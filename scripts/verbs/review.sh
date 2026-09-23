@@ -252,7 +252,7 @@ cmd_discover() {
     /^branch refs\/heads\// { print substr($0, 19) "\t" path }
   ')"
 
-  local branch slug worktree state notes_file notes_line counts
+  local branch worktree state notes_file notes_line counts
   while IFS= read -r branch; do
     [[ -n "$branch" ]] || continue
     # Per-item branches (feature/<slug>-W<n>, kept by blocked items) are
@@ -269,11 +269,7 @@ cmd_discover() {
       state="ok"
     else
       state="missing"
-      slug="${branch#*/}"
-      case "$branch" in
-        fix/*) worktree="$repo_root/orca-fix-$slug" ;;
-        *)     worktree="$repo_root/orca-$slug" ;;
-      esac
+      worktree="$repo_root/orca-${branch#feature/}"
     fi
     printf 'DELIVERABLE:\t%s\t%s\t%s\n' "$branch" "$worktree" "$state"
     # Unconsumed review comments are discoverable state: surface a notes
@@ -293,7 +289,7 @@ cmd_discover() {
           ;;
       esac
     fi
-  done < <(git --git-dir="$common_dir" branch --list 'feature/*' 'fix/*' \
+  done < <(git --git-dir="$common_dir" branch --list 'feature/*' \
              --no-merged "$trunk" --format='%(refname:short)')
   exit 0
 }

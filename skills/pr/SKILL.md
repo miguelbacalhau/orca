@@ -26,7 +26,7 @@ The candidate set is exact and computed by the script, never re-derived conversa
 - **One candidate** → proceed with it.
 - **Several, no argument** → default to the newest (run-dir names are timestamped; the last `DONE:` line), name the choice, and offer the others as a picker — offer, never force.
 - **An argument** → the `MATCH:` line names the run; `MISS:` is a loud miss — list the `CANDIDATE:` lines, never guess.
-- **None** → say what was found instead, and name the skill that owns that state: the branch exists but reads `merged` (already landed — nothing to do), the run is `RUN: interrupted` (no report yet — `/orca:feature` resumes it), or nothing has been delivered at all (`/orca:feature`, `/orca:debug`). A `DONE:` run whose branch is gone was landed and pruned; say that too.
+- **None** → say what was found instead, and name the skill that owns that state: the branch exists but reads `merged` (already landed — nothing to do), the run is `RUN: interrupted` (no report yet — `/orca:feature` resumes it), or nothing has been delivered at all (`/orca:feature`). A `DONE:` run whose branch is gone was landed and pruned; say that too.
 - **No `TRUNK:` line, or the branch reads `unknown`** → the base branch cannot be determined (detached or unset bare-repo HEAD); a PR needs a base, so say so and stop rather than guessing one.
 
 Carry forward the run directory, the head branch, and the trunk, exactly as emitted.

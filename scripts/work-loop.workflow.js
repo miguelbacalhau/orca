@@ -131,11 +131,10 @@ if (items.some(i => i.id === 'integration'))
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 if (!SLUG_RE.test(slug))
   throw new Error(`args.slug must match ${SLUG_RE} (got ${JSON.stringify(slug)})`)
-// item ids — W-numbered from the Work Breakdown, or F-numbered for the
-// debug loop's synthesized fix item (its nested call lands here).
-//   valid:   "W1", "W12", "F2"
-//   invalid: "W0", "W01", "w1", "H1", "W1a", "integration"
-const ITEM_ID_RE = /^[WF][1-9][0-9]*$/
+// item ids — W-numbered from the Work Breakdown.
+//   valid:   "W1", "W12"
+//   invalid: "W0", "W01", "w1", "F1", "W1a", "integration"
+const ITEM_ID_RE = /^W[1-9][0-9]*$/
 const badIds = items.filter(i => !ITEM_ID_RE.test(i.id))
 if (badIds.length)
   throw new Error(`invalid work breakdown: item ids must match ${ITEM_ID_RE}: ${badIds.map(i => JSON.stringify(i.id)).join(', ')}`)
@@ -200,18 +199,15 @@ const TUNABLE = ['plan', 'implement', 'review', 'fix', 'commit', 'merge', 'integ
 // config block verbatim — but they are applied by their own one-agent
 // workflows (spec.workflow.js at spec-spawn time, research.workflow.js at the
 // interview's research spawn), before this workflow exists; here they are
-// validated and otherwise ignored. The debug verb's stages get the same
-// treatment: the config file has ONE agents block shared by both verbs
-// (orca:debug passes it verbatim into its nested call to this script), so a
-// debug override must be valid-and-ignored here, never a launch failure.
-// 'prototype' likewise: orca:prototype's own one-agent workflow applies it.
-const STAGES = ['research', 'spec', ...TUNABLE, 'reproduce', 'hypothesize', 'verify', 'diagnose', 'prototype']
-// The stage vocabulary is one shared 14-key list kept in lockstep across
-// three code validators — scripts/lib.sh (the config verb's write path, and the run skills'
-// launch validation via its validate subcommand), this script, and
-// debug-loop.workflow.js — a value accepted anywhere but rejected here bricks
-// every launch until the config file is hand-edited. MODELS/EFFORTS are part
-// of the same lockstep, with a FOURTH, FIFTH, and SIXTH holder:
+// validated and otherwise ignored. 'prototype' likewise: orca:prototype's
+// own one-agent workflow applies it.
+const STAGES = ['research', 'spec', ...TUNABLE, 'prototype']
+// The stage vocabulary is one shared 10-key list kept in lockstep across
+// two code validators — scripts/lib.sh (the config verb's write path, and the run skills'
+// launch validation via its validate subcommand) and this script — a value
+// accepted there but rejected here bricks every launch until the config file
+// is hand-edited. MODELS/EFFORTS are part of the same lockstep, with a THIRD,
+// FOURTH, and FIFTH holder:
 // spec.workflow.js, research.workflow.js, and prototype.workflow.js carry
 // their own literal copies for their one-agent
 // spawns' model/effort validation. Workflow
@@ -353,8 +349,7 @@ const shMarked = async (cmd, label, ph) => {
 const sq = s => s.replace(/'/g, `'\\''`)
 
 // Relay-read SHAs are interpolated into git reset/log commands — validate
-// them like debug-loop's fix-base guard: full 40-hex or the command never
-// runs. A garbled relay read must fail the item, never flow into
+// them: full 40-hex or the command never runs. A garbled relay read must fail the item, never flow into
 // `git reset --soft <garbage>`.
 const SHA_RE = /^[0-9a-f]{40}$/
 const mustSha = (sha, label) => {
@@ -1253,7 +1248,7 @@ const gateWave = async (wave, tag) => {
       // every live item that the block path used.
       const perItem = {}
       for (const issue of rec.issues) {
-        const named = (issue.match(/\b[WF][1-9][0-9]*\b/g) || []).filter(id => wave.some(i => i.id === id))
+        const named = (issue.match(/\bW[1-9][0-9]*\b/g) || []).filter(id => wave.some(i => i.id === id))
         const targets = named.length ? [...new Set(named)] : live.map(i => i.id)
         for (const id of targets) {
           if (!objections[id]) objections[id] = []

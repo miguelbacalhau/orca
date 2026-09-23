@@ -205,51 +205,16 @@ EOF
   refute_line $'BRIEF:\t'"$PWD/.orca/feat-briefs/drafts/two.md"
 }
 
-@test "cases: ready when never launched or last run reported" {
-  make_repo "$BATS_TEST_TMPDIR/r"
-  cd "$BATS_TEST_TMPDIR/r"
-  mkdir -p .orca/bug-cases/crash .orca/20250101-bug-done
-  echo case >.orca/bug-cases/crash/case.md
-  run triage discover
-  has_line $'CASE:\tcrash\tready'
-  # launched, run dir has a report -> still ready
-  cat >.orca/bug-cases/crash/case.md <<EOF
-# case
-
-**Workflow run:** wf_abc
-**Workflow args:** {"runDir":"$PWD/.orca/20250101-bug-done"}
-EOF
-  echo report >.orca/20250101-bug-done/report.md
-  run triage discover
-  has_line $'CASE:\tcrash\tready'
-}
-
-@test "cases: interrupted when the last run dir lacks a report" {
-  make_repo "$BATS_TEST_TMPDIR/r"
-  cd "$BATS_TEST_TMPDIR/r"
-  mkdir -p .orca/bug-cases/crash .orca/20250101-bug-crash
-  cat >.orca/bug-cases/crash/case.md <<EOF
-# case
-
-**Workflow run:** wf_abc
-**Workflow args:** {"runDir":"$PWD/.orca/20250101-bug-crash"}
-EOF
-  run triage discover
-  [ "$status" -eq 0 ]
-  has_line $'CASE:\tcrash\tinterrupted'
-  has_line $'RUNID:\twf_abc'
-}
-
 @test "status joins branches to run dirs without cross-slug bleed" {
   make_repo "$BATS_TEST_TMPDIR/r"
   cd "$BATS_TEST_TMPDIR/r"
   git branch feature/alpha
   git branch feature/alpha-W1
-  mkdir -p .orca/20250101-feat-alpha .orca/20250201-bug-alpha
+  mkdir -p .orca/20250101-feat-alpha .orca/20250201-alpha
   run triage status
   [ "$status" -eq 0 ]
   has_line $'TRUNK:\tmain'
-  # the feat run dir wins; the bug dir with the same slug never joins
+  # the verb-marked run dir wins over a bare-suffix dir with the same slug
   has_line $'BRANCH:\tfeature/alpha\tmerged\tahead:0\t'"$PWD/.orca/20250101-feat-alpha"
   has_line $'ITEMBR:\tfeature/alpha-W1\tmerged\t'"$PWD/.orca/20250101-feat-alpha"
 }
@@ -261,10 +226,10 @@ EOF
   mkdir -p .orca/20250101-alpha
   run triage status
   has_line $'BRANCH:\tfeature/alpha\tmerged\tahead:0\t'"$PWD/.orca/20250101-alpha"
-  # a bug-marked dir carrying a longer slug that merely ends in -alpha
+  # a verb-marked dir carrying a longer slug that merely ends in -alpha
   # must not be claimed by the fallback
   rm -r .orca/20250101-alpha
-  mkdir -p .orca/20250101-bug-x-alpha
+  mkdir -p .orca/20250101-feat-x-alpha
   run triage status
   has_line $'BRANCH:\tfeature/alpha\tmerged\tahead:0\torphan'
 }
@@ -496,7 +461,7 @@ write_owner() {
 @test "snapshot combines discover and status and ranks the actions" {
   make_repo "$BATS_TEST_TMPDIR/r"
   cd "$BATS_TEST_TMPDIR/r"
-  mkdir -p .orca/20250101-feat-alpha .orca/20250102-feat-beta .orca/feat-briefs .orca/bug-cases/crash
+  mkdir -p .orca/20250101-feat-alpha .orca/20250102-feat-beta .orca/feat-briefs
   cat >.orca/20250101-feat-alpha/spec.md <<'EOF'
 # spec
 
@@ -505,7 +470,6 @@ write_owner() {
 EOF
   echo '# spec' >.orca/20250102-feat-beta/spec.md
   echo brief >.orca/feat-briefs/idea.md
-  echo case >.orca/bug-cases/crash/case.md
   run triage snapshot
   [ "$status" -eq 0 ]
   # both fact domains in one call
@@ -514,8 +478,7 @@ EOF
   # ranked: interrupted -> queued -> recovery
   has_line $'ACTION:\t1\tresume-run\tfeature\t'"$PWD/.orca/20250101-feat-alpha"$'\t'
   has_line $'ACTION:\t2\trun-brief\tfeature\t'"$PWD/.orca/feat-briefs/idea.md"$'\t'
-  has_line $'ACTION:\t3\tdebug-case\tdebug\tcrash\t'
-  has_line $'ACTION:\t4\trequeue-brief\t-\t'"$PWD/.orca/20250102-feat-beta"$'\t'
+  has_line $'ACTION:\t3\trequeue-brief\t-\t'"$PWD/.orca/20250102-feat-beta"$'\t'
 }
 
 @test "snapshot: a live lease suppresses the resume action" {

@@ -17,10 +17,10 @@
 #   orca.sh secrets place <worktree>
 #   orca.sh secrets remove <worktree>
 #
-# remove is place's inverse, for least-privilege staging: the loops strip
+# remove is place's inverse, for least-privilege staging: the loop strips
 # placement links from a worktree before stages that consume adversarial
-# content and need no credentials (the independent review), and re-place
-# them for stages that do (implement, fix, integrate, reproduce). Only
+# content and need no credentials (the independent review), and re-places
+# them for stages that do (implement, fix, integrate). Only
 # links passing the resolved-target ownership test are touched. Emits one
 # UNPLACED:<TAB><relpath> per removed link and a final
 # UNPLACED_TOTAL:<TAB><n>; exits 0 even when nothing was removed.

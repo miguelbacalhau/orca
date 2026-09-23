@@ -35,7 +35,7 @@ Carry forward the run directory, the head branch, and the trunk, exactly as emit
 
 Read the candidate's `<run-dir>/report.md`. Two gates, in order — even a draft PR asserts "the work is finished," and the report is the authority on whether that is true:
 
-- **`**Deliverable state:**` is not `verified`** → refuse in one line, quoting the report's own stated reason, and point at the owning skill: `unverified` from a died verifier or an interrupted run tail → `/orca:feature`'s resume; unmet or blocked work behind it → `/orca:retry`. Draft status is no fallback here — publishing as a draft is this skill's unconditional default, not an escape hatch, and it still pushes an unverified branch under a description claiming work the run never verified.
+- **`**Deliverable state:**` is not `verified`** → refuse in one line, quoting the report's own stated reason, and point at the owning skill: `unverified` from a died verifier or an interrupted run tail → `/orca:feature`'s resume; `unverified` from review-feedback fixes that left verification failing → `/orca:review`, whose next addressing round owns the fix; unmet or blocked work behind it → `/orca:retry`. Draft status is no fallback here — publishing as a draft is this skill's unconditional default, not an escape hatch, and it still pushes an unverified branch under a description claiming work the run never verified.
 - **`## Blocked` is anything other than "None"** → refuse and point at `/orca:retry`. A PR for a branch the run itself records as incomplete misrepresents the deliverable.
 
 ## Step 3: Compose
@@ -45,6 +45,8 @@ Read `<run-dir>/brief.md` alongside the `report.md` already in hand. The report 
 The reader has never heard of orca, so run vocabulary is translated or dropped — and so is the run's *shape*. Work items are the run's unit of parallelism, not the reader's unit of understanding: a nine-item run does not become nine bullets. Group by outcome, several items serving one visible change to one bullet.
 
 **Dropped entirely:** item IDs, commit hashes (the branch carries them), item counts and "deliverable state", run-dir and worktree paths, Follow-ups, Knowledge, Blocked (empty by the guard), internal deviations (replans, scope mechanics), and every `/orca:*` pointer. A deviation survives only where it changed user-visible behavior, folded into the prose where it belongs.
+
+**Review rounds:** a report's `## Review rounds` section records fixes landed after the run from the user's own review comments. Each `addressed` resolution is part of what the branch does — fold it into What changed by outcome, as the behavior now shipped, never as "review feedback" or a correction; a round's passing verification counts toward Testing. Comment ids, answered comments, timestamps, and archive paths are dropped.
 
 **Title:** conventional and imperative, from the report's one-line idea summary — the same register as the run's commit subjects.
 

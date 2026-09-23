@@ -93,13 +93,27 @@ Only ever entered through Step 4's gate (or the identical gate offered from Step
 2. **Spawn the `orca:address` agent.** The spawn runs in the background: wait for its task notification before the commit in item 3, and never fabricate the result. Its task message carries: the integration worktree path, the notes file path, the run directory when one exists (no run dir → say so: there is no spec; the comments themselves are the intent), and the per-comment plan as consented at the gate — bucket and approach per `#N`, with any corrections or answers from the conversation folded in. The agent classifies, fixes change requests, answers questions, and writes the notes file back as one whole-file snapshot with statuses and human-readable resolutions.
 3. **Commit** the fixes on the deliverable branch in the integration worktree — same attribution rules as every run commit: a subject shaped like an ordinary review-feedback commit, never mentioning Claude, AI, agents, or orca, no Co-Authored-By or Generated-with trailers. Read the message back from `git log` to check before moving on. Nothing to commit (answers only) → skip, and say so.
 4. **Verify the write-back:** re-run `orca.sh review notes <worktree>` — zero `open` remaining, version still 1. Anything else → report what the agent left undone rather than papering over it.
-5. **Parting message:** what was addressed vs answered (per `#N`, with each resolution), the commit hash, that re-running `/orca:review` shows each resolution inline under its anchor — editing a comment there re-opens it for the next round; that loop is the convergence mechanism — and the `git merge --no-ff <branch>` landing command for when they're satisfied.
+5. **Record the round in the report.** Run dir found in item 1 → edit its `report.md`, which is otherwise a pre-review snapshot: `/orca:pr` composes the PR body from it without reading the diff, and gates on its `**Deliverable state:**` line. Keep a `## Review rounds` section immediately before `## Landing` — create it on the first round, append on later ones — with one entry per round:
+
+   ```markdown
+   ### <YYYY-MM-DD HH:MM> — <commit hash, or "no commit (answers only)">
+
+   - #N addressed: <the resolution, verbatim>
+   - #N answered: <the resolution, verbatim>
+   - Left open: <each #N the agent could not settle — omit the line when none>
+   - Verification: pass | fail — <the commands the agent ran, and the failure when there is one>
+
+   Comments archived at `reviews/comments-<timestamp>.json`.
+   ```
+
+   Timestamp via `date +"%Y-%m-%d %H:%M"`, the report's own format. When verification failed and the state reads `verified`, rewrite that one line to `unverified — review-feedback fixes (<hash>) left verification failing`: a branch whose latest commit broke the suite is not the verified deliverable the report claims, and `/orca:pr` must refuse it. Never upgrade a state, and touch nothing else in the report — its other sections stay the run's record; a later `/orca:retry` or `/orca:iterate` archives the whole file, rounds included. No run dir → there is no report; skip this item.
+6. **Parting message:** what was addressed vs answered (per `#N`, with each resolution), the commit hash, any Deliverable state downgrade and why, that re-running `/orca:review` shows each resolution inline under its anchor — editing a comment there re-opens it for the next round; that loop is the convergence mechanism — and the `git merge --no-ff <branch>` landing command for when they're satisfied.
 
 There is deliberately no machine re-review after addressing: the human re-running `:OrcaReview` and seeing resolutions at their anchors *is* the review.
 
 ## Guidelines
 
-- Never merge anything, and never write in a worktree or in `.orca/review-notes/` outside two sanctioned paths: the consented `git worktree add` in Step 1 (which touches no worktree that exists — the secrets placement that follows it, writing only symlinks into that fresh worktree, is part of the same consent), and the consented addressing flow of Step 5 (the agent's fixes and notes snapshot, and the commit that follows). The deliverable is landed by the user's own hand.
+- Never merge anything, and never write in a worktree or in `.orca/review-notes/` outside two sanctioned paths: the consented `git worktree add` in Step 1 (which touches no worktree that exists — the secrets placement that follows it, writing only symlinks into that fresh worktree, is part of the same consent), and the consented addressing flow of Step 5 (the agent's fixes and notes snapshot, the commit that follows, and the round recorded in the run's `report.md`). The deliverable is landed by the user's own hand.
 - One writer at a time: never write the notes file — and never start addressing — while an editor session may be live. The gate right after window death is the sequencing; the residual race (the user reopens nvim mid-addressing) is accepted, per the contract's sequential-workflow assumption.
 - Never edit `.orca/config` — pinning or clearing `editor`/`terminal` belongs to orca:config; a failed probe's install belongs to orca:doctor. Recommend both by name.
 - This is the *human* half of review. The automated adversarial review stage lives inside runs (`agents.review`, the `reviewer` key) and is not touched, configured, or replaced here — and addressing comments must stay convergent (small deltas the user re-reads inline at their anchors), never become an unplanned work loop.

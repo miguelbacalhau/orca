@@ -165,7 +165,11 @@ $WT_FRAME,{\"die\":true},$FAIL,$OK]"
   # W2, never overwritten in place by the relaunch's round0.
   [[ "$output" == *'review-archive:W2#deferred'* ]]
   [[ "$output" == *"mv '/run/reviews/W2-'* '/run/reviews/prev'"* ]]
-  [[ "$output" == *"while ls '/run/reviews/prev'\\"\$n\\"'/W2-'*"* ]]
+  # The command sits JSON-escaped in the output; one quoted literal keeps the
+  # match exact (mixed quoted/unquoted backslashes read differently across
+  # bash versions).
+  local probe=$'while ls \'/run/reviews/prev\'\\"$n\\"\'/W2-\'*'
+  [[ "$output" == *"$probe"* ]]
   [[ "$output" == *'"id":"W2","reason":"dependency blocked: W1"'* ]]
 }
 

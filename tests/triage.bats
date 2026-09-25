@@ -597,21 +597,160 @@ make_finished() {
   printf '%s\n' "$output" | grep '^KEPT:' | grep -q 'feature/unlanded(unmerged)'
 }
 
-@test "archive: a leftover worktree is reported in the evidence, never a gate" {
+@test "archive removes the run's worktrees and branches, recording each tip" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  make_finished 20250101-feat-alpha None
+  git branch feature/alpha
+  git branch feature/alpha-W1
+  git worktree add orca-alpha feature/alpha >/dev/null 2>&1
+  git worktree add orca-alpha-W1 feature/alpha-W1 >/dev/null 2>&1
+  # an ignored file is regenerable, never "in use"
+  echo '.env' >orca-alpha/.gitignore
+  git -C orca-alpha add .gitignore && git -C orca-alpha commit -qm ignore
+  git merge -q feature/alpha
+  echo secret >orca-alpha/.env
+  # someone else's branch and worktree are never the run's footprint
+  git branch unrelated
+  local tip
+  tip="$(git rev-parse feature/alpha)"
+  run triage archive --scan
+  [ "$status" -eq 0 ]
+  has_line $'ARCHIVABLE:\t'"$PWD/.orca/20250101-feat-alpha"$'\t'
+  printf '%s\n' "$output" | grep '^ARCHIVABLE:' | grep -q 'removes 2 worktree(s) and 2 branch(es)'
+  has_line $'PRUNE:\t'"$PWD/.orca/20250101-feat-alpha"$'\tworktree\t'"$PWD/orca-alpha"
+  has_line $'PRUNE:\t'"$PWD/.orca/20250101-feat-alpha"$'\tworktree\t'"$PWD/orca-alpha-W1"
+  has_line $'PRUNE:\t'"$PWD/.orca/20250101-feat-alpha"$'\tbranch\tfeature/alpha-W1'
+  has_line $'PRUNE:\t'"$PWD/.orca/20250101-feat-alpha"$'\tbranch\tfeature/alpha'
+  # the scan is read-only
+  [ -d orca-alpha ]
+  git show-ref --verify --quiet refs/heads/feature/alpha
+  run triage archive .orca/20250101-feat-alpha
+  [ "$status" -eq 0 ]
+  has_line $'PRUNED:\tworktree\t'"$PWD/orca-alpha"
+  has_line $'PRUNED:\tbranch\tfeature/alpha\t'"$tip"
+  has_line $'ARCHIVED:\t.orca/20250101-feat-alpha'
+  # worktrees go before branches: git refuses a checked-out branch
+  local first_branch last_wt
+  first_branch="$(printf '%s\n' "$output" | grep -n $'^PRUNED:\tbranch' | head -1 | cut -d: -f1)"
+  last_wt="$(printf '%s\n' "$output" | grep -n $'^PRUNED:\tworktree' | tail -1 | cut -d: -f1)"
+  [ "$last_wt" -lt "$first_branch" ]
+  [ ! -d orca-alpha ] && [ ! -d orca-alpha-W1 ]
+  run git branch --list 'feature/*'
+  [ -z "$output" ]
+  git show-ref --verify --quiet refs/heads/unrelated
+  grep -qx "branch=feature/alpha $tip" .orca/20250101-feat-alpha/archived
+  grep -qx "worktree=$PWD/orca-alpha" .orca/20250101-feat-alpha/archived
+  # the run directory itself is untouched
+  [ -f .orca/20250101-feat-alpha/report.md ] && [ -f .orca/20250101-feat-alpha/spec.md ]
+  run triage status
+  refute_line $'BRANCH:\t'
+  refute_line $'WORKTREE:\t'
+}
+
+@test "archive: a run with no footprint left archives with nothing to remove" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  make_finished 20250101-feat-alpha None
+  run triage archive --scan
+  printf '%s\n' "$output" | grep '^ARCHIVABLE:' | grep -q 'no git footprint left'
+  refute_line $'PRUNE:\t'
+  run triage archive .orca/20250101-feat-alpha
+  [ "$status" -eq 0 ]
+  refute_line $'PRUNED:\t'
+  has_line $'ARCHIVED:\t.orca/20250101-feat-alpha'
+}
+
+@test "archive: a worktree already gone from disk is pruned from git's records" {
   make_repo "$BATS_TEST_TMPDIR/r"
   cd "$BATS_TEST_TMPDIR/r"
   make_finished 20250101-feat-alpha None
   git branch feature/alpha
   git worktree add orca-alpha feature/alpha >/dev/null 2>&1
-  run triage archive --scan
-  [ "$status" -eq 0 ]
-  has_line $'ARCHIVABLE:\t'"$PWD/.orca/20250101-feat-alpha"$'\t'
-  printf '%s\n' "$output" | grep '^ARCHIVABLE:' | grep -q 'leftover worktree'
+  rm -rf orca-alpha
   run triage archive .orca/20250101-feat-alpha
   [ "$status" -eq 0 ]
-  # archiving touches no git state: the worktree is still status's to prune
-  run triage snapshot
-  has_line $'ACTION:\t2\tprune-worktree\t-\t'"$PWD/orca-alpha"$'\t'
+  has_line $'PRUNED:\tworktree\t'"$PWD/orca-alpha"
+  has_line $'PRUNED:\tbranch\tfeature/alpha\t'
+  run git worktree list --porcelain
+  [[ "$output" != *orca-alpha* ]]
+}
+
+@test "archive: uncommitted work in a run worktree keeps the whole run" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  make_finished 20250101-feat-alpha None
+  git branch feature/alpha
+  git branch feature/alpha-W1
+  git worktree add orca-alpha feature/alpha >/dev/null 2>&1
+  echo hand-edit >orca-alpha/notes.txt
+  run triage archive --scan
+  has_line $'KEPT:\t'"$PWD/.orca/20250101-feat-alpha"$'\tWORKTREE_IN_USE\torca-alpha(uncommitted changes)'
+  refute_line $'PRUNE:\t'
+  run triage archive .orca/20250101-feat-alpha
+  assert_fail_reason WORKTREE_IN_USE
+  # all-or-nothing: the gate refused before anything was removed
+  [ -f orca-alpha/notes.txt ]
+  git show-ref --verify --quiet refs/heads/feature/alpha-W1
+  [ ! -f .orca/20250101-feat-alpha/archived ]
+}
+
+@test "archive: a locked worktree or this shell standing in one keeps the run" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  make_finished 20250101-feat-alpha None
+  make_finished 20250102-feat-beta None
+  git branch feature/alpha
+  git branch feature/beta
+  git worktree add orca-alpha feature/alpha >/dev/null 2>&1
+  git worktree add orca-beta feature/beta >/dev/null 2>&1
+  git worktree lock orca-alpha
+  cd orca-beta
+  run triage archive --scan
+  [ "$status" -eq 0 ]
+  has_line $'KEPT:\t'"$BATS_TEST_TMPDIR/r/.orca/20250101-feat-alpha"$'\tWORKTREE_IN_USE\torca-alpha(locked)'
+  has_line $'KEPT:\t'"$BATS_TEST_TMPDIR/r/.orca/20250102-feat-beta"$'\tWORKTREE_IN_USE\torca-beta(current directory)'
+}
+
+@test "archive: a run branch checked out outside the run keeps it" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  make_finished 20250101-feat-alpha None
+  git branch feature/alpha
+  git branch feature/alpha-W1
+  git worktree add "$BATS_TEST_TMPDIR/elsewhere" feature/alpha-W1 >/dev/null 2>&1
+  run triage archive --scan
+  has_line $'KEPT:\t'"$PWD/.orca/20250101-feat-alpha"$'\tWORKTREE_IN_USE\tfeature/alpha-W1(checked out at '"$BATS_TEST_TMPDIR/elsewhere"')'
+}
+
+@test "archive: a detached run worktree with unlanded commits is NOT_LANDED" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  make_finished 20250101-feat-alpha None
+  git branch feature/alpha
+  git worktree add --detach orca-alpha feature/alpha >/dev/null 2>&1
+  echo wip >orca-alpha/wip.txt
+  git -C orca-alpha add wip.txt && git -C orca-alpha commit -qm wip
+  run triage archive .orca/20250101-feat-alpha
+  assert_fail_reason NOT_LANDED
+  printf '%s\n' "$output" | grep -q 'orca-alpha(detached, unmerged)'
+  [ -d orca-alpha ]
+}
+
+@test "archive: the bare layout's worktrees and branches are removed too" {
+  make_bare_layout "$BATS_TEST_TMPDIR/b"
+  cd "$BATS_TEST_TMPDIR/b"
+  make_finished 20250101-feat-alpha None
+  git --git-dir=.bare branch feature/alpha main
+  git --git-dir=.bare worktree add "$PWD/orca-alpha" feature/alpha >/dev/null 2>&1
+  cd main
+  run triage archive "$BATS_TEST_TMPDIR/b/.orca/20250101-feat-alpha"
+  [ "$status" -eq 0 ]
+  has_line $'PRUNED:\tworktree\t'"$BATS_TEST_TMPDIR/b/orca-alpha"
+  has_line $'PRUNED:\tbranch\tfeature/alpha\t'
+  [ ! -d "$BATS_TEST_TMPDIR/b/orca-alpha" ]
+  # the main worktree is never footprint
+  [ -d "$BATS_TEST_TMPDIR/b/main" ]
 }
 
 @test "archive: an unmerged ITEM branch alone blocks retirement" {
@@ -647,8 +786,10 @@ make_finished() {
   run triage snapshot --run alpha
   [ "$status" -eq 0 ]
   has_line $'MATCH:\t'"$PWD/.orca/20250101-feat-alpha"
-  # the branch is still status's to prune: archiving touches no git state
-  has_line $'ACTION:\t1\tprune-branch\t-\tfeature/alpha\t'
+  # the landed branch went with the archive: nothing left for status to prune
+  refute_line $'ACTION:\t'
+  run git branch --list 'feature/*'
+  [ -z "$output" ]
 }
 
 @test "archive is idempotent and reversible; unarchive restores the routing" {
@@ -668,6 +809,34 @@ make_finished() {
   has_line $'UNARCHIVED:\t.orca/20250101-feat-alpha'
   run triage unarchive .orca/20250101-feat-alpha
   [ "$status" -eq 0 ]
+  run triage discover
+  has_line $'DONE:\t'"$PWD/.orca/20250101-feat-alpha"$'\tclean'
+}
+
+@test "unarchive recreates the removed branches at their recorded tips" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  make_finished 20250101-feat-alpha None
+  git checkout -qb feature/alpha
+  echo work >w.txt
+  git add w.txt && git commit -qm work
+  git checkout -q main
+  git merge -q --no-ff -m merge feature/alpha
+  git branch feature/alpha-W1 feature/alpha
+  local tip
+  tip="$(git rev-parse feature/alpha)"
+  run triage archive .orca/20250101-feat-alpha
+  [ "$status" -eq 0 ]
+  # a same-named branch that reappeared meanwhile is never clobbered
+  git branch feature/alpha-W1 main
+  run triage unarchive .orca/20250101-feat-alpha
+  [ "$status" -eq 0 ]
+  has_line $'RESTORED:\tbranch\tfeature/alpha\t'"$tip"
+  has_line $'NOT_RESTORED:\tbranch\tfeature/alpha-W1\texists'
+  has_line $'UNARCHIVED:\t.orca/20250101-feat-alpha'
+  [ "$(git rev-parse feature/alpha)" = "$tip" ]
+  [ "$(git rev-parse feature/alpha-W1)" = "$(git rev-parse main)" ]
+  [ ! -f .orca/20250101-feat-alpha/archived ]
   run triage discover
   has_line $'DONE:\t'"$PWD/.orca/20250101-feat-alpha"$'\tclean'
 }

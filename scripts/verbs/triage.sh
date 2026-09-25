@@ -160,22 +160,37 @@
 #
 # archive output contract — the retirement gate is provable, never
 # guessed: report.md present, Blocked section "None", lease not live,
-# and every feature/* branch joining this run dir (integration and item
+# every feature/* branch joining this run dir (integration and item
 # alike, through the same anchored run_join the status join uses) merged
-# into the trunk; absent branches pass (landed and pruned). Worktrees
-# never gate — the run dir stays in place, so status keeps joining and
-# pruning them. TAB-separated:
+# into the trunk — absent branches pass (landed and pruned) — and every
+# joined orca-* worktree removable without loss: a detached one's HEAD
+# merged too (else NOT_LANDED), none dirty, locked, holding this shell's
+# cwd, and no run branch checked out outside the run or being the trunk
+# (else WORKTREE_IN_USE). The write form then removes that footprint —
+# worktrees first, then branches, never --force — and writes the marker
+# recording each removal and branch tip. TAB-separated:
 #
 #   ARCHIVABLE:<TAB><run-dir><TAB><evidence>     --scan: every gate passes
-#       (evidence is one plain line — script-composed, no free prose)
+#       (evidence is one plain line — script-composed, no free prose),
+#       followed by the footprint the write form will remove:
+#     PRUNE:<TAB><run-dir><TAB>worktree|branch<TAB><path|name>
 #   KEPT:<TAB><run-dir><TAB><reason><TAB><detail> --scan: a gate failed;
-#       reason NOT_CLEAN|LEASE_LIVE|NO_TRUNK|NOT_LANDED. Finished runs
-#       only — unfinished runs are RUN:, never archive candidates.
+#       reason NOT_CLEAN|LEASE_LIVE|NO_TRUNK|NOT_LANDED|WORKTREE_IN_USE.
+#       Finished runs only — unfinished runs are RUN:, never candidates.
+#   PRUNED:<TAB>worktree<TAB><path>              write form, per removal,
+#   PRUNED:<TAB>branch<TAB><name><TAB><sha>      in removal order
 #   ARCHIVED:<TAB><run-dir>       --scan: already archived; write form:
-#                                 the marker is written (idempotent)
+#                                 the marker is written (idempotent — an
+#                                 archived run is never re-pruned)
+#   RESTORED:<TAB>branch<TAB><name><TAB><sha>    unarchive: recreated at
+#                                                its recorded tip
+#   NOT_RESTORED:<TAB>branch<TAB><name><TAB><why> unarchive: exists again,
+#                                                or its commit is gone
 #   UNARCHIVED:<TAB><run-dir>     marker removed; idempotent
 #   Typed failures, exit 1: NO_RUN_DIR, NO_REPORT, NOT_CLEAN, LEASE_LIVE,
-#   NO_TRUNK, NOT_LANDED, BAD_ARGS.
+#   NO_TRUNK, NOT_LANDED, WORKTREE_IN_USE, PRUNE_FAILED (git refused a
+#   removal after the gate passed — no marker written; re-run to finish),
+#   BAD_ARGS.
 #
 # The ARGS payloads are the point: a resume must replay the launch args
 # byte-identical (any drift changes agent prompts and re-runs completed
@@ -619,20 +634,77 @@ cmd_status() {
   exit 0
 }
 
-# ---- archive: retire a finished run from the routing surface ----------
+# ---- archive: retire a finished run and its git footprint --------------
 #
 # The size problem the marker solves is structural: finished runs are
 # never removed, so every entry-point skill's triage pays for the whole
 # history of the repository forever. Retirement is the user's decision,
 # but the GATE is provable — a run is archivable only when it is
-# finished, clean, unleased, and its git footprint has landed. The
-# branch test reuses the status join verbatim (the same anchored
-# run_join, the same merged_state against the same targets), so archive
-# and status can never disagree about what "landed" means.
+# finished, clean, unleased, its git footprint has landed, and nothing
+# about that footprint is in use. The branch test reuses the status join
+# verbatim (the same anchored run_join, the same merged_state against the
+# same targets), so archive and status can never disagree about what
+# "landed" means — and because that proof is exactly status's "safe to
+# delete" proof, archiving also performs the deletions status would
+# prescribe: the run's orca-* worktrees, then its feature/* branches.
+
+# The worktree table, one record per `git worktree list` entry:
+# <path>\t<branch|detached>\t<head-sha|->\t<locked 0|1>\t<main 0|1>.
+# The first entry is always the main worktree (or the bare repository
+# itself) — never a removal candidate, whatever its directory is called.
+worktree_records() {
+  local line path="" branch=detached head="-" locked=0 first=1
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*)
+        path="${line#worktree }"
+        branch=detached
+        head="-"
+        locked=0
+        ;;
+      "HEAD "*) head="${line#HEAD }" ;;
+      "branch refs/heads/"*) branch="${line#branch refs/heads/}" ;;
+      locked | "locked "*) locked=1 ;;
+      "")
+        if [[ -n "$path" ]]; then
+          printf '%s\t%s\t%s\t%s\t%s\n' "$path" "$branch" "$head" "$locked" "$first"
+          first=0
+        fi
+        path=""
+        ;;
+    esac
+  done < <(
+    g worktree list --porcelain
+    printf '\n'
+  )
+}
+
+# What archiving <run-dir> removes, in removal order — worktrees first,
+# since git refuses to delete a branch still checked out:
+#   worktree\t<path>\t<branch|detached>\t<head-sha|->\t<locked 0|1>
+#   branch\t<name>\t<sha>        item branches, then the integration branch
+# Worktrees and branches are exactly the ones the status join attributes
+# to the run; the main worktree never is.
+archive_footprint() { # <run-dir> <status-output> <worktree-records>
+  local dir="$1" stat="$2" wts="$3" p b rec sha
+  while IFS= read -r p; do
+    [[ -n "$p" ]] || continue
+    rec="$(printf '%s\n' "$wts" | awk -F'\t' -v p="$p" '$1 == p && $5 == 0 { print; exit }')"
+    [[ -n "$rec" ]] && printf 'worktree\t%s\n' "$(printf '%s' "$rec" | cut -f1-4)"
+  done < <(printf '%s\n' "$stat" | awk -F'\t' -v d="$dir" '$1 == "WORKTREE:" && $4 == d { print $2 }')
+  while IFS= read -r b; do
+    [[ -n "$b" ]] || continue
+    sha="$(g rev-parse --verify -q "refs/heads/$b^{commit}" 2>/dev/null)" || continue
+    printf 'branch\t%s\t%s\n' "$b" "$sha"
+  done < <(printf '%s\n' "$stat" | awk -F'\t' -v d="$dir" '
+    ($1 == "ITEMBR:" && $4 == d) { print $2 }
+    ($1 == "BRANCH:" && $5 == d) { last = last $2 "\n" }
+    END { printf "%s", last }')
+}
 
 # "<verdict>\t<detail>" — PASS, or a typed reason with its evidence.
-archive_gate() { # <run-dir> <status-output>
-  local dir="$1" stat="$2" trunk unmerged
+archive_gate() { # <run-dir> <status-output> <worktree-records> <footprint>
+  local dir="$1" stat="$2" wts="$3" fp="$4" trunk unmerged
   [[ -f "$dir/report.md" ]] || {
     printf 'NO_REPORT\tno report.md — the run has not finished'
     return
@@ -663,25 +735,85 @@ archive_gate() { # <run-dir> <status-output>
   unmerged="$(printf '%s' "$stat" | awk -F'\t' -v d="$dir" '
     ($1 == "BRANCH:" && $5 == d && $3 != "merged") { printf "%s(%s) ", $2, $3 }
     ($1 == "ITEMBR:" && $4 == d && $3 != "merged") { printf "%s(%s) ", $2, $3 }')"
+  # A detached worktree's commits live on no branch — removing it would
+  # orphan them unless its HEAD has landed too.
+  local kind p wb head locked name here real state inuse="" nwt=0 nbr=0 doomed=""
+  while IFS=$'\t' read -r kind p wb head locked; do
+    [[ "$kind" == worktree ]] || continue
+    nwt=$((nwt + 1))
+    doomed="$doomed$p"$'\n'
+    if [[ "$wb" == detached && "$head" != - && "$(merged_state "$head" "$trunk")" != merged ]]; then
+      unmerged="$unmerged${p##*/}(detached, unmerged) "
+    fi
+  done <<EOF
+$fp
+EOF
   if [[ -n "$unmerged" ]]; then
     printf 'NOT_LANDED\tunlanded branches: %s' "${unmerged% }"
     return
   fi
-  # Leftover worktrees are REPORTED, never a gate. One sitting on a merged
-  # branch is exactly the garbage status already prescribes removing, and
-  # the run directory survives archiving, so the join keeps rendering it
-  # under "safe to delete" either way — blocking retirement on it would
-  # demand cleanup for a state that carries no information. Naming it in
-  # the evidence is the honest middle: the user sees it and decides.
-  local leftover
-  leftover="$(printf '%s' "$stat" | awk -F'\t' -v d="$dir" \
-    '($1 == "WORKTREE:" && $4 == d) { n++ } END { if (n) print n }')"
+  # In use: anything whose removal would destroy work or pull the floor
+  # from under someone. Uncommitted or untracked files (the same test
+  # `git worktree remove` applies without --force; ignored files such as
+  # provisioned secrets and build output are regenerable and do not
+  # count), a lock, this very shell standing inside the worktree, and a
+  # run branch checked out anywhere that is not being removed with it.
+  here="$(pwd -P)"
+  while IFS=$'\t' read -r kind p wb head locked; do
+    [[ "$kind" == worktree ]] || continue
+    name="${p##*/}"
+    if [[ "$locked" == 1 ]]; then
+      inuse="$inuse$name(locked) "
+      continue
+    fi
+    [[ -d "$p" ]] || continue # already gone on disk — only metadata left
+    real="$(cd "$p" && pwd -P)" || real="$p"
+    case "$here/" in
+      "$real/"*)
+        inuse="$inuse$name(current directory) "
+        continue
+        ;;
+    esac
+    if ! state="$(git -C "$p" status --porcelain 2>/dev/null)"; then
+      inuse="$inuse$name(unreadable status) "
+    elif [[ -n "$state" ]]; then
+      inuse="$inuse$name(uncommitted changes) "
+    fi
+  done <<EOF
+$fp
+EOF
+  local b sha holder
+  while IFS=$'\t' read -r kind b sha; do
+    [[ "$kind" == branch ]] || continue
+    nbr=$((nbr + 1))
+    if [[ "$b" == "$trunk" ]]; then
+      inuse="$inuse$b(the trunk) "
+      continue
+    fi
+    holder="$(printf '%s\n' "$wts" | awk -F'\t' -v b="$b" '$2 == b { print $1 }' | while IFS= read -r p; do
+      printf '%s' "$doomed" | grep -qxF "$p" || {
+        printf '%s' "$p"
+        break
+      }
+    done)"
+    [[ -n "$holder" ]] && inuse="$inuse$b(checked out at $holder) "
+  done <<EOF
+$fp
+EOF
+  if [[ -n "$inuse" ]]; then
+    printf 'WORKTREE_IN_USE\t%s' "${inuse% }"
+    return
+  fi
   printf 'PASS\tclean, unleased, and every joined branch merged into %s' "$trunk"
-  [[ -n "$leftover" ]] && printf '; %s leftover worktree(s) still to prune' "$leftover"
+  if [[ $((nwt + nbr)) -gt 0 ]]; then
+    printf '; removes %s worktree(s) and %s branch(es)' "$nwt" "$nbr"
+  else
+    printf '; no git footprint left'
+  fi
 }
 
 cmd_archive() {
-  local scan=0 dir stat verdict detail
+  local scan=0 dir stat wts fp verdict detail
   while [[ "${1:-}" == --* ]]; do
     case "$1" in
       --scan)
@@ -693,10 +825,11 @@ cmd_archive() {
   done
   triage_resolve_repo
   stat="$(collect_status)"
+  wts="$(worktree_records)"
 
   if [[ "$scan" -eq 1 ]]; then
     [[ -z "${1:-}" ]] || triage_fail BAD_ARGS "archive --scan takes no run directory"
-    local spec
+    local spec kind a rest
     for spec in "$repo_root/.orca"/*/spec.md; do
       [[ -f "$spec" ]] || continue
       dir="$(dirname "$spec")"
@@ -706,9 +839,15 @@ cmd_archive() {
         printf 'ARCHIVED:\t%s\n' "$dir"
         continue
       fi
-      IFS=$'\t' read -r verdict detail < <(archive_gate "$dir" "$stat")
+      fp="$(archive_footprint "$dir" "$stat" "$wts")"
+      IFS=$'\t' read -r verdict detail < <(archive_gate "$dir" "$stat" "$wts" "$fp")
       if [[ "$verdict" == PASS ]]; then
         printf 'ARCHIVABLE:\t%s\t%s\n' "$dir" "$detail"
+        while IFS=$'\t' read -r kind a rest; do
+          [[ -n "$kind" ]] && printf 'PRUNE:\t%s\t%s\t%s\n' "$dir" "$kind" "$a"
+        done <<EOF
+$fp
+EOF
       else
         printf 'KEPT:\t%s\t%s\t%s\n' "$dir" "$verdict" "$detail"
       fi
@@ -731,20 +870,68 @@ cmd_archive() {
   # caller's own, like claim/release.
   local gate_dir
   gate_dir="$(cd "$dir" && pwd -P)" || triage_fail NO_RUN_DIR "cannot resolve: $dir"
-  IFS=$'\t' read -r verdict detail < <(archive_gate "$gate_dir" "$stat")
+  fp="$(archive_footprint "$gate_dir" "$stat" "$wts")"
+  IFS=$'\t' read -r verdict detail < <(archive_gate "$gate_dir" "$stat" "$wts" "$fp")
   [[ "$verdict" == PASS ]] || triage_fail "$verdict" "refusing to archive $dir: $detail"
-  # The marker is the whole mechanism: no move, no rewrite, nothing the
-  # run's own artifacts or the status join can notice. Reversible with
-  # `unarchive`, or by deleting one file by hand.
-  printf 'archived=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" >"$dir/archived"
+
+  # Remove in footprint order. No --force anywhere: the gate proved each
+  # worktree clean and each branch merged, and git re-checks the former
+  # itself — a refusal between the gate and here (a file written in the
+  # meantime) stops the run unarchived, with everything removed so far
+  # already printed. Re-running the archive finishes the job.
+  local record="" kind a b out
+  while IFS=$'\t' read -r kind a b _; do
+    case "$kind" in
+      worktree)
+        out="$(g worktree remove "$a" 2>&1)" \
+          || triage_fail PRUNE_FAILED "git worktree remove $a: $(printf '%s' "$out" | tr '\n' ' ')"
+        printf 'PRUNED:\tworktree\t%s\n' "$a"
+        record="${record}worktree=$a"$'\n'
+        ;;
+      branch)
+        out="$(g branch -D "$a" 2>&1)" \
+          || triage_fail PRUNE_FAILED "git branch -D $a: $(printf '%s' "$out" | tr '\n' ' ')"
+        printf 'PRUNED:\tbranch\t%s\t%s\n' "$a" "$b"
+        record="${record}branch=$a $b"$'\n'
+        ;;
+    esac
+  done <<EOF
+$fp
+EOF
+  # The marker: the timestamp, plus every removal with the branch tips —
+  # all reachable from the trunk, so `unarchive` can recreate them exactly.
+  printf 'archived=%s\n%s' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$record" >"$dir/archived"
   printf 'ARCHIVED:\t%s\n' "$dir"
   exit 0
 }
 
+# Ungated: removing the marker returns the run to the routing surface,
+# and every branch it recorded is recreated at its recorded tip — unless
+# a branch of that name exists again or the commit is gone, which is
+# reported and left alone. Worktrees are not re-added: /orca:review and
+# /orca:iterate re-add their own on demand.
 cmd_unarchive() {
-  local dir="${1:-}"
+  local dir="${1:-}" line name sha
   [[ -n "$dir" ]] || triage_fail BAD_ARGS "usage: triage.sh unarchive <run-dir>"
   [[ -d "$dir" ]] || triage_fail NO_RUN_DIR "not a directory: $dir"
+  if [[ -f "$dir/archived" ]] && grep -q '^branch=' "$dir/archived"; then
+    triage_resolve_repo
+    while IFS= read -r line; do
+      case "$line" in branch=*) ;; *) continue ;; esac
+      line="${line#branch=}"
+      name="${line% *}"
+      sha="${line##* }"
+      if g show-ref --verify --quiet "refs/heads/$name"; then
+        printf 'NOT_RESTORED:\tbranch\t%s\texists\n' "$name"
+      elif ! g cat-file -e "$sha^{commit}" 2>/dev/null; then
+        printf 'NOT_RESTORED:\tbranch\t%s\tcommit %s is gone\n' "$name" "$sha"
+      elif g branch "$name" "$sha" >/dev/null 2>&1; then
+        printf 'RESTORED:\tbranch\t%s\t%s\n' "$name" "$sha"
+      else
+        printf 'NOT_RESTORED:\tbranch\t%s\tgit branch failed\n' "$name"
+      fi
+    done <"$dir/archived"
+  fi
   rm -f "$dir/archived" 2>/dev/null
   printf 'UNARCHIVED:\t%s\n' "$dir"
   exit 0

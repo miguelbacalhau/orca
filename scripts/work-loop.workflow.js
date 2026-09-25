@@ -199,16 +199,15 @@ const TUNABLE = ['plan', 'implement', 'review', 'fix', 'commit', 'merge', 'integ
 // config block verbatim — but they are applied by their own one-agent
 // workflows (spec.workflow.js at spec-spawn time, research.workflow.js at the
 // interview's research spawn), before this workflow exists; here they are
-// validated and otherwise ignored. 'prototype' likewise: orca:prototype's
-// own one-agent workflow applies it.
-const STAGES = ['research', 'spec', ...TUNABLE, 'prototype']
-// The stage vocabulary is one shared 10-key list kept in lockstep across
+// validated and otherwise ignored.
+const STAGES = ['research', 'spec', ...TUNABLE]
+// The stage vocabulary is one shared 9-key list kept in lockstep across
 // two code validators — scripts/lib.sh (the config verb's write path, and the run skills'
 // launch validation via its validate subcommand) and this script — a value
 // accepted there but rejected here bricks every launch until the config file
-// is hand-edited. MODELS/EFFORTS are part of the same lockstep, with a THIRD,
-// FOURTH, and FIFTH holder:
-// spec.workflow.js, research.workflow.js, and prototype.workflow.js carry
+// is hand-edited. MODELS/EFFORTS are part of the same lockstep, with a THIRD
+// and FOURTH holder:
+// spec.workflow.js and research.workflow.js carry
 // their own literal copies for their one-agent
 // spawns' model/effort validation. Workflow
 // scripts run sandboxed with no filesystem access, so they cannot read a

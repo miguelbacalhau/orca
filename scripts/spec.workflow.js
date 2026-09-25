@@ -120,8 +120,8 @@ if (typeof pluginRoot !== 'string' || !pluginRoot.startsWith('/'))
   throw new Error(`NO_PLUGIN_ROOT: args.pluginRoot must be the installed plugin's absolute path (got ${JSON.stringify(pluginRoot)}) — the launching skill substitutes \${CLAUDE_PLUGIN_ROOT}`)
 
 // MODELS/EFFORTS are part of the ONE shared vocabulary kept in lockstep
-// across five holders — scripts/lib.sh, work-loop.workflow.js,
-// research.workflow.js, prototype.workflow.js, and this script: a value
+// across four holders — scripts/lib.sh, work-loop.workflow.js,
+// research.workflow.js, and this script: a value
 // accepted by any validator but rejected by another bricks that verb's
 // launches until the config file is hand-edited. Workflow scripts run
 // sandboxed with no filesystem access, so they cannot read a shared vocab

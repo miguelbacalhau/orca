@@ -144,17 +144,16 @@ canonicalize() { # <path> -> canonical absolute path on stdout
 # grammar cannot express an invalid shape: no quoting, no escaping, no
 # type confusion, and each line validates independently.
 #
-# One shared validation vocabulary kept in lockstep across five code
+# One shared validation vocabulary kept in lockstep across four code
 # validators: this file (the config verb's parse and the run skills' launch
 # validation via its validate subcommand), work-loop.workflow.js, and —
 # MODELS/EFFORTS only — the one-agent
-# workflows spec.workflow.js, research.workflow.js, and
-# prototype.workflow.js.
+# workflows spec.workflow.js and research.workflow.js.
 # The workflow scripts run sandboxed with no filesystem access, so they
 # carry their own literal copies; a value accepted here but rejected
 # there bricks that verb's launches until the config file is
 # hand-edited. CI's lockstep-check.py fails when the lists drift.
-ORCA_STAGES="research spec plan implement review fix commit merge integrate prototype"
+ORCA_STAGES="research spec plan implement review fix commit merge integrate"
 ORCA_MODELS="haiku sonnet opus fable"
 ORCA_EFFORTS="low medium high xhigh max"
 ORCA_REVIEWERS="codex claude"

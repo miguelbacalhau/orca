@@ -439,11 +439,6 @@ collect_discover() {
   for spec in "$orca"/*/spec.md; do
     [[ -f "$spec" ]] || continue
     dir="$(dirname "$spec")"
-    # prototype runs are deliberately invisible to discovery: nothing is
-    # resumable, nothing routes — their footprint stays visible only through
-    # status's worktree/branch lines, the manual cleanup surface. (A proto
-    # run never writes spec.md; this is the backstop.)
-    case "$(basename "$dir")" in *-proto-*) continue ;; esac
     if [[ -f "$dir/report.md" ]]; then
       # An archived run reduces to one bare line: retired by the user,
       # nothing routes off it. orca:followup reads ARCHIVED: as a pick
@@ -477,13 +472,12 @@ collect_discover() {
   # --- runs that died between brief consumption and the spec write ---
   # brief.md present, spec.md not yet: without this, the consumed brief is
   # invisible to every discovery surface. feat-briefs/ is
-  # excluded — a queued brief named brief.md is not a run directory — and so
-  # are *-proto-* dirs: a prototype run's brief.md is not a resumable run.
+  # excluded — a queued brief named brief.md is not a run directory.
   local briefmd bdir
   for briefmd in "$orca"/*/brief.md; do
     [[ -f "$briefmd" ]] || continue
     bdir="$(dirname "$briefmd")"
-    case "$(basename "$bdir")" in feat-briefs | *-proto-*) continue ;; esac
+    case "$(basename "$bdir")" in feat-briefs) continue ;; esac
     [[ -f "$bdir/spec.md" ]] && continue
     printf 'RUN:\t%s\tunlaunched\n' "$bdir"
     emit_lease "$bdir"
@@ -833,7 +827,6 @@ cmd_archive() {
     for spec in "$repo_root/.orca"/*/spec.md; do
       [[ -f "$spec" ]] || continue
       dir="$(dirname "$spec")"
-      case "$(basename "$dir")" in *-proto-*) continue ;; esac
       [[ -f "$dir/report.md" ]] || continue
       if is_archived "$dir"; then
         printf 'ARCHIVED:\t%s\n' "$dir"

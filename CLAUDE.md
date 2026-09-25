@@ -4,11 +4,11 @@ A Claude Code plugin for autonomous multi-agent development: `/orca:feature` tak
 
 ## Layout
 
-- `skills/<name>/SKILL.md` — the twelve user-facing skills (`feature`, `review`, `iterate`, …). Interview instructions live beside them (`skills/feature/interview.md`).
-- `agents/<stage>.md` — the sixteen stage agents, loaded as `orca:<stage>`.
+- `skills/<name>/SKILL.md` — the eleven user-facing skills (`feature`, `review`, `iterate`, …). Interview instructions live beside them (`skills/feature/interview.md`).
+- `agents/<stage>.md` — the fifteen stage agents, loaded as `orca:<stage>`.
 - `scripts/` — the deterministic core:
   - `orca.sh` + `lib.sh` + `verbs/*.sh` — the orca CLI: one case-statement dispatcher, a shared lib, one sourced file per verb. Every shell operation the plugin performs goes through this.
-  - `*.workflow.js` — the Workflow-tool scripts (work loop, spec gate, research, prototype). Plain JS, no Node APIs, no TypeScript.
+  - `*.workflow.js` — the Workflow-tool scripts (work loop, spec gate, research). Plain JS, no Node APIs, no TypeScript.
 - `tests/*.bats` — Bats suite with hermetic git fixtures (`tests/helpers.bash`). Run with `bats tests/`.
 - `plans/` — design docs for features of orca itself; not shipped.
 - `.claude-plugin/plugin.json` — the manifest.

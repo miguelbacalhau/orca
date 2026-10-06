@@ -1,3 +1,6 @@
 /plans/
 .claude/settings.local.json
 .orca/
+# Written by Claude Code when the plugin is loaded with --plugin-dir: the
+# editor types for hooks/ (.claude-plugin/types/ ignores itself).
+/tsconfig.json

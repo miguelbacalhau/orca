@@ -38,6 +38,7 @@ The deliverable of a run is a `feature/<slug>` branch on an integration worktree
 - [Quick start](#quick-start)
 - [Commands](#commands)
 - [Anatomy of a run](#anatomy-of-a-run)
+- [The run band](#the-run-band)
 - [Repository layout](#repository-layout)
 - [Project context](#project-context)
 - [Stage agents](#stage-agents)
@@ -311,6 +312,24 @@ Valid stage values — models `haiku` | `sonnet` | `opus` | `fable`, efforts `lo
 
 **The report** (`report.md`) is the durable record: shipped items with commit hashes, deviations mirroring the spec's Decisions log, blocked items with the decision each waits on, per-feature integration results, follow-ups sourced from the plans' Deviations sections, knowledge worth promoting drawn from the spec Decisions and plan Deviations, and the landing command.
 
+## The run band
+
+On Claude Code 2.1.287 or later, the session that launched a run shows it live in a band above the prompt:
+
+```text
+orca · staged-typecheck-overlay · build · 3/6 merged
+  W1  Overlay view layers      ✓ done
+  W2  Whiteout collector       ✓ done
+  W3  CLI flag wiring          ● review r2
+  W4  Cache invalidation       ● implement
+  W5  Docs + config            ◌ waiting on W3, W4
+  W6  Telemetry hook           ✕ blocked: <escalation reason>
+```
+
+During the spec stage it is one line, `orca · <slug> · spec · drafting | in review | ready`. `◌ waiting on` names dependencies that have not merged yet; `✕ blocked` is the terminal escalation that waits on you, and an item behind one reads `waiting on W6 (blocked)`. `–` marks an item the escalation cut. The band follows only the run this session launched, and goes away when the work loop's task ends or `report.md` is written. A spec that finished and then sees three of your prompts without a launch is taken as abandoned.
+
+It is a read-only observer, shipped as a function-hooks module (`hooks/run-band.tsx`): it watches this session's own Workflow launches of `spec.workflow.js` and `work-loop.workflow.js`, then reads the run directory and the workflow's `journal.jsonl` every 1.5 s while that run is tracked. Nothing in the workflows, agents, or skills writes anything for it. Item states come from `merged.tsv`, the journal's running stages, and the escalation results recorded there (blocked, cut, dependencies added mid-run). Without a readable journal it falls back to what plans and review artifacts on disk say, marked `no journal` in the header. Where the band cannot be drawn (VS Code, `claude -p`) it does nothing; collapse it with `[-]` or ctrl+x ctrl+a. The derivation is covered by `tests/run-band.test.ts` (`claude plugin test .`).
+
 ## Repository layout
 
 What a repository looks like mid-run (`/orca:init` creates the top three entries; the runs create the rest and clean up their transient worktrees):
@@ -539,6 +558,7 @@ This repository previously shipped the same workflow as symlink-installed skills
 | Path | Contents |
 |---|---|
 | `.claude-plugin/plugin.json` | The plugin manifest (`orca`). |
+| `hooks/hooks.json`, `hooks/run-band.tsx`, `hooks/derive.ts`, `types/index.d.ts` | [The run band](#the-run-band): the function-hooks module, its pure derivation, and the `$.state` contract the manifest names under `types`. |
 | `skills/feature/`, `skills/review/`, `skills/pr/`, `skills/retry/`, `skills/followup/`, `skills/iterate/`, `skills/status/`, `skills/archive/`, `skills/init/`, `skills/doctor/`, `skills/config/` | The eleven skills. |
 | `skills/feature/interview.md` | The interview instructions, loaded only when triage lands on a new interview. |
 | `scripts/orca.sh`, `scripts/lib.sh`, `scripts/verbs/` | The orca CLI — the plugin's entire shell surface behind one invocation shape (see [The orca CLI](#the-orca-cli) below): a case-statement dispatcher, the shared lib (typed failures, framed output, base64 relay encoding, repository resolution, the config parser/writer, the banned-attribution regex), and one sourced file per verb. |
@@ -547,7 +567,7 @@ This repository previously shipped the same workflow as symlink-installed skills
 | `scripts/research.workflow.js` | The one-agent workflow — a single stage spawn routed through the Workflow tool instead of the Agent tool, which is what gives the research step the same `{model, effort}` override surface as every workflow-spawned stage. |
 | `scripts/spec.workflow.js` | The gated spec stage: `orca:spec` authors the spec, the run's reviewer adversarially reviews it against the brief and a clean checkout, Critical/High findings drive one final revise round — no re-review — and reviewer failures fail open. Started as a one-agent workflow and keeps that family's `{model, effort}` override surface for the spec agent. |
 | `agents/` | The fifteen stage agents, loaded as `orca:<stage>` (the item reviewers are `review-codex` and `review-claude`, the spec reviewers `spec-review-codex` and `spec-review-claude`; `audit` reconciles a finished run for `/orca:retry` and `/orca:followup`; `doctor` derives and proves a repository's `.orca/setup` for `/orca:doctor` and `/orca:init`). |
-| `.github/workflows/version-bump.yml`, `.github/scripts/version-bump.sh` | Version-bump guard, run by GitHub Actions on every push to main: if shipped files (`skills/`, `agents/`, `scripts/`, `.claude-plugin/`) changed since the commit that introduced the current manifest version, the action commits a bump to main — sized by Conventional Commits across the uncovered range (`!`/`BREAKING CHANGE` → major, `feat` → minor, else patch). The plugin updater keys its install cache on that version, so an unbumped push makes updates silently serve stale code. The check is stateless, so a missed run self-heals on the next push; a manual bump of any size covers the changes that land with it. Pull after pushing shipped changes to pick up the bot's bump commit. |
+| `.github/workflows/version-bump.yml`, `.github/scripts/version-bump.sh` | Version-bump guard, run by GitHub Actions on every push to main: if shipped files (`skills/`, `agents/`, `scripts/`, `hooks/`, `types/`, `.claude-plugin/`) changed since the commit that introduced the current manifest version, the action commits a bump to main — sized by Conventional Commits across the uncovered range (`!`/`BREAKING CHANGE` → major, `feat` → minor, else patch). The plugin updater keys its install cache on that version, so an unbumped push makes updates silently serve stale code. The check is stateless, so a missed run self-heals on the next push; a manual bump of any size covers the changes that land with it. Pull after pushing shipped changes to pick up the bot's bump commit. |
 | [orca.nvim](https://github.com/miguelbacalhau/orca.nvim) *(separate repository)* | The Neovim companion: `:OrcaReview` reviews a branch's merge-base diff in your own editor — opened by `/orca:review`. Dependency-free, installs like any plugin; `/orca:doctor` checks it and prescribes the install. |
 | [orca.vscode](https://github.com/miguelbacalhau/orca.vscode) *(separate repository)* | The VS Code companion: an "Orca: Review" session walks the same merge-base diff — one native diff at a time, ✓ checkboxes in the Source Control sidebar — opened by `/orca:review` via `code --open-url`. Installed from the release VSIX; `/orca:doctor` checks it and prescribes the install. |
 

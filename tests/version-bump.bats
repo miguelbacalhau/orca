@@ -39,6 +39,15 @@ version_now() { sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' .claude-plugin/plugi
   [ "$(version_now)" = "1.1.0" ]
 }
 
+@test "a change to the hooks module alone bumps" {
+  make_release_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  mkdir -p hooks && echo x >hooks/run-band.tsx && git add -A && git commit -qm 'fix: band width'
+  run bash "$BUMP"
+  [ "$status" -eq 0 ]
+  [ "$(version_now)" = "1.0.1" ]
+}
+
 @test "a non-shipped feat does not size a shipped chore's bump" {
   make_release_repo "$BATS_TEST_TMPDIR/r"
   cd "$BATS_TEST_TMPDIR/r"

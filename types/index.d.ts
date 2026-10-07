@@ -1,5 +1,6 @@
-// The run band's state contract: what the hooks module (hooks/run-band.tsx)
-// keeps in $.state so it survives a hot reload of the module.
+// orca's $.state contract: what the hooks module keeps in $.state so it
+// survives a hot reload — the run band's run and band (hooks/run-band.tsx),
+// and the verb hook's permission gate (hooks/relay.ts).
 
 // One work item as the work-loop launch passed it.
 export type OrcaItem = { id: string; title: string; deps: string[] }
@@ -45,6 +46,13 @@ export type OrcaBand = {
 
 declare module 'claude-code' {
   interface PluginState {
-    orca: { run: OrcaRun | null; band: OrcaBand | null }
+    orca: {
+      run: OrcaRun | null
+      band: OrcaBand | null
+      // The session's permission mode as the classic hook events last
+      // reported it; null until one has. The verb hook runs verbs only while
+      // it is bypassPermissions.
+      permissionMode: string | null
+    }
   }
 }

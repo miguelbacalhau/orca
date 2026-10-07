@@ -2,7 +2,7 @@
 name: commit
 description: Orca commit stage — creates one Conventional Commit for a completed work item on its item branch, carrying every decision the item's work lands. Spawned by the orca work loop; not for standalone use.
 tools: Bash, Read, Skill
-model: haiku
+model: sonnet
 effort: low
 ---
 

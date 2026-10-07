@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 #
-# orca merge-finalize — one relay call for the whole post-merge-agent
+# orca merge-finalize — one verb call for the whole post-merge-agent
 # block: the forgot-to-commit recovery, the span attribution check, the
 # audit ledger write, and the worktree/branch cleanup. Sourced by
 # orca.sh; lib.sh is already loaded. Runs inside the caller's serialized
@@ -13,8 +13,9 @@
 #       --ledger <path>
 #
 # <tip-before> is the integration head read after the merge mutex was
-# taken and before the merge agent ran — the caller captures it (that
-# ordering is why this verb can never read it itself).
+# taken and before the merge agent ran — merge-prepare's base marker,
+# which the caller holds and passes back (that ordering is why this verb
+# can never read it itself).
 #
 # The merge stage squashes: `git merge --squash <item-branch>` stages the
 # item's whole diff without recording a second parent, and the agent
@@ -106,7 +107,7 @@ if [ -z "$mf_iwt" ] || [ -z "$mf_tip_before" ] || [ -z "$mf_id" ] || [ -z "$mf_t
   fail BAD_ARGS "$usage"
 fi
 [ -d "$mf_iwt" ] || fail BAD_ARGS "integration worktree is not a directory: $mf_iwt"
-[[ $mf_tip_before =~ ^[0-9a-f]{40}$ ]] || fail BAD_ARGS "tip-before is not a 40-hex commit sha: $mf_tip_before"
+is_marker "$mf_tip_before" || fail BAD_ARGS "tip-before is not a merge base marker: $mf_tip_before"
 # The id is a ledger key matched with an anchored regex — keep it to the
 # characters a work-item id has ever had (it is also a branch-name
 # segment, so anything else is already broken upstream).
@@ -126,7 +127,7 @@ mf_tab="$(printf '\t')"
 mf_head() {
   local sha
   sha="$(git -C "$mf_iwt" rev-parse HEAD)" || fail GIT_ERROR "could not read HEAD in $mf_iwt"
-  [[ $sha =~ ^[0-9a-f]{40}$ ]] || fail GIT_ERROR "HEAD of $mf_iwt is not a commit sha: $sha"
+  is_marker "$sha" || fail GIT_ERROR "HEAD of $mf_iwt is not a commit id: $sha"
   printf '%s' "$sha"
 }
 

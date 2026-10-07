@@ -1,1 +1,1 @@
-{ "modules": ["./run-band.tsx"] }
+{ "modules": ["./index.ts"] }

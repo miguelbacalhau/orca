@@ -3,14 +3,15 @@
 # orca lib — the shared machinery under the orca CLI (orca.sh and the
 # verbs it dispatches to) and any bundled script that sources it. One
 # holder for the conventions every verb must agree on: typed failures,
-# the framed-output contract, base64 relay encoding, repository
-# resolution, the symlink canonicalizer, and the banned-attribution
-# regex.
+# the framed-output contract, base64 encoding, repository
+# resolution, the symlink canonicalizer, the path and marker guards,
+# and the banned-attribution regex.
 #
 # Sourced, never executed. bash has textual inclusion, not modules, so
 # the rules are conventions, enforced by review: this file owns its
 # function names (fail, emit_frame, b64_encode, b64_decode,
-# resolve_repo, canonicalize, is_banned) and verbs never redefine them;
+# resolve_repo, canonicalize, is_run_dir, is_worktree_root, is_marker,
+# is_banned) and verbs never redefine them;
 # callers source it via an absolute path ("$PLUGIN_ROOT/scripts/lib.sh"
 # — `source` resolves relative paths against the working directory, not
 # the sourcing script); and a sourced file's `exit` kills the caller —
@@ -30,14 +31,14 @@ fail() { # <reason> <detail> — typed failure, exit 1
 }
 
 # ---- framed output ----------------------------------------------------
-# The relay contract: a verb's machine-readable result is one frame —
+# The frame contract: a verb's machine-readable result is one frame —
 # @@ORCA@@, one key=value line per fact, @@ORCA_END@@ — and arbitrary
-# content crosses the relay only base64-encoded under a `.b64` key, so
-# relay preamble can never contaminate what gets parsed or
-# attribution-checked. The decoder's continuation rule (any line between
-# the markers not opening a declared key joins the open key's value)
-# is what lets a relay-wrapped .b64 line survive; emission's job is
-# simply never to emit a value containing a newline outside a .b64 key.
+# content crosses only base64-encoded under a `.b64` key, so whatever
+# surrounds the frame (a caller's preamble, pass-through lines) can
+# never contaminate what gets parsed or attribution-checked. The work
+# loop's decoder is strict — every line between the markers must open
+# one of the verb's declared keys — so emission's job is never to emit
+# an undeclared key or a value containing a newline.
 
 emit_frame() { # key=value ... — one frame on stdout
   printf '@@ORCA@@\n'
@@ -127,6 +128,47 @@ canonicalize() { # <path> -> canonical absolute path on stdout
     fi
   done
   printf '%s\n' "${result:-/}"
+}
+
+# ---- path guards ------------------------------------------------------
+# The work loop's verbs take their paths from workflow args, and several
+# of them mutate what a path names (mv, reset --hard, worktree remove) —
+# so a path is checked against what it must be before anything touches
+# it. Predicates: they return, and the verb picks the typed failure.
+
+is_run_dir() { # <path> — an absolute, existing directory inside a .orca/
+  case "$1" in
+    /*) ;;
+    *) return 1 ;;
+  esac
+  [ -d "$1" ] || return 1
+  case "$(canonicalize "$1")/" in
+    */.orca/?*) return 0 ;;
+  esac
+  return 1
+}
+
+is_worktree_root() { # <path> — an absolute directory that is the top level of a git work tree
+  local top
+  case "$1" in
+    /*) ;;
+    *) return 1 ;;
+  esac
+  [ -d "$1" ] || return 1
+  top="$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" || return 1
+  [ -n "$top" ] && [ "$(canonicalize "$top")" = "$(canonicalize "$1")" ]
+}
+
+# ---- markers ----------------------------------------------------------
+# A marker is a value one verb hands back for another to consume — a
+# spec mark, a merge/commit base, a worktree head — or for the run's
+# result to carry (a commit hash). The workflow passes it along verbatim
+# and never interprets it; the producing verb checks it before emitting
+# and the consuming verb on arrival, so a garbled marker fails
+# typed instead of reaching git. Every kind is an object id today: 40
+# hex (sha1) or 64 (sha256).
+is_marker() { # <value>
+  [[ $1 =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]]
 }
 
 # ---- config: vocabulary, parser, canonical writer ---------------------

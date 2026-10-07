@@ -6,7 +6,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { derive, layoutRows, parseJournal, parseTaskNotifications, specState } from '../hooks/derive'
+import { classifyLabel, derive, layoutRows, parseJournal, parseTaskNotifications, specState } from '../hooks/derive'
 import type { JournalRead, RunFiles } from '../hooks/derive'
 import type { OrcaItem, OrcaRun } from '../types'
 
@@ -146,6 +146,11 @@ describe('build phase', () => {
     expect(items[1]?.deps).toEqual([])
   })
 
+  test('the hook-mode verb calls read as plumbing or their stage', () => {
+    expect(classifyLabel('run-lease')).toBe(null)
+    expect(classifyLabel('worktree:W1')).toEqual({ kind: 'item', ids: ['W1'], stage: 'worktree' })
+  })
+
   test('a torn last line and a garbled line are skipped, not fatal', () => {
     const text = journal(...done('p1', 'plan:W1'), ['started', 'i1', 'implement:W1']) +
       'not json at all\n' +
@@ -160,7 +165,6 @@ describe('build phase', () => {
     expect(at('review:W1#0')).toBe('● review r1')
     expect(at('review:W1#2~retry')).toBe('● review r3')
     expect(at('fix:W1#2')).toBe('● fix r2')
-    expect(at('worktree:W1~frameretry')).toBe('● worktree')
     expect(at('commit-verify:W1#1')).toBe('● commit')
     expect(at('merge-reset:W1')).toBe('● merge')
     expect(at('plan:W1#rebuild')).toBe('● replan')

@@ -59,7 +59,7 @@ jobs:
       - name: Parse workflow scripts (host-style wrapping)
         run: node .github/scripts/parse-workflow.js scripts/*.workflow.js
 
-      - name: Relay codec and frame decoder
+      - name: Verb codec and frame decoder
         run: node .github/scripts/frame-decoder-test.js scripts/work-loop.workflow.js
 
       - name: Install bats

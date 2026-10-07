@@ -9,7 +9,7 @@ A Claude Code plugin for autonomous multi-agent development: `/orca:feature` tak
 - `scripts/` — the deterministic core:
   - `orca.sh` + `lib.sh` + `verbs/*.sh` — the orca CLI: one case-statement dispatcher, a shared lib, one sourced file per verb. Every shell operation the plugin performs goes through this.
   - `*.workflow.js` — the Workflow-tool scripts (work loop, spec gate, research). Plain JS, no Node APIs, no TypeScript.
-- `hooks/` — the run band: a function-hooks module (`hooks.json` → `run-band.tsx`, pure logic in `derive.ts`) that draws the session's own run above the prompt, read-only over run files and the workflow journal. Its `$.state` contract is `types/index.d.ts`; its tests are `tests/run-band.test.ts` (`claude plugin test .`).
+- `hooks/` — one function-hooks module (`hooks.json` → `index.ts`) registering two parts: the run band (`run-band.tsx`, pure logic in `derive.ts`), drawing the session's own run above the prompt read-only over run files and the workflow journal; and the verb hook (`relay.ts`), the work loop's only way to `orca.sh`: it answers the workflow's `orca:` agent calls by running allow-listed verbs with `$.process.run`, only in bypassPermissions sessions — no fallback, so a session without it fails a run at its first verb. Its `$.state` contract is `types/index.d.ts`; tests are `tests/run-band.test.ts` and `tests/relay.test.ts` (`claude plugin test .`).
 - `tests/*.bats` — Bats suite with hermetic git fixtures (`tests/helpers.bash`). Run with `bats tests/`.
 - `plans/` — design docs for features of orca itself; not shipped.
 - `.claude-plugin/plugin.json` — the manifest.
@@ -18,7 +18,7 @@ A Claude Code plugin for autonomous multi-agent development: `/orca:feature` tak
 
 - **Determinism in scripts, judgment in agents.** Scheduling, retries, gating, and git plumbing are code (workflow scripts, shell verbs); anything requiring judgment is a schema'd agent call whose reasoning lands in run artifacts. Don't move logic from scripts into prose instructions or vice versa.
 - **State lives in files** under the target repo's `.orca/` (brief, spec, plans, findings, report), never in conversation memory. Three of them are *configuration* rather than run state — `config`, `secrets/`, `setup` — and readiness questions about those belong to `/orca:doctor`, never `/orca:status`.
-- **Shell conventions** (see the header comment in `scripts/lib.sh`): typed failures via `fail`, framed output, base64 relay encoding, absolute-path sourcing, sentinel guard against double-sourcing. Runtime envelope is bash 3.2 + git ≥ 2.31 + coreutils — nothing else.
+- **Shell conventions** (see the header comment in `scripts/lib.sh`): typed failures via `fail`, framed output, base64 encoding, absolute-path sourcing, sentinel guard against double-sourcing. Runtime envelope is bash 3.2 + git ≥ 2.31 + coreutils — nothing else.
 - No commit produced by an orca run may mention Claude, AI, agents, or orca (`is_banned` in `lib.sh` enforces this).
 
 ## Workflow

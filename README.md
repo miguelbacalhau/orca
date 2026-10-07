@@ -39,6 +39,7 @@ The deliverable of a run is a `feature/<slug>` branch on an integration worktree
 - [Commands](#commands)
 - [Anatomy of a run](#anatomy-of-a-run)
 - [The run band](#the-run-band)
+- [The verb hook](#the-verb-hook)
 - [Repository layout](#repository-layout)
 - [Project context](#project-context)
 - [Stage agents](#stage-agents)
@@ -57,7 +58,7 @@ Three design choices carry the whole system:
 
 **Independent review.** Claude implements; a separate reviewer attacks the result before anything is committed. The featured default is cross-model: [Codex](https://openai.com/codex/) reviews, run non-interactively by the plugin's own CLI (`orca.sh codex` → `codex exec`) against the global `codex` binary, driven adversarially over each item's diff by a dedicated courier agent — an independent second opinion from a different model family, one that does not share the implementer's blind spots. The review explicitly attacks the tests, since the same model family wrote the code and the tests. With `reviewer=claude` — the detected default wherever codex isn't installed, or an explicit pin via `/orca:config` — a dedicated Claude review agent performs the same adversarial review itself: it keeps fresh-context independence (a separate agent, only the artifacts and the diff), but it is same-model, so it may share the implementer's blind spots. That trade-off is stated wherever the choice is made; cross-model stays the stronger design.
 
-**A deterministic work loop.** The long autonomous middle of a run is one bundled script executed through Claude Code's Workflow tool, not conversational orchestration. Scheduling, retry bounds, review throttling, merge serialization, and the commit-attribution check are code, so the guarantees are structural rather than model discipline that decays over a long context. Judgment calls (plan reconciliation, escalation, review verdicts) stay in agents, but as schema'd calls whose reasons land in the run's artifacts. Every agent call is journaled, so an interrupted run resumes where it stopped. One honest caveat: the workflow sandbox has no shell, so even "deterministic" git plumbing runs through a small model relay — exit-status markers and marker-delimited output make mis-relay detectable-and-retryable rather than impossible, a probabilistic guarantee by design.
+**A deterministic work loop.** The long autonomous middle of a run is one bundled script executed through Claude Code's Workflow tool, not conversational orchestration. Scheduling, retry bounds, review throttling, merge serialization, and the commit-attribution check are code, so the guarantees are structural rather than model discipline that decays over a long context. Judgment calls (plan reconciliation, escalation, review verdicts) stay in agents, but as schema'd calls whose reasons land in the run's artifacts. Every agent call is journaled, so an interrupted run resumes where it stopped. The workflow sandbox has no shell, so its git plumbing has to leave the sandbox to run: orca's [verb hook](#the-verb-hook), a function hook the plugin ships, runs each `orca.sh` verb itself and hands back its exact output — no model in the path. That hook is the only way out: **a run requires function hooks (mods) loaded and a `bypassPermissions` session**, and without either it fails at its first verb with a message naming the cause — there is no fallback.
 
 State lives in files, never in conversation memory: the brief, the spec with its work breakdown and decision log, one plan per item, the raw review findings per round, and a final report — all under a per-run directory in `.orca/`.
 
@@ -70,7 +71,8 @@ State lives in files, never in conversation memory: the brief, the spec with its
 | Repository layout | Bare-repo-with-worktrees (`.bare/` + peer worktrees). `/orca:init` sets this up, including converting an existing conventional checkout in place. |
 | git | ≥ 2.31 (`rev-parse --path-format` — every orca script's repository resolution; older gits get a typed `OLD_GIT` failure naming the upgrade, never a misdiagnosis); ≥ 2.42 for `worktree add --orphan` when `/orca:init` creates a brand-new repository. |
 | `BASH_MAX_TIMEOUT_MS` | Codex-only, like the Codex CLI row: set to `1200000` (~20 min) in a Claude Code settings `env` block, so Codex reviews are not killed at the default Bash tool timeout. A plugin cannot ship session env, so `/orca:doctor` writes it for you. |
-| Permission mode | Runs need `bypassPermissions` for the session — see [Permissions and autonomy](#permissions-and-autonomy). |
+| Permission mode | Runs need `bypassPermissions` for the session — see [Permissions and autonomy](#permissions-and-autonomy). The verb hook enforces it: in any other mode it refuses, and the run fails at its first verb. |
+| Function hooks (mods) | Runs need orca's hooks module loaded in the session: a Claude Code build with function hooks (2.1.290+ was probed), the feature enabled (`CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` in a settings `env` block where the server-side flag is off), not started with `--bare`, and no `disableAllHooks` in any settings file, managed ones included. The work loop reaches `orca.sh` only through [the verb hook](#the-verb-hook); without it a run fails at its first verb, naming the fix. No shell check can see the hook, so `/orca:doctor` and the pre-flight state this requirement rather than test it. |
 
 Everything else — the fifteen stage agents and the CLI that drives codex — ships inside the plugin itself; there is nothing to install per repository beyond the layout.
 
@@ -330,6 +332,34 @@ During the spec stage it is one line, `orca · <slug> · spec · drafting | in r
 
 It is a read-only observer, shipped as a function-hooks module (`hooks/run-band.tsx`): it watches this session's own Workflow launches of `spec.workflow.js` and `work-loop.workflow.js`, then reads the run directory and the workflow's `journal.jsonl` every 1.5 s while that run is tracked. Nothing in the workflows, agents, or skills writes anything for it. Item states come from `merged.tsv`, the journal's running stages, and the escalation results recorded there (blocked, cut, dependencies added mid-run). Without a readable journal it falls back to what plans and review artifacts on disk say, marked `no journal` in the header. Where the band cannot be drawn (VS Code, `claude -p`) it does nothing; collapse it with `[-]` or ctrl+x ctrl+a. The derivation is covered by `tests/run-band.test.ts` (`claude plugin test .`).
 
+## The verb hook
+
+The work loop runs a few dozen `orca.sh` verbs per run (the lease, worktree arrival, commit verification, merge preparation and finalization, salvage, archiving). Its sandbox has no shell, so each one has to leave the workflow somehow. orca ships a function hook, `hooks/relay.ts`, that does this without a model. **What it does, stated plainly: it runs orca's own verbs, asked for by orca's own work loop, without a permission prompt — only in `bypassPermissions` sessions, and only from an allow-list.**
+
+How a call travels: the work loop asks for a verb with an agent call whose model name carries the request, `orca:{"v":1,"verb":"spec","args":["mark","<run-dir>"]}`. The hook sees that request at `turn.step`, before anything is sent to the API, and answers it itself: it runs `bash <orca's own plugin root>/scripts/orca.sh <verb> <args…>` (an argv, no shell; through `bash` and `orca.sh`, never `git` directly, so the repository's git hooks still run) and returns `b64:` + base64 of the JSON `{v, rc, stdout, stderr}`. No model sees the request or the output, and no tokens are spent: a call takes about a tenth of a second.
+
+Its guards, each a refusal (`{v, refused}`) the work loop raises as a loud error:
+
+- **Bypass mode only.** The hook keeps the session's permission mode as the classic hook events report it (`UserPromptSubmit`, `PostToolUse`, `SubagentStop`, `Stop`) and runs nothing unless it is `bypassPermissions`. A mode it has not seen yet counts as not bypass. Events from inside a subagent can close the gate but never open it.
+- **An allow-list:** exactly the verbs the work loop calls (`triage claim|release`, `spec mark|changed`, `secrets place|remove`, `archive attempt`, `notes write`, `worktree-item`, `provision`, `commit-verify`, `merge-prepare`, `merge-finalize`, `commit-prepare`, `salvage`, and `self-test`). Not `codex`, `setup`, `config`, `review`, or any other verb; a bats test keeps the list in lockstep with the work loop's call sites.
+- **Workflow agents only**, protocol version `1` only, and arguments that are an array of strings. An `orca:` request is always answered by the hook, refused or not; it is never passed on to the API.
+
+**There is no fallback.** The hook is the work loop's only way to `orca.sh`, and every way it can fail to answer fails loudly, at that call, naming the cause and the fix. The run's first verb is the lease claim (`run-lease`), so a session that cannot run verbs stops there, before any agent has run:
+
+- **No answer** (`run-lease: no answer from orca's verb hook …`): the request went to the API, which has no such model, so the hooks module is not loaded — function hooks off, `--bare`, `disableAllHooks`, or a module that failed to load. Nothing was journaled; fix the session and resume.
+- **Refused** (`orca's verb hook refused …`), with the guard's reason — most often a session not in bypass mode.
+- **Failed, timed out, or malformed** — the hook could not start the verb, the verb ran past ten minutes, or the answer is unreadable (a version mismatch between the loaded plugin and the run's workflow).
+
+A hook answer — a refusal or error included — is journaled like any agent result, so a resume replays it rather than asking again: after fixing a refusal at launch, launch the run fresh instead of resuming it. A hook failure *after* launch blocks the item whose call met it, starts no further items (each is blocked `run stopped: orca's verb hook failed: …`), and skips integration verification; the report carries the cause, and `/orca:retry` relaunches the unfinished items once it is fixed.
+
+Limits worth knowing:
+
+- **Ten minutes per verb.** `$.process.run` allows no more. `.orca/setup` is capped at nine minutes so that, inside the `provision` / `worktree-item` call that runs it, setup's own timeout fires first: the item continues with a `TIMED OUT` provisioning note and the log tail, rather than failing on the hook's hard cut. A verb that still runs past ten minutes fails as a timeout naming it.
+- **Version skew.** The hook runs the `orca.sh` of the plugin version loaded now, while the work loop was launched by the version installed then. A plugin update in the middle of a run can therefore run newer verbs under an older workflow. The `v` field catches incompatible protocol changes only, not changed verb behaviour; finish a run on the version that started it, as [Interruption, resume, and cleanup](#interruption-resume-and-cleanup) already advises.
+- **Without the hook, the request leaves the machine.** Where the hooks module is not loaded, the verb request — its model name, carrying the verb and its arguments (run-directory paths, the slug and branch in the lease note) — is sent to the API as an unknown model and rejected there. At launch, only the first verb gets that far.
+
+The hook is covered by `tests/relay.test.ts` (`claude plugin test .`), the work loop's side of it — the request shape and every loud failure — by `tests/work-loop.bats`.
+
 ## Repository layout
 
 What a repository looks like mid-run (`/orca:init` creates the top three entries; the runs create the rest and clean up their transient worktrees):
@@ -401,7 +431,7 @@ The contract, which the script is written against:
 | `ORCA_WORKTREE` | absolute path of the worktree (= cwd) |
 | `ORCA_REPO_ROOT` | the directory holding `.orca/` — for sharing a cache or linking build outputs across worktrees |
 | `ORCA_ARRIVAL` | `created` \| `branch_resumed` \| `reused` \| `integrate` |
-| Wall-clock cap | 15 minutes, then the whole process group is killed |
+| Wall-clock cap | 9 minutes, then the whole process group is killed (under the verb hook's ten-minute limit per call) |
 
 And what it must be: **idempotent and cheap when warm** (`npm install`, not `npm ci` — it runs on every arrival), **safe with eight copies at once** (package managers already are; a hand-rolled write to one shared path is not), and **non-interactive** — no servers, no watchers, no fixed ports, no shared-database migrations. Dependency installs, codegen, and compile-to-artifacts belong in it; test suites do not, because that is the stage agent's job and it would cost eight times over.
 
@@ -437,7 +467,7 @@ The first eleven serve feature runs:
 | `review-codex` | Courier that drives the Codex review via `orca.sh codex`, which files the findings verbatim | sonnet | medium |
 | `review-claude` | Performs the independent review itself — same adversarial contract and artifact schema as the Codex path | opus | high |
 | `fix` | Applies review findings; escalates findings rooted in the plan, spec, or other items | opus | high |
-| `commit` | One Conventional Commit per item, staged by name, carrying the item's decisions, no attribution | haiku | low |
+| `commit` | One Conventional Commit per item, staged by name, carrying the item's decisions, no attribution | sonnet | low |
 | `merge` | Serialized squash onto the integration branch, under the item commit's own message; resolves conflicts with both plans in hand; verifies the merged result | opus | high |
 | `integrate` | Verifies the assembled feature end to end against the spec | opus | high |
 
@@ -509,6 +539,8 @@ A run only stays autonomous if the harness never raises a permission prompt: eve
 
 **This requires `bypassPermissions` mode — an allow-list is not sufficient.** The subagents decide commands at runtime (dependency installs, build/test variants, assorted git invocations), so the command set is open-ended; and Bash permission rules match as prefix globs against the literal command string, so listed commands still slip through when they contain `$(…)`, lead with flags, or are compound. A leaked prompt is a question of *when*, not *whether*.
 
+Bypass mode is also what lets [the verb hook](#the-verb-hook) run the work loop's `orca.sh` verbs; in any other mode the hook refuses, and the run fails at its first verb with the hook's reason.
+
 Enable it one of three ways: Shift+Tab in-session until the footer shows "bypass permissions" (easiest, right before the run); `claude --dangerously-skip-permissions` at launch; or `"permissions": { "defaultMode": "bypassPermissions" }` in `.claude/settings.local.json` for always-unattended repos (offered by `/orca:doctor`, never defaulted).
 
 The tradeoff is real and `/orca:feature` states it before starting: bypass mode disables the approval gate for the **whole session**, not just the run — a dedicated session for the run is the clean choice. If you won't enable it now, the run does not start (it would only pause partway), but the invocation ends cleanly with the brief saved and queued — enable bypass and re-invoke `/orca:feature` when ready.
@@ -524,7 +556,7 @@ Every agent call in the work loop is journaled, and the workflow `runId` is pers
 - **Abandoned run**: `git worktree list`, remove leftover `orca-*` worktrees and their `feature/<slug>*` branches. A leftover `orca-*` *directory* nowadays means an interrupted run or a pre-salvage blocked item — blocked items survive as branches only; everything else to clean up is branches. Prefer resuming.
 - **Landed runs pile up**: nothing removes a finished run, so triage grows with the repository's history. `/orca:archive` retires the ones whose branches provably merged and removes those branches and their clean worktrees — the run directories stay, `/orca:followup` still picks them, and `--undo` recreates the branches.
 - **Pre-plugin runs cannot resume** under the plugin (agent types, worktree names, and journal keys all changed) — clean up their leftovers and start fresh from a new brief.
-- **Plugin upgrades mid-run**: an in-flight run should be finished (or retried) on the plugin version that started it — resuming across an upgrade is best-effort: changed prompts cache-miss and re-run live, and the CLI verbs' re-entrancy makes that degrade gracefully, not dangerously.
+- **Plugin upgrades mid-run**: an in-flight run should be finished (or retried) on the plugin version that started it — resuming across an upgrade is best-effort: changed prompts cache-miss and re-run live, and the CLI verbs' re-entrancy makes that degrade gracefully, not dangerously. Under [the verb hook](#the-verb-hook) an update reaches a run even without a resume: the hook runs the `orca.sh` of the version loaded now, so a run launched before the update calls the newer verbs from the older workflow.
 
 ## Troubleshooting
 
@@ -539,6 +571,9 @@ Every agent call in the work loop is journaled, and the workflow `runId` is pers
 | `REVIEWER: FAIL: invalid reviewer` | The `reviewer` key in `.orca/config` is not `codex`/`claude` (or appears twice). Fix it with `/orca:config` — the pre-flight never guesses. |
 | `PLUGIN_ROOT: FAIL: NO_PLUGIN_ROOT` (or the workflow refuses launch with `NO_PLUGIN_ROOT`) | The plugin-shipped CLI (`scripts/orca.sh`) isn't where the install put the rest of the plugin — the work loop's worktree/commit/merge rituals run through it, so nothing can commit. Reinstall the plugin; there is no inline fallback by design. |
 | `/orca:feature` says the harness has no Workflow tool | The work loop needs a Claude Code harness with workflows; there is no conversational fallback. |
+| Run fails at `run-lease: no answer from orca's verb hook` | orca's hooks module is not loaded in the session, and the work loop has no other way to run `orca.sh`. Enable function hooks (`CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` where the flag is off), don't launch with `--bare`, remove any `disableAllHooks`, check the module loads without errors — then resume from a session that loads it. See [The verb hook](#the-verb-hook). |
+| Run fails at `run-lease: orca's verb hook refused … permission mode is …` | The session was not in `bypassPermissions` mode when the run launched. Switch it (Shift+Tab) and launch the run fresh — the refusal is journaled, so a resume would replay it. |
+| An item blocks with `` `orca.sh provision` `` or `` `orca.sh worktree-item` `` `timed out in orca's verb hook` | The verb ran past the hook's ten-minute limit. `.orca/setup` itself stops at nine minutes, so the remainder went to git or secrets work in a very large worktree, or the setup's process group outlived its kill. Make the warm path faster (`/orca:doctor` re-derives and proves the script), then `/orca:retry`. |
 | Run pauses on a permission prompt | The session wasn't in `bypassPermissions` mode. Enable it (Shift+Tab) and re-invoke the verb — triage offers the resume from the journal — rather than restarting the run. |
 | An agent reports an unprovisioned tree, or a run logs `Provisioning: FAILED` | The repository has no `.orca/setup`, or the one it has broke. Run `/orca:doctor` — its repo-readiness pass derives one from the repo's own evidence and proves it in a throwaway worktree before you approve it. See [Worktree provisioning](#worktree-provisioning). |
 | `git fetch` does nothing in a bare clone made by hand | Bare clones get no fetch refspec. `/orca:init`'s clone path sets `remote.origin.fetch` — do the same, or re-clone through it. |
@@ -558,10 +593,10 @@ This repository previously shipped the same workflow as symlink-installed skills
 | Path | Contents |
 |---|---|
 | `.claude-plugin/plugin.json` | The plugin manifest (`orca`). |
-| `hooks/hooks.json`, `hooks/run-band.tsx`, `hooks/derive.ts`, `types/index.d.ts` | [The run band](#the-run-band): the function-hooks module, its pure derivation, and the `$.state` contract the manifest names under `types`. |
+| `hooks/hooks.json`, `hooks/index.ts`, `hooks/run-band.tsx`, `hooks/derive.ts`, `hooks/relay.ts`, `types/index.d.ts` | The function-hooks module (`index.ts` registers both halves): [the run band](#the-run-band) and its pure derivation, [the verb hook](#the-verb-hook), and the `$.state` contract the manifest names under `types`. |
 | `skills/feature/`, `skills/review/`, `skills/pr/`, `skills/retry/`, `skills/followup/`, `skills/iterate/`, `skills/status/`, `skills/archive/`, `skills/init/`, `skills/doctor/`, `skills/config/` | The eleven skills. |
 | `skills/feature/interview.md` | The interview instructions, loaded only when triage lands on a new interview. |
-| `scripts/orca.sh`, `scripts/lib.sh`, `scripts/verbs/` | The orca CLI — the plugin's entire shell surface behind one invocation shape (see [The orca CLI](#the-orca-cli) below): a case-statement dispatcher, the shared lib (typed failures, framed output, base64 relay encoding, repository resolution, the config parser/writer, the banned-attribution regex), and one sourced file per verb. |
+| `scripts/orca.sh`, `scripts/lib.sh`, `scripts/verbs/` | The orca CLI — the plugin's entire shell surface behind one invocation shape (see [The orca CLI](#the-orca-cli) below): a case-statement dispatcher, the shared lib (typed failures, framed output, base64 encoding, repository resolution, the config parser/writer, the banned-attribution regex), and one sourced file per verb. |
 | `scripts/codex-findings.schema.json` | The findings shape `orca.sh codex` hands Codex as `--output-schema`, making the review's JSON a contract Codex enforces rather than a plea in the prompt. Shared by the item and spec reviewers. |
 | `scripts/work-loop.workflow.js` | The deterministic feature work loop, run through the Workflow tool. |
 | `scripts/research.workflow.js` | The one-agent workflow — a single stage spawn routed through the Workflow tool instead of the Agent tool, which is what gives the research step the same `{model, effort}` override surface as every workflow-spawned stage. |
@@ -592,8 +627,9 @@ That single invocation shape is the point: **one allowlist entry — `bash */scr
 | `review discover\|open\|probe\|wait\|notes` | The deterministic spine of `/orca:review` — deliverable discovery, editor/terminal resolution, probes, and the launch; the skill converses, the script executes. |
 | `secrets place\|remove` | Links `.orca/secrets/` (the mirror-tree secrets convention) into a worktree as relative symlinks — run by the loops and skills after every `worktree add`, and runnable by hand on your own worktree. |
 | `setup run\|verify\|status\|install` | Sole owner of `.orca/setup`, the [worktree provisioning](#worktree-provisioning) script: `run` executes it under the safety envelope (closed stdin, captured output, a process-group watchdog at 15 minutes), `verify` proves a candidate in a throwaway worktree with the repo's own build as the check, `status` is the cheap drift read `/orca:doctor` opens with, and `install` is the only writer — it computes the fingerprint and stamps the provenance header the drift check reads. |
-| `provision` | The composite arrival ritual — `secrets place`, then `setup run`, in that order because an install often needs the `.npmrc` placement provides. One relay call per worktree arrival; advisory by contract, so a failed install rides the frame instead of failing the caller. |
-| `worktree-item`, `commit-verify`, `merge-finalize` | The relay verbs the work loops spawn per item: the whole worktree-arrival ritual, the commit decision table, and merge finalization — results reported through the `@@ORCA@@` frame. |
+| `provision` | The composite arrival ritual — `secrets place`, then `setup run`, in that order because an install often needs the `.npmrc` placement provides. One verb call per worktree arrival; advisory by contract, so a failed install rides the frame instead of failing the caller. |
+| `worktree-item`, `commit-verify`, `merge-finalize` | The verbs the work loop calls per item (through [the verb hook](#the-verb-hook)): the whole worktree-arrival ritual, the commit decision table, and merge finalization — results reported through the `@@ORCA@@` frame. |
+| `merge-prepare`, `commit-prepare`, `salvage`, `archive attempt`, `spec mark\|changed`, `notes write` | The work loop's other questions, each answered in a frame with named fields: self-healing the integration worktree before a merge (`merge --abort`, falling back to `reset --hard`), whether the integration-fixes pass left anything to commit, a blocked item's worktree turned into a `wip:` commit and removed, a superseded attempt's plan and reviews archived to the first free `round<N>` / `prev<N>` slot, whether `spec.md` moved since an earlier mark, and the integration fixer's notes persisted. The bases the two prepare verbs return and the spec marks are opaque markers: the workflow passes them back to `merge-finalize`, `commit-verify`, and `spec changed` without reading them, and the receiving verb rejects a malformed one. |
 | `self-test` | Smoke verb — proves dispatch, lib loading, and the frame path without touching a repository. |
 
 ## License

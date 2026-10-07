@@ -42,8 +42,8 @@
 # Two emission modes, one implementation. Dispatched as a verb, this file
 # parses its arguments and closes with the frame; sourced with
 # ORCA_PROVISION_LIB=1 (worktree-item does this, folding the result into
-# its own frame — two frames in one output would be one frame to the
-# relay decoder), it only defines provision_ritual.
+# its own frame — two frames in one output would not decode as one
+# frame), it only defines provision_ritual.
 #
 # Sourced by orca.sh with the verb arguments in place; lib.sh is loaded.
 

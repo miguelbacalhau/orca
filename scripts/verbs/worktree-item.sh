@@ -1,6 +1,6 @@
 # shellcheck shell=bash disable=SC2154
 #
-# orca worktree-item — one relay call for the whole worktree-arrival
+# orca worktree-item — one verb call for the whole worktree-arrival
 # ritual. Sourced by orca.sh with the verb arguments in place; lib.sh
 # is already loaded.
 #
@@ -27,14 +27,15 @@
 # and a setup script is required to be cheap when warm. Both verbs' typed
 # lines pass through for the caller to log. provision.sh is SOURCED in
 # library mode rather than dispatched: it emits a frame of its own, and
-# two frames in one output is one frame to the relay decoder.
+# two frames in one output would not decode as one frame.
 #
-# The frame reports the worktree's head sha, which the caller holds as
+# The frame reports the worktree's head as a marker (lib.sh is_marker,
+# checked here before it is emitted), which the caller holds opaque as
 # commit-verify's <base-sha> — valid only because implement/fix agents
 # are forbidden to commit or stage, so HEAD cannot move between here and
 # the commit stage.
 #
-# Frame keys: rc, arrival=reused|branch_resumed|created, head=<40-hex>,
+# Frame keys: rc, arrival=reused|branch_resumed|created, head=<marker>,
 # setup=absent|ok|failed|timeout, setup_stamped, setup_rc, setup_seconds,
 # and setup_tail.b64 when provisioning failed — the loops turn the last
 # into the `Provisioning: FAILED` line in the implement agent's prompt.
@@ -92,8 +93,8 @@ provision_ritual "$wti_wt" "$wti_arrival" || exit 1
 
 wti_head="$(git -C "$wti_wt" rev-parse HEAD)" \
   || fail GIT_ERROR "could not read HEAD in $wti_wt"
-[[ $wti_head =~ ^[0-9a-f]{40}$ ]] \
-  || fail GIT_ERROR "HEAD of $wti_wt is not a commit sha: $wti_head"
+is_marker "$wti_head" \
+  || fail GIT_ERROR "HEAD of $wti_wt is not a commit id: $wti_head"
 
 if [ -n "$provision_tail" ]; then
   emit_frame rc=0 "arrival=$wti_arrival" "head=$wti_head" "setup=$provision_setup" \

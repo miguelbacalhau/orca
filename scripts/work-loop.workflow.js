@@ -45,15 +45,15 @@
 //   pluginRoot        REQUIRED absolute path of the installed plugin root
 //                     (the launching skill substitutes ${CLAUDE_PLUGIN_ROOT}
 //                     — this script has no environment to resolve it from).
-//                     The worktree/commit/merge rituals run through the
-//                     plugin-shipped CLI (scripts/orca.sh), and its secrets
-//                     verb runs after every worktree add — a missing plugin
-//                     root means "can't commit anything", so the launch
-//                     refuses typed (NO_PLUGIN_ROOT) instead of failing at
-//                     minute forty. the preflight verb verifies the dispatcher
-//                     file exists launcher-side; this script can only
-//                     assert the argument's shape (no filesystem here) —
-//                     the two checks are complementary, not redundant
+//                     The codex review courier runs `orca.sh codex` from it
+//                     through its own Bash tool, so it rides that agent's
+//                     prompt; a missing value refuses launch typed
+//                     (NO_PLUGIN_ROOT) instead of failing at the first
+//                     review. This script's own verbs do NOT run from it:
+//                     orca's verb hook runs them from the hook's own plugin
+//                     root (see orca() below) — the version loaded now,
+//                     which a mid-run plugin update can make newer than
+//                     this script
 // }
 //
 // Review prompts are not inputs: the reviewer agent (orca:review-codex driving
@@ -61,8 +61,8 @@
 // reviewing itself) carries the adversarial review contract in its own
 // definition, receiving only the run directory, artifact paths, and owned
 // files — nothing has to be written into <runDir>/reviews/ before this
-// workflow starts, and there is no review script or shell relay anywhere in
-// the review path.
+// workflow starts, and no review step goes through orca() — the codex courier
+// runs `orca.sh codex` through its own Bash tool.
 
 export const meta = {
   name: 'orca-work-loop',
@@ -165,12 +165,11 @@ const reviewer = parsedArgs.reviewer
 if (reviewer !== 'codex' && reviewer !== 'claude')
   throw new Error(`args.reviewer must be "codex" or "claude" (got ${JSON.stringify(reviewer)}) — the run skill resolves it before launch`)
 
-// The worktree/commit/merge rituals run through the plugin-shipped CLI, so a
-// missing plugin root means "can't commit anything" — mandatory, refused
-// typed at launch. No inline fallback path: a second implementation of the
-// trickiest logic that almost never runs would rot untested. "Plugin
-// installed but its own directory unknown" is a launcher bug to surface,
-// not a state to limp through.
+// The codex courier runs the plugin-shipped CLI from this path, so it is
+// mandatory and refused typed at launch — for either reviewer, so a resume
+// that switches reviewer never meets a missing value. "Plugin installed but
+// its own directory unknown" is a launcher bug to surface, not a state to
+// limp through.
 const pluginRoot = parsedArgs.pluginRoot
 if (typeof pluginRoot !== 'string' || !pluginRoot.startsWith('/'))
   throw new Error(`NO_PLUGIN_ROOT: args.pluginRoot must be the installed plugin's absolute path (got ${JSON.stringify(pluginRoot)}) — the launching skill substitutes \${CLAUDE_PLUGIN_ROOT}`)
@@ -187,8 +186,8 @@ const contextLine = `Project context: ${repoRoot}/.orca/decisions.md (decision l
 
 // Per-stage model/effort overrides (args.agents). Only the seven stages this
 // workflow spawns are tunable here — spec is spawned by spec.workflow.js
-// before this workflow launches — and the internal helpers (the sh relay,
-// reconcile) keep their fixed models: their cost/judgment profile is part
+// before this workflow launches — and the internal helpers (reconcile)
+// keep their fixed models: their cost/judgment profile is part
 // of the loop's design, not a per-repo preference. Escalation is the one
 // derived model (see escalateModel below): not independently tunable, but
 // never allowed to sit below the planners it overrules. Validated at
@@ -311,79 +310,28 @@ const must = (result, what) => {
   return result
 }
 
-// The script has no shell access; deterministic commands run through a haiku
-// agent. The command is wrapped so its exit status comes back as a short
-// SH_RC marker the model cannot plausibly mangle — a failed command throws
-// here instead of silently reading as success.
-const sh = async (cmd, label, ph) => {
-  const prompt = `Run exactly this command and return its complete output verbatim — plain text, no code fences, no commentary:\n{ ${cmd} ; } ; echo "SH_RC=$?"`
-  const raw = await agent(prompt, { model: 'haiku', effort: 'low', label, phase: ph })
-  if (raw === null || raw === undefined) throw new Error(`${label}: command agent was skipped or died`)
-  const out = raw.split('\n').filter(l => !/^\s*`{3,}/.test(l)).join('\n')
-  const marks = [...out.matchAll(/SH_RC=(\d+)/g)]
-  if (!marks.length) throw new Error(`${label}: no exit-status marker in command output: ${out.trim().slice(-300)}`)
-  const m = marks[marks.length - 1]
-  // A nonzero exit is the command's own verdict, not relay flakiness — never retried.
-  if (m[1] !== '0') throw new Error(`${label}: command exited ${m[1]}: ${out.slice(0, m.index).trim().slice(-300)}`)
-  return out.slice(0, m.index).trim()
+// Markers — a spec mark, a merge/commit base, a worktree head, a commit
+// hash — are values a verb hands back, for another verb to consume or for
+// the run's result to carry. The workflow never interprets one; it only
+// passes it along, and the verbs validate it on both ends (lib.sh
+// is_marker: the producer before it emits, the consumer on arrival). This
+// check is the workflow's share: a read must be one well-formed token (an
+// object id, 40 or 64 hex) before it goes anywhere, so a bad one fails
+// here — for a merge base, before the merge agent runs rather than in
+// merge-finalize after it — and never lands in the result as a hash.
+const MARK_RE = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/
+const mustMark = (mark, label) => {
+  if (typeof mark !== 'string' || !MARK_RE.test(mark))
+    throw new Error(`${label}: verb returned a malformed marker (${String(mark).slice(0, 80)})`)
+  return mark
 }
 
-// sh() trims trailing text after the exit marker but keeps leading relay
-// commentary. Any output that gets parsed (hashes) or attribution-checked
-// (commit messages) must come from between explicit markers, never the raw
-// transcript — a stray "Claude" in relay preamble would trip the banned regex
-// against a clean commit. Marker lines are matched whole, so the echoed
-// command text (where the markers appear quoted) can never match.
-const shMarked = async (cmd, label, ph) => {
-  const out = await sh(`echo "@@OUT@@" ; { ${cmd} ; } ; echo "@@OUT_END@@"`, label, ph)
-  const lines = out.split('\n')
-  const a = lines.findIndex(l => l.trim() === '@@OUT@@')
-  const b = lines.map(l => l.trim()).lastIndexOf('@@OUT_END@@')
-  if (a === -1 || b <= a)
-    throw new Error(`${label}: output markers did not survive the relay: ${out.trim().slice(-300)}`)
-  return lines.slice(a + 1, b).join('\n')
-}
-
-// Single-quote a value into a relayed shell command.
-const sq = s => s.replace(/'/g, `'\\''`)
-
-// Relay-read SHAs are interpolated into git reset/log commands — validate
-// them: full 40-hex or the command never runs. A garbled relay read must fail the item, never flow into
-// `git reset --soft <garbage>`.
-const SHA_RE = /^[0-9a-f]{40}$/
-const mustSha = (sha, label) => {
-  if (!SHA_RE.test(sha))
-    throw new Error(`${label}: relay returned something that is not a commit sha (${String(sha).slice(0, 80)})`)
-  return sha
-}
-
-// One relayed read of spec.md's content hash. Two callers, both asking "did
-// the contract move?": the unguarded first reconcile (did another wave's
-// escalation land while this one was reading?) and the escalation itself
-// (did it actually amend, or was a replan the whole fix?). Neither can be
-// answered any other way — the script has no filesystem, and ESCALATE does
-// not report whether the agent edited spec.md. Fail-soft: an unreadable or
-// malformed hash returns null, which every caller reads as "assume it moved"
-// and takes the conservative path.
-const SPEC_HASH_RE = /^[0-9a-f]{40,64}$/
-const specHash = async label => {
-  try {
-    const h = (await shMarked(`git -C "${integrationWt}" hash-object '${sq(`${runDir}/spec.md`)}'`, label, 'Plan')).trim()
-    if (SPEC_HASH_RE.test(h)) return h
-    log(`${label}: spec.md hash came back malformed (${h.slice(0, 60)}) — treating the spec as moved`)
-    return null
-  } catch (err) {
-    log(`${label}: spec.md hash unavailable (${String((err && err.message) || err)}) — treating the spec as moved`)
-    return null
-  }
-}
-
-// ---------- relay codec: base64 + UTF-8 + frame decoder ----------
-// LOCKSTEP: a literal copy of this block lives in each workflow script
-// that calls the CLI verbs — the sandbox reads no files, so each script
-// carries its own (the MODELS/EFFORTS precedent); CI extracts and tests
-// the block under node (.github/scripts/frame-decoder-test.js). The
-// sandbox exposes NO atob/btoa/Buffer/TextDecoder/TextEncoder (verified
+// ---------- verb codec: base64 + UTF-8 + frame decoder ----------
+// The hook's answers arrive base64-encoded, verb frames carry arbitrary
+// content under .b64 keys, and the notes verb takes its payload base64 —
+// so the workflow needs both directions. CI extracts this block by its
+// markers and tests it under node (.github/scripts/frame-decoder-test.js).
+// The sandbox exposes NO atob/btoa/Buffer/TextDecoder/TextEncoder (verified
 // empirically 2026-07-23 with a zero-agent probe) — "standard JS
 // built-ins" means ECMAScript only, so the UTF-8 step is hand-rolled
 // here: commit messages carry non-ASCII.
@@ -439,30 +387,24 @@ const b64decode = s => {
   return out
 }
 // Frame grammar, normative alongside lib.sh's emitter: between @@ORCA@@
-// and @@ORCA_END@@, a line opening one of the frame's DECLARED keys
-// (each verb's key set is fixed) starts that key; ANY other line is a
-// continuation of the open key's value — joined, then whitespace
-// stripped from .b64 values before decoding. The continuation rule is
-// what lets a relay-wrapped multi-KB message.b64 line rejoin instead of
-// burning the one retry; matching declared keys (not a generic charset)
-// keeps a wrapped base64 continuation ending in '=' padding from
-// masquerading as a key line. A continuation before any key, or a .b64
-// value that still fails to decode after the join, throws — the loud
-// retryable frame-decode failure. Decoded .b64 keys land WITHOUT the
-// suffix (message.b64 -> message).
+// and @@ORCA_END@@, every non-blank line opens one of the frame's DECLARED
+// keys (each verb's key set is fixed) — `key=value`, the value running to
+// the end of the line. Anything else between the markers (an undeclared
+// key, a stray line) throws, as does a .b64 value that does not decode:
+// the hook hands back the verb's own bytes, so a frame that does not match
+// its contract is a real failure, never transport noise. Decoded .b64 keys
+// land WITHOUT the suffix (message.b64 -> message).
 const decodeFrame = (raw, keys) => {
   const lines = raw.split('\n')
   const a = lines.findIndex(l => l.trim() === '@@ORCA@@')
   const b = lines.map(l => l.trim()).lastIndexOf('@@ORCA_END@@')
   if (a === -1 || b <= a) throw new Error('frame markers missing from verb output')
   const out = {}
-  let open = null
   for (const line of lines.slice(a + 1, b)) {
+    if (line.trim() === '') continue
     const key = keys.find(k => line.startsWith(`${k}=`))
-    if (key) { open = key; out[key] = line.slice(key.length + 1) }
-    else if (open !== null) out[open] += line
-    else if (line.trim() === '') continue
-    else throw new Error(`frame continuation before any key: ${line.slice(0, 80)}`)
+    if (!key) throw new Error(`frame line opens no declared key: ${line.slice(0, 80)}`)
+    out[key] = line.slice(key.length + 1)
   }
   for (const k of Object.keys(out)) {
     if (k.endsWith('.b64')) { out[k.slice(0, -4)] = b64decode(out[k]); delete out[k] }
@@ -470,31 +412,152 @@ const decodeFrame = (raw, keys) => {
   }
   return out
 }
-// ---------- end relay codec ----------
+// ---------- end verb codec ----------
 
-// One relay call per ritual: run a CLI verb through the dispatcher and
-// decode its frame. One retry on frame-decode failure, then fail the
-// item — bounded, matching the lock-retry temperament. A nonzero exit
-// (the verb's typed FAIL line) is the verb's own verdict, thrown by
-// sh() and never retried here. Returns { frame, raw } — raw so callers
-// can surface the verb's pass-through lines (secrets placement).
-const verb = async (argline, keys, label, ph) => {
-  const cmd = `bash "${pluginRoot}/scripts/orca.sh" ${argline}`
-  for (let attempt = 1; ; attempt++) {
-    const raw = await sh(cmd, attempt > 1 ? `${label}~frameretry` : label, ph)
-    try { return { frame: decodeFrame(raw, keys), raw } }
-    catch (err) {
-      if (attempt === 2)
-        throw new Error(`${label}: verb frame did not decode after a retry: ${String((err && err.message) || err)}`)
-    }
-  }
+// ---------- the one call shape: orca(verb, args, keys, label, phase) ----------
+// The script has no shell access. Every shell operation it performs is one
+// orca.sh verb, and every verb call goes through orca():
+//   verb   the dispatcher's verb name — a bare word, checked here
+//   args   plain strings, each one argv entry of the verb. Call sites never
+//          quote, escape, or interpolate shell: no shell ever sees them
+//   keys   the verb's declared frame keys, or NO_FRAME for a verb whose
+//          exit status is its whole answer (triage claim/release, secrets
+//          place/remove)
+// -> { frame, raw }: the decoded frame (null under NO_FRAME), and the verb's
+//    stdout for the callers that surface its pass-through lines
+//    (worktree-item's secrets placement).
+// A nonzero exit is the verb's own verdict (its typed FAIL line): thrown,
+// never retried. A frame that does not decode is thrown too: the hook hands
+// back the verb's own bytes, so a bad frame is a real failure.
+//
+// The way to the shell is orca's verb hook (hooks/relay.ts), and nothing
+// else: no fallback, no transport choice. The request rides in the model
+// name — `orca:{"v":1,"verb":…,"args":[…]}` — which the hook reads at
+// turn.step and answers without a model: `b64:` + base64 of the UTF-8 JSON
+// { v, rc, stdout, stderr }, or { v, refused } when one of its guards says
+// no (verb not on its allow-list, session not in bypassPermissions mode),
+// or { v, error, timedOut? } when the command could not be run to
+// completion. The answer is encoded whole because the harness rewrites
+// agent results that look instruction-shaped; base64 passes untouched, and
+// the journal keeps the encoded form, which a replay decodes the same way.
+//
+// Every way the hook can fail to answer is loud, at that call, naming the
+// cause and what to do. The run's first verb is `triage claim`, so a
+// session without the hook fails there, before any agent has run.
+const NO_FRAME = null
+const VERB_RE = /^[a-z][a-z-]*$/
+const HOOK_V = 1
+
+// What to do when the hook did not answer: everything that keeps a
+// function-hooks module from loading in this session.
+const HOOK_FIX = "orca runs its verbs only through that hook; there is no fallback. To fix: run Claude Code with function hooks (mods) enabled (CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 where the feature flag is off), not with --bare, with no disableAllHooks in any settings file (managed ones included), and with orca's hooks module (hooks/hooks.json) loading without errors; then resume or relaunch the run in such a session."
+const BYPASS_FIX = 'To fix: switch this session to bypass permissions (Shift+Tab, or launch with --permission-mode bypassPermissions) before the run'
+// A refusal or error is the hook's answer, and answers are journaled: a
+// resume replays it rather than asking again (a null is not journaled).
+const REPLAYS = "This answer is in the run's journal, so resuming the run replays it."
+
+// A failure of the hook itself, as opposed to a verb's own verdict (rc ≠ 0):
+// tagged, so the scheduler stops starting work a failed hook would fail too.
+const hookFault = msg => Object.assign(new Error(msg), { hookFault: true })
+let hookDown = null
+
+const hookAnswer = (raw, verb, label) => {
+  const bad = why => hookFault(`${label}: malformed answer from orca's verb hook for \`orca.sh ${verb}\`: ${why}`)
+  if (raw === null || raw === undefined)
+    throw hookFault(`${label}: no answer from orca's verb hook for \`orca.sh ${verb}\`: the request went to the API instead (which has no such model), so orca's hooks module is not loaded in this session. ${HOOK_FIX}`)
+  if (typeof raw !== 'string' || !raw.startsWith('b64:')) throw bad(`not a b64: answer (${String(raw).slice(0, 120)})`)
+  let a
+  try { a = JSON.parse(b64decode(raw.slice(4))) }
+  catch (err) { throw bad(`it does not decode (${String((err && err.message) || err)})`) }
+  if (typeof a !== 'object' || a === null || Array.isArray(a)) throw bad('not an object')
+  if (a.v !== HOOK_V)
+    throw bad(`protocol version ${JSON.stringify(a.v)}, this workflow speaks ${HOOK_V}; the loaded orca plugin and this run's workflow script are different versions`)
+  if (typeof a.refused === 'string')
+    throw hookFault(`${label}: orca's verb hook refused \`orca.sh ${verb}\`: ${a.refused}.${/permission mode/.test(a.refused) ? ` ${BYPASS_FIX}.` : ''} ${REPLAYS}`)
+  if (typeof a.error === 'string' && a.timedOut === true)
+    throw hookFault(`${label}: \`orca.sh ${verb}\` timed out in orca's verb hook: ${a.error}.${verb === 'provision' || verb === 'worktree-item' ? " The likely cause is the repository's .orca/setup script: it must finish within that limit." : ''} ${REPLAYS}`)
+  if (typeof a.error === 'string')
+    throw hookFault(`${label}: orca's verb hook failed running \`orca.sh ${verb}\`: ${a.error}. ${REPLAYS}`)
+  if (!Number.isInteger(a.rc) || typeof a.stdout !== 'string' || (a.stderr !== undefined && typeof a.stderr !== 'string'))
+    throw bad('it needs an integer rc and a string stdout')
+  return a
 }
+const hookRun = async (verb, args, label, ph) => {
+  const raw = await agent('', { model: `orca:${JSON.stringify({ v: HOOK_V, verb, args })}`, label, phase: ph })
+  let a
+  try { a = hookAnswer(raw, verb, label) }
+  catch (err) {
+    if (hookDown === null) {
+      hookDown = err.message
+      log(`orca's verb hook failed — no further items will start: ${hookDown}`)
+    }
+    throw err
+  }
+  // stderr joins stdout only on a failure, for the error's tail.
+  return { rc: a.rc, stdout: a.rc === 0 || !a.stderr ? a.stdout : `${a.stdout}\n${a.stderr}` }
+}
+
+const orca = async (verb, args, keys, label, ph) => {
+  if (typeof verb !== 'string' || !VERB_RE.test(verb))
+    throw new Error(`${label}: not an orca verb: ${JSON.stringify(verb)}`)
+  if (!Array.isArray(args) || args.some(a => typeof a !== 'string'))
+    throw new Error(`${label}: orca ${verb} arguments must be an array of strings (got ${JSON.stringify(args)})`)
+  const { rc, stdout } = await hookRun(verb, args, label, ph)
+  // A nonzero exit is the verb's own verdict — never retried.
+  if (rc !== 0) throw new Error(`${label}: command exited ${rc}: ${stdout.slice(-300)}`)
+  if (keys === NO_FRAME) return { frame: null, raw: stdout }
+  try { return { frame: decodeFrame(stdout, keys), raw: stdout } }
+  catch (err) { throw new Error(`${label}: verb frame did not decode: ${String((err && err.message) || err)}`) }
+}
+
 const WORKTREE_KEYS = ['rc', 'arrival', 'head',
   'setup', 'setup_stamped', 'setup_rc', 'setup_seconds', 'setup_tail.b64']
 const PROVISION_KEYS = ['rc', 'arrival',
   'setup', 'setup_stamped', 'setup_rc', 'setup_seconds', 'setup_tail.b64']
 const COMMIT_VERIFY_KEYS = ['rc', 'action', 'hash', 'message.b64']
 const MERGE_FINALIZE_KEYS = ['rc', 'tip', 'commit', 'attribution', 'ledger', 'cleanup']
+const MERGE_PREPARE_KEYS = ['rc', 'reset', 'base']
+const COMMIT_PREPARE_KEYS = ['rc', 'pending', 'base']
+const SALVAGE_KEYS = ['rc', 'salvaged']
+const ARCHIVE_KEYS = ['rc', 'plan', 'reviews']
+const NOTES_KEYS = ['rc', 'written']
+const SPEC_KEYS = ['rc', 'mark', 'changed']
+
+// "Did the contract move?" — asked of the spec verb. Two callers: the
+// unguarded first reconcile (did another wave's escalation land while this
+// one was reading?) and the escalation itself (did it actually amend, or was
+// a replan the whole fix?). Neither can be answered any other way — the
+// script has no filesystem, and ESCALATE does not report whether the agent
+// edited spec.md. `spec mark` takes a reading; `spec changed` compares the
+// file now against an earlier one and hands back the current mark, so a
+// bracket chain costs exactly one call per step. Fail-soft throughout: a
+// mark that cannot be taken is null, and every unknown — no prior mark,
+// changed=unknown, a failed verb, a malformed frame — reads as "assume it
+// moved", the conservative path.
+const specMark = async label => {
+  try {
+    const { frame } = await orca('spec', ['mark', runDir], SPEC_KEYS, label, 'Plan')
+    return mustMark(frame.mark, label)
+  } catch (err) {
+    log(`${label}: spec.md mark unavailable (${String((err && err.message) || err)}) — treating the spec as moved`)
+    return null
+  }
+}
+// -> { moved, mark }: mark is the spec's current reading (null when it
+// could not be taken), the `since` of the next bracket in a chain.
+const specMoved = async (since, label) => {
+  if (since === null) return { moved: true, mark: await specMark(label) }
+  try {
+    const { frame } = await orca('spec', ['changed', runDir, since], SPEC_KEYS, label, 'Plan')
+    if (frame.changed === 'no') return { moved: false, mark: since }
+    if (frame.changed === 'yes') return { moved: true, mark: mustMark(frame.mark, label) }
+    if (frame.changed !== 'unknown') throw new Error(`unknown answer changed=${JSON.stringify(frame.changed)}`)
+    log(`${label}: spec.md unreadable — treating the spec as moved`)
+  } catch (err) {
+    log(`${label}: spec.md comparison unavailable (${String((err && err.message) || err)}) — treating the spec as moved`)
+  }
+  return { moved: true, mark: null }
+}
 
 // Codex reviews contend for one Codex auth — cap concurrency at 2 (SKILL:
 // review throttling). Codex-only: claude reviews have no shared auth to
@@ -618,7 +681,7 @@ const reviewAgentType = reviewer === 'codex' ? 'orca:review-codex' : 'orca:revie
 // skill's placement) re-place. Best-effort both ways — a failed
 // place/remove degrades privilege separation, never the run.
 const secretsStage = async (mode, wt, label) => {
-  try { await sh(`bash "${pluginRoot}/scripts/orca.sh" secrets ${mode} "${wt}"`, label, 'Review') }
+  try { await orca('secrets', [mode, wt], NO_FRAME, label, 'Review') }
   catch (err) { log(`secrets ${mode} failed (non-fatal) for ${wt}: ${String((err && err.message) || err)}`) }
 }
 // Post-review re-placement stays `secrets place`, never `provision`: the
@@ -712,64 +775,58 @@ const planItem = (i, replanNote = '', labelTag = '') => {
     tuned('plan', { agentType: 'orca:plan', label: `plan:${i.id}${labelTag}`, phase: 'Plan' }))
 }
 
-// A superseded plan left at plans/<ID>.md reads as finished work to a fresh
-// planner — the W3 stall: the replan agent found its predecessor's plan on
-// disk, endorsed it as "already complete", and returned without applying the
-// spec amendment. Archive it review-style (<ID>.round0.md, first free slot)
-// before replanning. Fail-soft: the replan note independently declares any
-// surviving plan file superseded, so a failed mv degrades one guard, never
-// the wave.
+// A superseded attempt is archived before its replan — one `archive attempt`
+// call, plan and reviews together (nothing ever archived one without the
+// other).
+//
+// The plan: a superseded plan left at plans/<ID>.md reads as finished work
+// to a fresh planner — the W3 stall: the replan agent found its
+// predecessor's plan on disk, endorsed it as "already complete", and
+// returned without applying the spec amendment. The verb moves it to the
+// first free <ID>.round<N>.md, N unbounded (a fixed 0-3 list once let a
+// fifth archive silently no-op).
+//
+// The reviews: review() writes fixed round<N> names, so a relaunch's round0
+// overwrote the old one while the old round1/round2 survived beside it — and
+// a stale round2 carrying Critical/High next to a fresh clean round0 reads,
+// to orca:audit and to anyone counting, as an item that exhausted its fix
+// rounds when it never did (15 phantom exhaustions across the corpus,
+// plans/run-corpus-analysis.md §6). Same shape as /orca:retry's archive:
+// everything named <ID>-* under reviews/ moves into the first prev<N>/
+// holding nothing of this item, so a retry's snapshot and an in-run replan's
+// never collide and the round<N> name keeps meaning "fix round N of the
+// attempt it sits beside". An item replanned before its first review has
+// nothing to move.
+//
+// Fail-soft per part, as when they were two calls: the verb attempts both
+// and reports each, and a failure is logged, never thrown — the replan note
+// independently declares any surviving plan file superseded, so a failed
+// move degrades one guard, never the wave. The label keeps its old
+// plan-archive: name (the run band reads it as the replan stage).
 const archivePlan = async (i, tag) => {
-  const p = sq(`${runDir}/plans/${i.id}`)
   try {
-    // First free round<N> slot, unbounded: with a fixed 0-3 list, a fifth
-    // archive silently no-opped and left the superseded plan in place for
-    // the fresh planner to endorse.
-    await sh(`n=0 ; while [ -e '${p}.round'"$n"'.md' ] ; do n=$((n+1)) ; done ; mv '${p}.md' '${p}.round'"$n"'.md'`,
-      `plan-archive:${i.id}${tag}`, 'Plan')
-  } catch (e) { log(`${i.id}: superseded plan not archived (${String((e && e.message) || e)}) — replanning over it`) }
-  await archiveReviews(i, tag)
-}
-
-// The superseded attempt's review files go with its plan. review() writes
-// fixed round<N> names, so a relaunch's round0 overwrote the old one while
-// the old round1/round2 survived beside it — and a stale round2 carrying
-// Critical/High next to a fresh clean round0 reads, to orca:audit and to
-// anyone counting, as an item that exhausted its fix rounds when it never
-// did (15 phantom exhaustions across the corpus, plans/run-corpus-analysis.md
-// §6). Same shape as /orca:retry's archive: everything named <ID>-* under
-// reviews/ moves into the first prev<N>/ holding nothing of this item, so a
-// retry's snapshot and an in-run replan's never collide and the round<N>
-// name keeps meaning "fix round N of the attempt it sits beside". An item
-// replanned before its first review has nothing to move. Fail-soft like the
-// plan: a missed move degrades the archive, never the wave.
-const archiveReviews = async (i, tag) => {
-  const d = sq(`${runDir}/reviews`)
-  const id = sq(i.id)
-  try {
-    await sh(`set -- '${d}/${id}-'* ; if [ -e "$1" ] ; then n=0 ; ` +
-      `while ls '${d}/prev'"$n"'/${id}-'* >/dev/null 2>&1 ; do n=$((n+1)) ; done ; ` +
-      `mkdir -p '${d}/prev'"$n" && mv '${d}/${id}-'* '${d}/prev'"$n"'/' ; fi`,
-      `review-archive:${i.id}${tag}`, 'Plan')
-  } catch (e) { log(`${i.id}: superseded reviews not archived (${String((e && e.message) || e)}) — relaunching over them`) }
+    const { frame } = await orca('archive', ['attempt', runDir, i.id],
+      ARCHIVE_KEYS, `plan-archive:${i.id}${tag}`, 'Plan')
+    if (frame.plan === 'failed') log(`${i.id}: superseded plan not archived — replanning over it`)
+    if (frame.reviews === 'failed') log(`${i.id}: superseded reviews not archived — relaunching over them`)
+  } catch (e) {
+    log(`${i.id}: superseded plan and reviews not archived (${String((e && e.message) || e)}) — replanning over them`)
+  }
 }
 
 // Commit with the attribution rule enforced against the repository itself,
 // not the agent's self-report. Two agent attempts, each verified by ONE
-// commit-verify relay call (the verb reads the head, judges the whole span
+// commit-verify call (the verb reads the head, judges the whole span
 // against the banned regex — lib.sh is the regex's single holder now, the
 // JS copy is gone — and converges the worktree: accept, wip/prior rewrite,
 // violation reset, or on --final the deterministic fallback). <base> is the
 // worktree head BEFORE the commit agent ran: the per-item path holds it
-// from worktree-item's frame, the integration-fixes path from the extended
-// dirty-check probe — the verb can never read it itself, the agent has
-// already run by then. The title crosses the relay base64-encoded, so a
-// title containing "Claude" never appears literally in the relayed command,
-// and single-quoted: a long opaque token is the worst case for verbatim
-// transcription, and an observed relay corruption injected a ` | ` into one
-// (splitting the command, so the next flag landed in command position and a
-// finished item was reported blocked). Inside quotes the same corruption is
-// inert data — the verb's own b64 decode check rejects it by name.
+// from worktree-item's frame, the integration-fixes path from
+// commit-prepare's — the verb can never read it itself, the agent has
+// already run by then. The title crosses to the verb base64-encoded, so a
+// title containing "Claude" never appears literally among the verb's
+// arguments, and a damaged one is data the verb's own b64 decode check
+// rejects by name.
 const commitItem = async (wt, id, title, base, extraLines = []) => {
   const titleB64 = b64encode(title)
   let warn = ''
@@ -780,16 +837,15 @@ const commitItem = async (wt, id, title, base, extraLines = []) => {
         .filter(Boolean).join('\n'),
       tuned('commit', { agentType: 'orca:commit', label: `commit:${id}#${attempt}`, phase: 'Merge' })),
       `commit:${id}#${attempt}`)
-    const { frame } = await verb(
-      `commit-verify "${wt}" ${base} ${id} --branch "${integrationBranch}" --title-b64 '${titleB64}'` +
-      (attempt === 2 ? ' --final' : ''),
+    const { frame } = await orca('commit-verify',
+      [wt, base, id, '--branch', integrationBranch, '--title-b64', titleB64, ...(attempt === 2 ? ['--final'] : [])],
       COMMIT_VERIFY_KEYS, `commit-verify:${id}#${attempt}`, 'Merge')
     switch (frame.action) {
       case 'accepted':
       case 'wip_rewritten':
       case 'prior_squashed':
       case 'fallback_rewritten':
-        return { hash: mustSha(frame.hash, `commit-verify:${id}#${attempt}`), message: frame.message ?? '' }
+        return { hash: mustMark(frame.hash, `commit-verify:${id}#${attempt}`), message: frame.message ?? '' }
       case 'violation_reset':
         // The verb reset --soft to base; the second agent attempt recommits
         // the staged work, and --final guarantees attempt 2 terminates.
@@ -817,7 +873,7 @@ const buildItem = async item => {
   // via its .git pointer file, and when that file is absent git discovery
   // walks up from it — possibly into an enclosing repo. The integration
   // worktree always resolves to the right bare repo.
-  // One relay call for the whole ritual: the worktree-item verb owns the
+  // One verb call for the whole ritual: the worktree-item verb owns the
   // three arrivals, the bounded index.lock retry, and the chained
   // provisioning — secrets placement then `.orca/setup` (idempotent — a
   // resumed worktree's links are all-OK output and a setup script is
@@ -826,11 +882,10 @@ const buildItem = async item => {
   // only because implement/fix agents are forbidden to commit or stage
   // (agents/implement.md, agents/fix.md), so HEAD cannot move between here
   // and the commit stage — if those prompts ever change, this read must
-  // return to its own relay call.
-  const wtRes = await verb(
-    `worktree-item "${integrationWt}" "${wt}" "${branch}" "${integrationBranch}"`,
+  // return to its own verb call.
+  const wtRes = await orca('worktree-item', [integrationWt, wt, branch, integrationBranch],
     WORKTREE_KEYS, `worktree:${item.id}`, 'Build')
-  const baseSha = mustSha(wtRes.frame.head, `worktree:${item.id}`)
+  const baseSha = mustMark(wtRes.frame.head, `worktree:${item.id}`)
   if (wtRes.frame.arrival === 'reused') log(`${item.id}: resuming the worktree left by a previous run`)
   else if (wtRes.frame.arrival === 'branch_resumed') log(`${item.id}: re-created the worktree for the branch left by a previous run`)
   // A secret that could not be placed fails exactly where it fails today —
@@ -881,20 +936,22 @@ const buildItem = async item => {
   const merge = await serializedMerge(async () => {
     // Self-heal before merging: a predecessor that died mid-conflict must not
     // leave the integration worktree in MERGING state for everyone after it.
-    // `merge --abort` alone cannot do it — a conflicted `git merge --squash`
-    // records no MERGE_HEAD, so the abort fails with "no merge to abort" and
-    // leaves the conflict markers in the index for the next item to inherit.
-    // The reset is the fallback, and it is safe precisely here: merges are
+    // merge-prepare owns the ritual — `merge --abort`, falling back to
+    // `reset --hard HEAD` because a conflicted `git merge --squash` records no
+    // MERGE_HEAD to abort. The reset is safe precisely here: merges are
     // serialized and each ends in a commit, so anything uncommitted in the
     // integration worktree at the head of a section is a dead predecessor's
     // debris — the work itself is never lost, it lives on the item branch.
-    // One command with the tip read — this section is the run's serial
-    // bottleneck, so every relay round-trip here is paid by every item.
-    const tipBefore = mustSha((await shMarked(
-      `git -C "${integrationWt}" merge --abort >/dev/null 2>&1 || ` +
-      `git -C "${integrationWt}" reset --hard HEAD >/dev/null 2>&1 || true ; ` +
-      `git -C "${integrationWt}" rev-parse HEAD`,
-      `merge-reset:${item.id}`, 'Merge')).trim(), `merge-reset:${item.id}`)
+    // One call with the base read — this section is the run's serial
+    // bottleneck, so every verb round-trip here is paid by every item. The
+    // base is a marker for merge-finalize, taken before the merge agent runs.
+    const prep = await orca('merge-prepare', [integrationWt],
+      MERGE_PREPARE_KEYS, `merge-reset:${item.id}`, 'Merge')
+    const tipBefore = mustMark(prep.frame.base, `merge-reset:${item.id}`)
+    if (prep.frame.reset === 'aborted' || prep.frame.reset === 'hard')
+      log(`${item.id}: cleared a dead predecessor's leftover merge state from the integration worktree (${prep.frame.reset === 'aborted' ? 'merge --abort' : 'reset --hard'})`)
+    else if (prep.frame.reset === 'failed')
+      log(`${item.id}: the integration worktree could not be reset — merging over its leftover state`)
     const m = must(await agent(
       [`Integration worktree: ${integrationWt}`, `Run directory: ${runDir}`,
        `Item: ${item.id} — ${item.title}`,
@@ -903,7 +960,7 @@ const buildItem = async item => {
       tuned('merge', { agentType: 'orca:merge', label: `merge:${item.id}`, phase: 'Merge', schema: MERGE })),
       `merge:${item.id}`)
     // What the merge left in the repository is state the agent's schema
-    // never returns — one merge-finalize relay call reads it and converges:
+    // never returns — one merge-finalize call reads it and converges:
     // it finishes a squash the agent staged but never committed, applies the
     // same attribution backstop as commit-verify (first-parent only: a stray
     // merge's second parent came off an item branch already checked and
@@ -913,15 +970,14 @@ const buildItem = async item => {
     // section: acceptable, it is fast git plumbing, and the verb preserves
     // cleanup's non-fatality (a failed cleanup is reported in the frame with
     // rc=0 and the merged outcome intact — a stray build artifact must never
-    // demote a merged item to blocked). The title rides the relay
-    // base64-encoded and single-quoted (see commitItem — a mis-transcribed
-    // blob must stay data, never syntax); the verb composes the safe message
+    // demote a merged item to blocked). The title crosses base64-encoded
+    // (see commitItem — a mis-transcribed blob must stay data, never
+    // syntax); the verb composes the safe message
     // itself (it needs the banned regex, whose one holder is lib.sh).
     if (m.merged) {
-      const fin = await verb(
-        `merge-finalize "${integrationWt}" ${tipBefore} ${item.id} ` +
-        `--title-b64 '${b64encode(item.title)}' --wt "${wt}" --branch "${branch}" ` +
-        `--ledger "${runDir}/merged.tsv"`,
+      const fin = await orca('merge-finalize',
+        [integrationWt, tipBefore, item.id, '--title-b64', b64encode(item.title),
+         '--wt', wt, '--branch', branch, '--ledger', `${runDir}/merged.tsv`],
         MERGE_FINALIZE_KEYS, `merge-finalize:${item.id}`, 'Merge')
       // commit=none outranks the agent's own merged=true: the tip never
       // moved and the staged state was too ambiguous to finish from, so
@@ -1114,7 +1170,7 @@ const gateWave = async (wave, tag) => {
     return
   }
   const checked = live.map(i => i.id)
-  const specBefore = await specHash(`spec-hash:${tag}`)
+  const specBefore = await specMark(`spec-hash:${tag}`)
   const first = must(await agent(reconcilePrompt(checked),
     { model: 'opus', effort: 'high', label: `reconcile:${tag}`, phase: 'Plan', schema: RECONCILE }),
     `reconcile:${tag}`)
@@ -1129,8 +1185,8 @@ const gateWave = async (wave, tag) => {
     // A clean read of a spec that moved mid-read was a read of a spec that no
     // longer exists — another wave's escalation landed. Redo it in the
     // section, where nothing can move underneath it.
-    const specAfter = await specHash(`spec-hash:${tag}#recheck`)
-    if (specBefore !== null && specAfter === specBefore && !sawEscalation) return
+    const recheck = await specMoved(specBefore, `spec-hash:${tag}#recheck`)
+    if (!recheck.moved && !sawEscalation) return
     log(`${tag}: ${sawEscalation
       ? 'another wave was mid-escalation in spec.md while reconciliation read it'
       : 'spec.md moved while reconciliation was reading it'} — re-checking inside the spec section`)
@@ -1140,16 +1196,16 @@ const gateWave = async (wave, tag) => {
   await serializedSpec(async () => {
     live = wave.filter(i => state[i.id] === 'active')
     if (!live.length) return
-    // Doubles as the pre-escalation hash: this section holds spec.md, and
-    // reconcile does not write, so nothing can move it between here and the
-    // escalation call.
-    const specAt = await specHash(`spec-hash:${tag}#serial`)
+    // Its mark doubles as the pre-escalation reading: this section holds
+    // spec.md, and reconcile does not write, so nothing can move it between
+    // here and the escalation call.
+    const at = await specMoved(specBefore, `spec-hash:${tag}#serial`)
     const sameSubject = live.length === checked.length && live.every((i, n) => i.id === checked[n])
     let rec = first
     // sawEscalation forces the re-read for the same reason it denies the fast
     // path: an unguarded verdict computed while someone was mid-escalation was
     // computed against a spec.md nobody ever committed to.
-    if (specAt === null || specBefore === null || specAt !== specBefore || !sameSubject || sawEscalation) {
+    if (at.moved || !sameSubject || sawEscalation) {
       rec = must(await agent(reconcilePrompt(live.map(i => i.id)),
         { model: 'opus', effort: 'high', label: `reconcile~serial:${tag}`, phase: 'Plan', schema: RECONCILE }),
         `reconcile~serial:${tag}`)
@@ -1168,10 +1224,9 @@ const gateWave = async (wave, tag) => {
     } finally { escalationInFlight = false }
     // Did it amend, or was a replan the whole fix? Only the file knows: the
     // agent edits spec.md directly and ESCALATE does not report it. An
-    // unreadable hash keeps the old, amendment-shaped note — the conservative
+    // unreadable spec keeps the old, amendment-shaped note — the conservative
     // reading, and the one the note carried unconditionally before.
-    const specNow = await specHash(`spec-hash:${tag}#amend`)
-    const amended = specAt === null || specNow === null || specNow !== specAt
+    const amended = (await specMoved(at.mark, `spec-hash:${tag}#amend`)).moved
     if (!amended) log(`${tag}: the escalation amended nothing — replanning against the unchanged contract`)
     // Only ids actually in this wave — the schema cannot stop the model from
     // naming an item it was never asked about, and a stray id would corrupt
@@ -1271,6 +1326,13 @@ const runWave = async wave => {
   plans.forEach((p, idx) => { if (p === null || p === undefined) block(wave[idx].id, 'plan agent was skipped or died') })
 
   await gateWave(wave, tag)
+  // The gate's verbs are fail-soft; a hook that failed under them fails every
+  // build too, so no survivor starts.
+  if (hookDown !== null) {
+    wave.filter(i => state[i.id] === 'active')
+      .forEach(i => block(i.id, `run stopped: orca's verb hook failed: ${hookDown}`))
+    return
+  }
 
   // No barrier from here: each survivor pipelines through build → merge on its
   // own, and every completion re-pumps the scheduler so dependents launch the
@@ -1293,17 +1355,16 @@ const runWave = async wave => {
 // clutter at the repo root. Best-effort under the same contract as the
 // merged-path cleanup: a failure here logs and never demotes or re-throws,
 // and an unfinished salvage leaves the worktree in place rather than
-// removing unsaved work. The WIP message is deterministic and passes the
-// banned-attribution regex; commit-verify rewrites it if it ever
-// surfaces as a tip.
+// removing unsaved work. The salvage verb owns that ordering and the WIP
+// message, which is fixed and checked against the banned-attribution regex
+// where the regex lives; commit-verify rewrites it if it ever surfaces as a
+// tip.
 const salvageWorktree = async item => {
   const wt = `${repoRoot}/orca-${slug}-${item.id}`
   try {
-    await sh(
-      `if [ -d "${wt}" ]; then git -C "${wt}" add -A && ` +
-      `{ git -C "${wt}" diff --cached --quiet || git -C "${wt}" commit -m 'wip: ${item.id} — blocked, partial work' ; } && ` +
-      `git -C "${integrationWt}" worktree remove --force "${wt}" ; else echo NO_WORKTREE ; fi`,
-      `salvage:${item.id}`, 'Build')
+    const { frame } = await orca('salvage', [wt, integrationWt, item.id],
+      SALVAGE_KEYS, `salvage:${item.id}`, 'Build')
+    if (frame.salvaged === 'committed') log(`${item.id}: partial work salvaged into a wip: commit on its branch`)
   } catch (err) {
     log(`${item.id}: worktree salvage failed (non-fatal): ${String((err && err.message) || err)}`)
   }
@@ -1339,15 +1400,15 @@ const runItem = async item => {
         // Fail-soft as everywhere: an unreadable hash on either side reads as
         // "assume it amended".
         const braced = await serializedSpec(async () => {
-          const before = await specHash(`spec-hash:${item.id}#build`)
+          const before = await specMark(`spec-hash:${item.id}#build`)
           escalationInFlight = true
           let out
           try {
             out = await agent(buildEscalatePrompt(item, reason),
               { model: escalateModel, effort: 'high', label: `escalate:${item.id}`, phase: 'Build', schema: BUILD_ESCALATE })
           } finally { escalationInFlight = false }
-          const after = await specHash(`spec-hash:${item.id}#build-amend`)
-          return { out, amended: before === null || after === null || after !== before }
+          const after = await specMoved(before, `spec-hash:${item.id}#build-amend`)
+          return { out, amended: after.moved }
         })
         esc = braced.out
         amended = braced.amended
@@ -1385,6 +1446,13 @@ const pump = () => {
     const wave = items.filter(i => state[i.id] === 'pending' &&
       i.deps.every(d => state[d] === 'merged' || state[d] === 'cut'))
     if (!wave.length) { if (!depBlocked.length) break; continue }
+
+    // A failed hook fails every later verb too: start nothing more. The
+    // failure itself was thrown loudly at its call and logged by hookRun.
+    if (hookDown !== null) {
+      wave.forEach(i => block(i.id, `run stopped: orca's verb hook failed: ${hookDown}`))
+      continue
+    }
 
     if (budget.total && budget.remaining() < 50_000) {
       log('token budget nearly exhausted — not starting further items')
@@ -1429,12 +1497,12 @@ if (cyclic.length)
 // over a held lease fails typed here (the verb's FAIL: LEASE_HELD line
 // names the owner and the lease verdict); the skill's steal path
 // (triage claim --steal) recovers a provably stale lock. Released at the
-// end of the run.
+// end of the run. The claim is also the run's first verb, so a session
+// whose verb hook is missing or refuses fails here, before any agent runs.
 const leaseNote = `orca work loop; slug=${slug}; branch=${integrationBranch}`
-await sh(`bash "${pluginRoot}/scripts/orca.sh" triage claim '${sq(runDir)}' '${sq(leaseNote)}'`,
-  'run-lease', 'Plan')
+await orca('triage', ['claim', runDir, leaseNote], NO_FRAME, 'run-lease', 'Plan')
 const releaseLease = async () => {
-  try { await sh(`bash "${pluginRoot}/scripts/orca.sh" triage release '${sq(runDir)}'`, 'run-lease-release', 'Integrate') }
+  try { await orca('triage', ['release', runDir], NO_FRAME, 'run-lease-release', 'Integrate') }
   catch (err) { log(`run lease not released (non-fatal): ${String((err && err.message) || err)}`) }
 }
 
@@ -1455,7 +1523,13 @@ let integration = { features: [], fixesApplied: false, gaps: ['skipped: no items
 // The report and the audit/retry skills read this instead of inferring
 // "completed deliverable" from the mere presence of a branch.
 let deliverableState = 'built'
-if (shipped.length) {
+if (shipped.length && hookDown !== null) {
+  // Verification needs verbs (provisioning; committing any fixes), and the
+  // hook that runs them has failed: the merged work stands unverified.
+  integration = { features: [], fixesApplied: false,
+    gaps: [`integration verification did not run: orca's verb hook failed: ${hookDown}`] }
+  deliverableState = 'unverified'
+} else if (shipped.length) {
   // Re-provision before verifying: every item that merged may have changed
   // the dependency set, and the integration worktree was last provisioned
   // when it was created — possibly hours and a dozen merges ago. Advisory
@@ -1463,7 +1537,7 @@ if (shipped.length) {
   // a log line, never a reason to skip verification.
   let integrationNote = ''
   try {
-    const prov = await verb(`provision "${integrationWt}" integrate`,
+    const prov = await orca('provision', [integrationWt, 'integrate'],
       PROVISION_KEYS, 'provision:integration', 'Integrate')
     logProvision('integration', prov.frame)
     integrationNote = provisionNote(prov.frame)
@@ -1499,10 +1573,17 @@ if (shipped.length) {
       // A reviewer switch on retry (codex run resumed as claude, or vice
       // versa) can leave the other reviewer's integration artifact on disk
       // while fix.md asserts exactly one exists — the fixer would read last
-      // round's stale findings beside the fresh ones. Clear both names
-      // before this run's reviewer writes its own.
-      await sh(`rm -f '${sq(runDir)}/reviews/integration-codex.json' '${sq(runDir)}/reviews/integration-claude.json'`,
-        'integration-review-clean', 'Review')
+      // round's stale findings beside the fresh ones. Move every
+      // integration-* review out of the way before this run's reviewer
+      // writes its own — archived into the first free prev<N>/ like an item
+      // attempt's, so the earlier round's evidence survives. Not fail-soft,
+      // as the delete it replaces was not: a stale artifact the archive
+      // could not move would sit beside the fresh one, so a failed move is a
+      // review that did not complete.
+      const cleared = await orca('archive', ['attempt', runDir, 'integration'],
+        ARCHIVE_KEYS, 'integration-review-clean', 'Review')
+      if (cleared.frame.reviews === 'failed')
+        throw new Error('the previous integration review artifacts could not be archived')
       const first = await review('integration', integrationWt, 0, 'integration')
       if (first.total === 0 && first.criticalOrHigh === 0) reviewedClean = true
       else {
@@ -1541,28 +1622,31 @@ if (shipped.length) {
     integration.fixNotes = fixNotes
     if (fixNotes.declines.length || fixNotes.escalations.length) {
       try {
-        await sh(`printf '%s\\n' '${sq(JSON.stringify(fixNotes, null, 2))}' > '${sq(runDir)}/integration-fixes.json'`,
-          'integration-fix-notes', 'Integrate')
+        // Base64, like commit titles: arbitrary content never rides the
+        // command line raw, and a mis-transcribed blob stays data that the
+        // verb's own decode check rejects by name.
+        await orca('notes', ['write', runDir, 'integration-fixes', b64encode(`${JSON.stringify(fixNotes, null, 2)}\n`)],
+          NOTES_KEYS, 'integration-fix-notes', 'Integrate')
       } catch (err) {
         log(`integration fix notes not persisted (non-fatal): ${String((err && err.message) || err)} — they remain in the workflow result`)
       }
     }
     if (reviewedClean) {
       try {
-        // The probe also emits the integration head: commit-verify's base
-        // must be captured before the commit agent runs (the same ordering
-        // logic as the tip-before read), and the probe is an existing relay
-        // call, so the sha rides free.
-        const status = await shMarked(
-          `{ [ -n "$(git -C "${integrationWt}" status --porcelain)" ] && echo DIRTY || echo CLEAN ; } ; ` +
-          `git -C "${integrationWt}" rev-parse HEAD`,
-          'integration-status', 'Merge')
-        const [flag, intBase] = status.split('\n').map(s => s.trim())
-        if (flag === 'DIRTY') {
+        // One call answers both questions: is there anything to commit, and
+        // what base does commit-verify judge against? The base must be
+        // captured before the commit agent runs (the same ordering logic as
+        // merge-prepare's), so it rides this probe; it is a marker the
+        // workflow hands to commit-verify verbatim.
+        const prep = await orca('commit-prepare', [integrationWt],
+          COMMIT_PREPARE_KEYS, 'integration-status', 'Merge')
+        if (prep.frame.pending === 'yes') {
           const c = await commitItem(integrationWt, 'integration', 'integration fixes from full-feature verification',
-            mustSha(intBase, 'integration-status'),
+            mustMark(prep.frame.base, 'integration-status'),
             ['There is no plan file for this item; commit the integration fixes only.'])
           log(`integration fixes committed (${c.hash})`)
+        } else if (prep.frame.pending !== 'no') {
+          throw new Error(`integration-status: unknown answer pending=${JSON.stringify(prep.frame.pending)}`)
         }
       } catch (err) {
         integration.gaps.push(`integration fixes could not be committed: ${String((err && err.message) || err)}`)

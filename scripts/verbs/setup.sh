@@ -122,12 +122,15 @@
 # monorepo (a pnpm install and a go mod download at low single-digit
 # minutes each, a devserver build under one) sum to well under five;
 # eight worktrees contending for CPU and disk can plausibly triple that.
-# Fifteen minutes keeps headroom over a fat cold install while still
-# failing a hung one before a review's ~20-minute cap would.
+# Nine minutes keeps headroom over a fat cold install and sits under the
+# ten minutes orca's verb hook allows one verb call ($.process.run's limit):
+# provision and worktree-item run setup inside that call alongside their
+# git and secrets work, so setup's own timeout, a soft one the agent is told
+# about, with its log tail, must fire first, never the hook's hard cut.
 # Not per-repo configurable: the config grammar cannot carry a number, and
 # a script that needs longer should be moving cold work into a shared
 # cache — the doctor's measured `seconds` is what says a repo is near it.
-SETUP_TIMEOUT=900
+SETUP_TIMEOUT=540
 
 # The well-known provisioning inputs, in a fixed order. Literal paths only
 # — a glob would need `ls-tree -r` and could not render an `absent` entry,

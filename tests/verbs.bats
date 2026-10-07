@@ -411,4 +411,433 @@ finalize() {
   make_run_layout "$BATS_TEST_TMPDIR/r"
   run orca commit-verify "$BATS_TEST_TMPDIR/r/int" not-a-sha W1 --branch feature/x --title-b64 "$(b64 t)"
   assert_fail_reason BAD_ARGS
+  # the tip-before is a marker: a relay-garbled one fails typed before git sees it
+  run orca merge-finalize "$BATS_TEST_TMPDIR/r/int" 'dddd; rm -rf /' W1 \
+    --title-b64 "$(b64 t)" --wt /x --branch b --ledger /x/merged.tsv
+  assert_fail_reason BAD_ARGS
+}
+
+# ---- run-state verbs: spec, archive, notes ------------------------------
+
+# make_run_dir <layout-dir> — a run directory inside the layout's .orca/,
+# path in $rd.
+make_run_dir() {
+  rd="$1/.orca/20260101-0000-feat-x"
+  mkdir -p "$rd/plans" "$rd/reviews"
+}
+
+@test "spec mark: the mark is spec.md's content id" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  make_run_dir "$BATS_TEST_TMPDIR/r"
+  printf '# spec\n' >"$rd/spec.md"
+  run orca spec mark "$rd"
+  [ "$status" -eq 0 ]
+  [ "$(frame_get mark)" = "$(git hash-object --no-filters "$rd/spec.md")" ]
+}
+
+@test "spec changed: no over an untouched spec, yes with the new mark after an edit" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  make_run_dir "$BATS_TEST_TMPDIR/r"
+  printf '# spec\n' >"$rd/spec.md"
+  run orca spec mark "$rd"
+  local m1
+  m1="$(frame_get mark)"
+  run orca spec changed "$rd" "$m1"
+  [ "$status" -eq 0 ]
+  has_line 'changed=no'
+  [ "$(frame_get mark)" = "$m1" ]
+  printf '# spec\n\n## Decisions\n- (W1) amended\n' >"$rd/spec.md"
+  run orca spec changed "$rd" "$m1"
+  [ "$status" -eq 0 ]
+  has_line 'changed=yes'
+  [ "$(frame_get mark)" = "$(git hash-object --no-filters "$rd/spec.md")" ]
+  [ "$(frame_get mark)" != "$m1" ]
+}
+
+@test "spec: an unreadable spec answers changed=unknown, and fails mark typed" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  make_run_dir "$BATS_TEST_TMPDIR/r"
+  run orca spec changed "$rd" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  [ "$status" -eq 0 ]
+  has_line 'changed=unknown'
+  [ -z "$(frame_get mark)" ]
+  run orca spec mark "$rd"
+  assert_fail_reason SPEC_UNREADABLE
+}
+
+@test "spec: a malformed mark and a path outside .orca/ fail typed" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  make_run_dir "$BATS_TEST_TMPDIR/r"
+  printf '# spec\n' >"$rd/spec.md"
+  run orca spec changed "$rd" 'aaaa; rm -rf /'
+  assert_fail_reason BAD_ARGS
+  run orca spec changed "$rd" AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+  assert_fail_reason BAD_ARGS
+  mkdir -p "$BATS_TEST_TMPDIR/elsewhere"
+  printf '# spec\n' >"$BATS_TEST_TMPDIR/elsewhere/spec.md"
+  run orca spec mark "$BATS_TEST_TMPDIR/elsewhere"
+  assert_fail_reason BAD_ARGS
+  run orca spec mark ".orca/20260101-0000-feat-x"
+  assert_fail_reason BAD_ARGS
+  run orca spec mark "$BATS_TEST_TMPDIR/r/.orca"
+  assert_fail_reason BAD_ARGS
+  run orca spec frobnicate "$rd"
+  assert_fail_reason BAD_ARGS
+}
+
+@test "archive attempt: plan and reviews move together, reviews into prev0" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  make_run_dir "$BATS_TEST_TMPDIR/r"
+  echo plan >"$rd/plans/W1.md"
+  echo r0 >"$rd/reviews/W1-codex.json"
+  echo r0 >"$rd/reviews/W1-codex.round0.json"
+  echo keep >"$rd/reviews/W10-codex.json"
+  echo keep >"$rd/plans/W10.md"
+  run orca archive attempt "$rd" W1
+  [ "$status" -eq 0 ]
+  has_line 'plan=archived'
+  has_line 'reviews=archived'
+  [ ! -e "$rd/plans/W1.md" ]
+  [ "$(cat "$rd/plans/W1.round0.md")" = plan ]
+  [ -f "$rd/reviews/prev0/W1-codex.json" ]
+  [ -f "$rd/reviews/prev0/W1-codex.round0.json" ]
+  # W1's glob is W1-*, never W10's files
+  [ -f "$rd/reviews/W10-codex.json" ]
+  [ -f "$rd/plans/W10.md" ]
+}
+
+@test "archive attempt: plan slots are unbounded — the first free round<N>" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  make_run_dir "$BATS_TEST_TMPDIR/r"
+  local n
+  for n in 0 1 2 3 4; do echo "old$n" >"$rd/plans/W3.round$n.md"; done
+  echo newest >"$rd/plans/W3.md"
+  run orca archive attempt "$rd" W3
+  [ "$status" -eq 0 ]
+  has_line 'plan=archived'
+  [ "$(cat "$rd/plans/W3.round5.md")" = newest ]
+  [ "$(cat "$rd/plans/W3.round0.md")" = old0 ]
+}
+
+@test "archive attempt: the first prev<N> holding nothing of the item, unbounded, shared with other items" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  make_run_dir "$BATS_TEST_TMPDIR/r"
+  local n
+  # prev0..prev5 each already hold a W2 attempt; prev0..prev7 hold W5's.
+  for n in 0 1 2 3 4 5; do mkdir -p "$rd/reviews/prev$n"; echo "w2-$n" >"$rd/reviews/prev$n/W2-claude.json"; done
+  for n in 0 1 2 3 4 5 6 7; do mkdir -p "$rd/reviews/prev$n"; echo "w5-$n" >"$rd/reviews/prev$n/W5-claude.json"; done
+  echo fresh >"$rd/reviews/W2-claude.json"
+  run orca archive attempt "$rd" W2
+  [ "$status" -eq 0 ]
+  has_line 'reviews=archived'
+  # prev6 is the first holding nothing of W2, even though W5 lives there
+  [ "$(cat "$rd/reviews/prev6/W2-claude.json")" = fresh ]
+  [ "$(cat "$rd/reviews/prev6/W5-claude.json")" = w5-6 ]
+  [ "$(cat "$rd/reviews/prev5/W2-claude.json")" = w2-5 ]
+  # and an item with nothing archived yet takes prev0, beside the others
+  echo first >"$rd/reviews/W9-codex.json"
+  run orca archive attempt "$rd" W9
+  [ "$status" -eq 0 ]
+  [ "$(cat "$rd/reviews/prev0/W9-codex.json")" = first ]
+}
+
+@test "archive attempt: nothing to move is none/none, and a run-twice converges" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  make_run_dir "$BATS_TEST_TMPDIR/r"
+  run orca archive attempt "$rd" W4
+  [ "$status" -eq 0 ]
+  has_line 'plan=none'
+  has_line 'reviews=none'
+  [ ! -e "$rd/reviews/prev0" ]
+  echo plan >"$rd/plans/W4.md"
+  echo r >"$rd/reviews/W4-codex.json"
+  run orca archive attempt "$rd" W4
+  has_line 'plan=archived'
+  run orca archive attempt "$rd" W4
+  [ "$status" -eq 0 ]
+  has_line 'plan=none'
+  has_line 'reviews=none'
+  [ ! -e "$rd/plans/W4.round1.md" ]
+  [ ! -e "$rd/reviews/prev1" ]
+}
+
+@test "archive attempt integration: stale integration reviews are archived, not deleted" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  make_run_dir "$BATS_TEST_TMPDIR/r"
+  echo codex >"$rd/reviews/integration-codex.json"
+  echo claude >"$rd/reviews/integration-claude.json"
+  echo codex0 >"$rd/reviews/integration-codex.round0.json"
+  echo keep >"$rd/reviews/W1-codex.json"
+  run orca archive attempt "$rd" integration
+  [ "$status" -eq 0 ]
+  has_line 'plan=none'
+  has_line 'reviews=archived'
+  [ "$(cat "$rd/reviews/prev0/integration-codex.json")" = codex ]
+  [ "$(cat "$rd/reviews/prev0/integration-claude.json")" = claude ]
+  [ "$(cat "$rd/reviews/prev0/integration-codex.round0.json")" = codex0 ]
+  [ -z "$(find "$rd/reviews" -maxdepth 1 -name 'integration-*')" ]
+  [ -f "$rd/reviews/W1-codex.json" ]
+}
+
+@test "archive attempt: a failed plan move still archives the reviews" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  make_run_dir "$BATS_TEST_TMPDIR/r"
+  echo plan >"$rd/plans/W1.md"
+  echo r >"$rd/reviews/W1-codex.json"
+  chmod a-w "$rd/plans"
+  run orca archive attempt "$rd" W1
+  chmod u+w "$rd/plans"
+  [ "$status" -eq 0 ]
+  has_line 'plan=failed'
+  has_line 'reviews=archived'
+  [ -f "$rd/plans/W1.md" ]
+  [ -f "$rd/reviews/prev0/W1-codex.json" ]
+}
+
+@test "archive: bad arguments fail typed" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  make_run_dir "$BATS_TEST_TMPDIR/r"
+  run orca archive attempt "$rd" 'W1*'
+  assert_fail_reason BAD_ARGS
+  run orca archive attempt "$rd" '../W1'
+  assert_fail_reason BAD_ARGS
+  run orca archive attempt "$rd" '.hidden'
+  assert_fail_reason BAD_ARGS
+  run orca archive attempt "$BATS_TEST_TMPDIR/r/int" W1
+  assert_fail_reason BAD_ARGS
+  run orca archive plan "$rd" W1
+  assert_fail_reason BAD_ARGS
+  run orca archive attempt "$rd"
+  assert_fail_reason BAD_ARGS
+}
+
+@test "notes write: content lands byte-exact, atomically, and reports its path" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  make_run_dir "$BATS_TEST_TMPDIR/r"
+  local content
+  content="$(printf '{\n  "declines": ["café — naïve"],\n  "escalations": []\n}\nX')"
+  content="${content%X}"
+  run orca notes write "$rd" integration-fixes "$(b64 "$content")"
+  [ "$status" -eq 0 ]
+  [ "$(frame_get written)" = "$rd/integration-fixes.json" ]
+  [ "$(cat "$rd/integration-fixes.json"; printf X)" = "${content}X" ]
+  # a rewrite replaces, and leaves no temp file behind
+  run orca notes write "$rd" integration-fixes "$(b64 'second')"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$rd/integration-fixes.json")" = second ]
+  [ -z "$(find "$rd" -maxdepth 1 -name '.notes.*')" ]
+}
+
+@test "notes write: bad arguments and an unwritable run dir fail typed" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  make_run_dir "$BATS_TEST_TMPDIR/r"
+  run orca notes write "$rd" report "$(b64 x)"
+  assert_fail_reason BAD_ARGS
+  run orca notes write "$rd" integration-fixes 'not base64!'
+  assert_fail_reason BAD_ARGS
+  run orca notes write "$BATS_TEST_TMPDIR" integration-fixes "$(b64 x)"
+  assert_fail_reason BAD_ARGS
+  run orca notes read "$rd" integration-fixes
+  assert_fail_reason BAD_ARGS
+  chmod a-w "$rd"
+  run orca notes write "$rd" integration-fixes "$(b64 x)"
+  chmod u+w "$rd"
+  assert_fail_reason WRITE_ERROR
+  [ ! -e "$rd/integration-fixes.json" ]
+}
+
+# ---- merge-prepare / commit-prepare -------------------------------------
+
+@test "merge-prepare: a clean integration worktree is left alone, base is its head" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  run orca merge-prepare "$BATS_TEST_TMPDIR/r/int"
+  [ "$status" -eq 0 ]
+  has_line 'reset=none'
+  [ "$(frame_get base)" = "$(git -C "$BATS_TEST_TMPDIR/r/int" rev-parse HEAD)" ]
+}
+
+# conflict_layout <dir> — an item branch and the integration branch that
+# both rewrite seed.txt, so any merge of the item conflicts.
+conflict_layout() {
+  make_run_layout "$1"
+  add_wt "$1"
+  echo item >"$1/wt1/seed.txt"
+  git -C "$1/wt1" commit -qam 'feat: item side'
+  echo int >"$1/int/seed.txt"
+  git -C "$1/int" commit -qam 'feat: integration side'
+}
+
+@test "merge-prepare: a conflicted squash (no MERGE_HEAD) falls back to reset --hard" {
+  conflict_layout "$BATS_TEST_TMPDIR/r"
+  local head
+  head="$(git -C "$BATS_TEST_TMPDIR/r/int" rev-parse HEAD)"
+  run git -C "$BATS_TEST_TMPDIR/r/int" merge --squash feature/x-W1
+  [ "$status" -ne 0 ]
+  [ -n "$(git -C "$BATS_TEST_TMPDIR/r/int" ls-files --unmerged)" ]
+  run git -C "$BATS_TEST_TMPDIR/r/int" rev-parse -q --verify MERGE_HEAD
+  [ "$status" -ne 0 ]
+  echo debris >"$BATS_TEST_TMPDIR/r/int/untracked.txt"
+  run orca merge-prepare "$BATS_TEST_TMPDIR/r/int"
+  [ "$status" -eq 0 ]
+  has_line 'reset=hard'
+  [ "$(frame_get base)" = "$head" ]
+  [ -z "$(git -C "$BATS_TEST_TMPDIR/r/int" status --porcelain --untracked-files=no)" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/r/int/seed.txt")" = int ]
+  # untracked files were never reset's to remove
+  [ -f "$BATS_TEST_TMPDIR/r/int/untracked.txt" ]
+}
+
+@test "merge-prepare: a real merge in progress is aborted" {
+  conflict_layout "$BATS_TEST_TMPDIR/r"
+  run git -C "$BATS_TEST_TMPDIR/r/int" merge --no-ff feature/x-W1
+  [ "$status" -ne 0 ]
+  git -C "$BATS_TEST_TMPDIR/r/int" rev-parse -q --verify MERGE_HEAD >/dev/null
+  run orca merge-prepare "$BATS_TEST_TMPDIR/r/int"
+  [ "$status" -eq 0 ]
+  has_line 'reset=aborted'
+  run git -C "$BATS_TEST_TMPDIR/r/int" rev-parse -q --verify MERGE_HEAD
+  [ "$status" -ne 0 ]
+  [ -z "$(git -C "$BATS_TEST_TMPDIR/r/int" status --porcelain --untracked-files=no)" ]
+}
+
+@test "merge-prepare: debris an abort leaves behind is reset too" {
+  conflict_layout "$BATS_TEST_TMPDIR/r"
+  echo other >"$BATS_TEST_TMPDIR/r/int/other.txt"
+  git -C "$BATS_TEST_TMPDIR/r/int" add other.txt
+  git -C "$BATS_TEST_TMPDIR/r/int" commit -qm 'chore: other'
+  echo leftover >>"$BATS_TEST_TMPDIR/r/int/other.txt"
+  run git -C "$BATS_TEST_TMPDIR/r/int" merge --no-ff feature/x-W1
+  [ "$status" -ne 0 ]
+  git -C "$BATS_TEST_TMPDIR/r/int" rev-parse -q --verify MERGE_HEAD >/dev/null
+  run orca merge-prepare "$BATS_TEST_TMPDIR/r/int"
+  [ "$status" -eq 0 ]
+  has_line 'reset=hard'
+  [ -z "$(git -C "$BATS_TEST_TMPDIR/r/int" status --porcelain --untracked-files=no)" ]
+}
+
+@test "merge-prepare: staged leftovers are reset; a reset that cannot run is reported, not fatal" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  echo staged >"$BATS_TEST_TMPDIR/r/int/seed.txt"
+  git -C "$BATS_TEST_TMPDIR/r/int" add seed.txt
+  local gitdir
+  gitdir="$(git -C "$BATS_TEST_TMPDIR/r/int" rev-parse --absolute-git-dir)"
+  touch "$gitdir/index.lock"
+  run orca merge-prepare "$BATS_TEST_TMPDIR/r/int"
+  [ "$status" -eq 0 ]
+  has_line 'reset=failed'
+  [ "$(frame_get base)" = "$(git -C "$BATS_TEST_TMPDIR/r/int" rev-parse HEAD)" ]
+  rm -f "$gitdir/index.lock"
+  run orca merge-prepare "$BATS_TEST_TMPDIR/r/int"
+  [ "$status" -eq 0 ]
+  has_line 'reset=hard'
+  [ "$(cat "$BATS_TEST_TMPDIR/r/int/seed.txt")" = seed ]
+}
+
+@test "merge-prepare and commit-prepare refuse anything but a worktree top level" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  mkdir -p "$BATS_TEST_TMPDIR/r/int/sub" "$BATS_TEST_TMPDIR/plain"
+  for v in merge-prepare commit-prepare; do
+    run orca "$v" "$BATS_TEST_TMPDIR/r/int/sub"
+    assert_fail_reason BAD_ARGS
+    run orca "$v" "$BATS_TEST_TMPDIR/plain"
+    assert_fail_reason BAD_ARGS
+    run orca "$v" int
+    assert_fail_reason BAD_ARGS
+    run orca "$v"
+    assert_fail_reason BAD_ARGS
+  done
+}
+
+@test "commit-prepare: pending follows the tree, base is the head" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  run orca commit-prepare "$BATS_TEST_TMPDIR/r/int"
+  [ "$status" -eq 0 ]
+  has_line 'pending=no'
+  [ "$(frame_get base)" = "$(git -C "$BATS_TEST_TMPDIR/r/int" rev-parse HEAD)" ]
+  echo new >"$BATS_TEST_TMPDIR/r/int/untracked.txt"
+  run orca commit-prepare "$BATS_TEST_TMPDIR/r/int"
+  has_line 'pending=yes'
+  git -C "$BATS_TEST_TMPDIR/r/int" add untracked.txt
+  run orca commit-prepare "$BATS_TEST_TMPDIR/r/int"
+  has_line 'pending=yes'
+}
+
+@test "commit-prepare's base feeds commit-verify as its marker" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  echo fix >"$BATS_TEST_TMPDIR/r/int/fix.txt"
+  run orca commit-prepare "$BATS_TEST_TMPDIR/r/int"
+  local mark
+  mark="$(frame_get base)"
+  commit_in "$BATS_TEST_TMPDIR/r/int" 'fix: integration fixes'
+  run orca commit-verify "$BATS_TEST_TMPDIR/r/int" "$mark" integration \
+    --branch feature/x --title-b64 "$(b64 'integration fixes')"
+  [ "$status" -eq 0 ]
+  has_line 'action=accepted'
+}
+
+# ---- salvage -----------------------------------------------------------
+
+@test "salvage: partial work becomes the fixed wip commit, and the worktree goes" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  add_wt "$BATS_TEST_TMPDIR/r"
+  echo partial >"$BATS_TEST_TMPDIR/r/wt1/partial.txt"
+  run orca salvage "$BATS_TEST_TMPDIR/r/wt1" "$BATS_TEST_TMPDIR/r/int" W1
+  [ "$status" -eq 0 ]
+  has_line 'salvaged=committed'
+  [ ! -d "$BATS_TEST_TMPDIR/r/wt1" ]
+  [ "$(git -C "$BATS_TEST_TMPDIR/r/int" log -1 --format=%B feature/x-W1)" = 'wip: W1 — blocked, partial work' ]
+  git -C "$BATS_TEST_TMPDIR/r/int" show feature/x-W1:partial.txt >/dev/null
+}
+
+@test "salvage: a clean worktree is removed without a commit; a missing one is no-worktree" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  add_wt "$BATS_TEST_TMPDIR/r"
+  run orca salvage "$BATS_TEST_TMPDIR/r/wt1" "$BATS_TEST_TMPDIR/r/int" W1
+  [ "$status" -eq 0 ]
+  has_line 'salvaged=clean'
+  [ ! -d "$BATS_TEST_TMPDIR/r/wt1" ]
+  [ "$(git -C "$BATS_TEST_TMPDIR/r/int" rev-parse feature/x-W1)" = "$base" ]
+  run orca salvage "$BATS_TEST_TMPDIR/r/wt1" "$BATS_TEST_TMPDIR/r/int" W1
+  [ "$status" -eq 0 ]
+  has_line 'salvaged=no-worktree'
+}
+
+@test "salvage: a failed commit leaves the worktree and its work in place" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  add_wt "$BATS_TEST_TMPDIR/r"
+  mkdir -p "$BATS_TEST_TMPDIR/hooks"
+  printf '#!/bin/sh\nexit 1\n' >"$BATS_TEST_TMPDIR/hooks/pre-commit"
+  chmod +x "$BATS_TEST_TMPDIR/hooks/pre-commit"
+  git -C "$BATS_TEST_TMPDIR/r/wt1" config core.hooksPath "$BATS_TEST_TMPDIR/hooks"
+  echo partial >"$BATS_TEST_TMPDIR/r/wt1/partial.txt"
+  run orca salvage "$BATS_TEST_TMPDIR/r/wt1" "$BATS_TEST_TMPDIR/r/int" W1
+  assert_fail_reason GIT_ERROR
+  [ -f "$BATS_TEST_TMPDIR/r/wt1/partial.txt" ]
+}
+
+@test "salvage: an id that trips the attribution regex falls back to the id-free message" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  run orca worktree-item "$BATS_TEST_TMPDIR/r/int" "$BATS_TEST_TMPDIR/r/wtc" feature/x-claude1 feature/x
+  echo partial >"$BATS_TEST_TMPDIR/r/wtc/partial.txt"
+  run orca salvage "$BATS_TEST_TMPDIR/r/wtc" "$BATS_TEST_TMPDIR/r/int" claude1
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$BATS_TEST_TMPDIR/r/int" log -1 --format=%B feature/x-claude1)" = 'wip: blocked, partial work' ]
+}
+
+@test "salvage: never the integration worktree, never another repository's worktree" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  make_run_layout "$BATS_TEST_TMPDIR/other"
+  run orca salvage "$BATS_TEST_TMPDIR/r/int" "$BATS_TEST_TMPDIR/r/int" W1
+  assert_fail_reason BAD_ARGS
+  [ -d "$BATS_TEST_TMPDIR/r/int" ]
+  run orca salvage "$BATS_TEST_TMPDIR/other/int" "$BATS_TEST_TMPDIR/r/int" W1
+  assert_fail_reason BAD_ARGS
+  [ -d "$BATS_TEST_TMPDIR/other/int" ]
+  mkdir -p "$BATS_TEST_TMPDIR/r/int/sub"
+  run orca salvage "$BATS_TEST_TMPDIR/r/int/sub" "$BATS_TEST_TMPDIR/r/int" W1
+  assert_fail_reason BAD_ARGS
+  run orca salvage wt1 "$BATS_TEST_TMPDIR/r/int" W1
+  assert_fail_reason BAD_ARGS
+  run orca salvage "$BATS_TEST_TMPDIR/r/wt1" "$BATS_TEST_TMPDIR/r/int" 'W1 x'
+  assert_fail_reason BAD_ARGS
 }

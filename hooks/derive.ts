@@ -83,8 +83,8 @@ export type LabelMeaning =
   | null
 
 export function classifyLabel(label: string): LabelMeaning {
-  // Retries keep their stage: review:W1#0~retry, worktree:W1~frameretry.
-  const bare = label.replace(/~(retry|frameretry)$/, '')
+  // Retries keep their stage: review:W1#0~retry.
+  const bare = label.replace(/~retry$/, '')
   if (bare === 'spec') return { kind: 'spec', state: 'drafting' }
   if (bare === 'spec-review' || bare === 'spec-revise') return { kind: 'spec', state: 'in review' }
   if (bare === 'run-lease-release') return { kind: 'wrap-up' }

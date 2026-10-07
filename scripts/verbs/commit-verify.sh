@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 #
-# orca commit-verify — one relay call for everything between (and
+# orca commit-verify — one verb call for everything between (and
 # after) commit-agent attempts: read the head, judge the span against
 # the banned-attribution regex, and converge the worktree to a clean,
 # attributable commit. Sourced by orca.sh; lib.sh is already loaded.
@@ -11,8 +11,8 @@
 #
 # <base-sha> is the worktree head BEFORE the commit agent ran — the
 # caller holds it from worktree-item's frame (per-item path) or from
-# the extended dirty-check probe (integration-fixes path); this verb
-# can never read it itself, the agent has already run.
+# commit-prepare's base marker (integration-fixes path); this verb can
+# never read it itself, the agent has already run.
 #
 # Decision table (converge, don't replay — every branch observes
 # current repo state, never assumes a previous invocation didn't run):
@@ -47,7 +47,9 @@
 # exactly one holder: lib.sh.
 #
 # Frame keys: rc, action, hash, message.b64 (hash/message only on
-# actions that leave a commit standing).
+# actions that leave a commit standing). <base-sha> and the emitted hash
+# are markers (lib.sh is_marker): the base is checked on arrival, the
+# hash before it is emitted, so the caller never validates a sha itself.
 
 cv_wt=""
 cv_base=""
@@ -75,7 +77,7 @@ if [ -z "$cv_wt" ] || [ -z "$cv_base" ] || [ -z "$cv_id" ] || [ -z "$cv_branch" 
   fail BAD_ARGS "$usage"
 fi
 [ -d "$cv_wt" ] || fail BAD_ARGS "worktree is not a directory: $cv_wt"
-[[ $cv_base =~ ^[0-9a-f]{40}$ ]] || fail BAD_ARGS "base-sha is not a 40-hex commit sha: $cv_base"
+is_marker "$cv_base" || fail BAD_ARGS "base-sha is not a commit base marker: $cv_base"
 
 cv_title="$(printf '%s' "$cv_title_b64" | tr -d '[:space:]' | b64_decode 2>/dev/null)" \
   || fail BAD_ARGS "--title-b64 does not decode as base64"
@@ -89,7 +91,7 @@ fi
 cv_head() {
   local sha
   sha="$(git -C "$cv_wt" rev-parse HEAD)" || fail GIT_ERROR "could not read HEAD in $cv_wt"
-  [[ $sha =~ ^[0-9a-f]{40}$ ]] || fail GIT_ERROR "HEAD of $cv_wt is not a commit sha: $sha"
+  is_marker "$sha" || fail GIT_ERROR "HEAD of $cv_wt is not a commit id: $sha"
   printf '%s' "$sha"
 }
 

@@ -162,3 +162,43 @@ decode_frame_key() { # <key> — frame on stdin, joined value on stdout
   run bash -c 'source "$1/lib.sh" && is_banned "feat: add AI summarizer user-agent header"' _ "$SCRIPTS"
   [ "$status" -ne 0 ]
 }
+
+# ---- path and marker guards --------------------------------------------
+
+@test "is_run_dir accepts an absolute directory inside .orca/, nothing else" {
+  mkdir -p "$BATS_TEST_TMPDIR/repo/.orca/20260101-feat-x" "$BATS_TEST_TMPDIR/repo/plain"
+  lib is_run_dir "$BATS_TEST_TMPDIR/repo/.orca/20260101-feat-x"
+  # symlinked spellings judge by where they land
+  ln -s "$BATS_TEST_TMPDIR/repo/.orca/20260101-feat-x" "$BATS_TEST_TMPDIR/link"
+  lib is_run_dir "$BATS_TEST_TMPDIR/link"
+  run lib is_run_dir "$BATS_TEST_TMPDIR/repo/.orca"
+  [ "$status" -ne 0 ]
+  run lib is_run_dir "$BATS_TEST_TMPDIR/repo/plain"
+  [ "$status" -ne 0 ]
+  run lib is_run_dir "$BATS_TEST_TMPDIR/repo/.orca/missing"
+  [ "$status" -ne 0 ]
+  run bash -c 'cd "$1" && source "$2/lib.sh" && is_run_dir .orca/20260101-feat-x' _ "$BATS_TEST_TMPDIR/repo" "$SCRIPTS"
+  [ "$status" -ne 0 ]
+}
+
+@test "is_worktree_root accepts a work tree's top level only" {
+  make_repo "$BATS_TEST_TMPDIR/repo"
+  mkdir -p "$BATS_TEST_TMPDIR/repo/sub" "$BATS_TEST_TMPDIR/plain"
+  lib is_worktree_root "$BATS_TEST_TMPDIR/repo"
+  run lib is_worktree_root "$BATS_TEST_TMPDIR/repo/sub"
+  [ "$status" -ne 0 ]
+  run lib is_worktree_root "$BATS_TEST_TMPDIR/plain"
+  [ "$status" -ne 0 ]
+  run bash -c 'cd "$1" && source "$2/lib.sh" && is_worktree_root .' _ "$BATS_TEST_TMPDIR/repo" "$SCRIPTS"
+  [ "$status" -ne 0 ]
+}
+
+@test "is_marker accepts 40- and 64-hex object ids only" {
+  lib is_marker "$(printf 'a%.0s' {1..40})"
+  lib is_marker "$(printf '0%.0s' {1..64})"
+  for bad in '' "$(printf 'a%.0s' {1..39})" "$(printf 'a%.0s' {1..41})" "$(printf 'A%.0s' {1..40})" \
+    "$(printf 'a%.0s' {1..40}); rm -rf /" "$(printf 'g%.0s' {1..40})"; do
+    run lib is_marker "$bad"
+    [ "$status" -ne 0 ]
+  done
+}

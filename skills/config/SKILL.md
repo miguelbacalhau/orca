@@ -19,7 +19,7 @@ One stage comes with a caveat worth stating whenever it is configured:
 
 - **review** tunes whichever reviewer agent is active, and what that means depends on the reviewer. With reviewer **codex**, the review stage is a courier that drives Codex: configuring it changes the courier's cost and care, never the quality of Codex's review. With reviewer **claude**, the review stage IS the reviewer (`orca:review-claude`, default opus/high): configuring it changes actual review quality.
 
-The workflow's internal helper agents — the shell relay, reconciliation, escalation — are not configurable: their cost/judgment profile is part of the loop's design, not a per-repo preference.
+The workflow's internal helper agents — reconciliation, escalation — are not configurable: their cost/judgment profile is part of the loop's design, not a per-repo preference.
 
 ## Step 1: Read the current state
 

@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-// Tests the relay codec block (base64 + UTF-8 + frame decoder) that the
-// verb-calling workflow script carries as a literal copy. The sandboxed
-// scripts cannot be imported (top-level workflow calls), so the block is
-// extracted by its `relay codec` markers and evaluated standalone — CI
-// runs node anyway (the envelope binds user machines, not runners).
+// Tests the verb codec block (base64 + UTF-8 + frame decoder) that the
+// work loop carries: it decodes orca's verb-hook answers (b64: + base64 of
+// UTF-8 JSON) and the frames inside them, and encodes the notes verb's
+// payload. The sandboxed scripts cannot be imported (top-level workflow
+// calls), so the block is extracted by its `verb codec` markers and
+// evaluated standalone — CI runs node anyway (the envelope binds user
+// machines, not runners).
 //
 //   node .github/scripts/frame-decoder-test.js scripts/work-loop.workflow.js [...]
 'use strict'
@@ -27,13 +29,12 @@ const assertThrows = (fn, what) => {
 }
 
 const KEYS = ['rc', 'action', 'hash', 'message.b64']
-const wrap = (s, w) => s.replace(new RegExp(`(.{${w}})`, 'g'), '$1\n')
 
 for (const file of files) {
   const src = fs.readFileSync(file, 'utf8')
-  const m = src.match(/\/\/ -+ relay codec[^\n]*\n([\s\S]*?)\/\/ -+ end relay codec/)
+  const m = src.match(/\/\/ -+ verb codec[^\n]*\n([\s\S]*?)\/\/ -+ end verb codec/)
   if (!m) {
-    console.error(`FAIL ${file}: no relay codec block found between the markers`)
+    console.error(`FAIL ${file}: no verb codec block found between the markers`)
     failures++
     continue
   }
@@ -52,7 +53,7 @@ for (const file of files) {
 
   const msg = 'fix: handle "quotes" and — dashes\n\nwith a body café'
   const frame = (b64) =>
-    `relay preamble to ignore\n@@ORCA@@\nrc=0\naction=accepted\nhash=${'a'.repeat(40)}\nmessage.b64=${b64}\n@@ORCA_END@@\ntrailing noise`
+    `pass-through line before the frame\n@@ORCA@@\nrc=0\naction=accepted\nhash=${'a'.repeat(40)}\nmessage.b64=${b64}\n@@ORCA_END@@\n`
 
   check(`${file}: an unwrapped frame decodes`, () => {
     const out = decodeFrame(frame(b64encode(msg)), KEYS)
@@ -62,18 +63,23 @@ for (const file of files) {
     assert(out.message === msg, `message = ${JSON.stringify(out.message)}`)
   })
 
-  check(`${file}: a relay-wrapped .b64 value rejoins via the continuation rule`, () => {
-    // Wrapped lines can end in '=' padding and must still read as
-    // continuations, never as key lines.
-    const out = decodeFrame(frame(wrap(b64encode(msg), 20)), KEYS)
-    assert(out.message === msg, `message = ${JSON.stringify(out.message)}`)
+  check(`${file}: a hook answer decodes — base64 of UTF-8 JSON carrying a frame`, () => {
+    const stdout = frame(b64encode(msg))
+    const answer = Buffer.from(JSON.stringify({ v: 1, rc: 0, stdout, stderr: '' }), 'utf8').toString('base64')
+    const a = JSON.parse(b64decode(answer))
+    assert(a.stdout === stdout, 'stdout did not survive the round trip')
+    assert(decodeFrame(a.stdout, KEYS).message === msg, 'frame inside the answer did not decode')
   })
 
   check(`${file}: garbage frames are loud decode failures`, () => {
     assertThrows(() => decodeFrame('no markers at all', KEYS), 'missing markers')
     assertThrows(() => decodeFrame('@@ORCA@@\nrc=0', KEYS), 'missing end marker')
-    assertThrows(() => decodeFrame('@@ORCA@@\nstray continuation\nrc=0\n@@ORCA_END@@', KEYS),
-      'continuation before any key')
+    assertThrows(() => decodeFrame('@@ORCA@@\nstray line\nrc=0\n@@ORCA_END@@', KEYS),
+      'a line opening no key')
+    assertThrows(() => decodeFrame('@@ORCA@@\nrc=0\nsurprise=1\n@@ORCA_END@@', KEYS),
+      'an undeclared key')
+    assertThrows(() => decodeFrame(frame(b64encode(msg).replace(/(.{20})/, '$1\n')), KEYS),
+      'a wrapped .b64 value (no continuation rule)')
     assertThrows(() => decodeFrame(frame('@@not-base64@@'), KEYS), 'b64 garbage')
   })
 }

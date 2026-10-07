@@ -6,7 +6,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { classifyLabel, derive, headerRule, layoutRows, parseJournal, parseTaskNotifications, specState } from '../hooks/derive'
+import { classifyLabel, derive as deriveAt, headerRule, layoutRows, parseJournal, parseTaskNotifications, specState } from '../hooks/derive'
 import type { JournalRead, RunFiles } from '../hooks/derive'
 import type { OrcaBand, OrcaItem, OrcaRun } from '../types'
 
@@ -27,14 +27,16 @@ const ITEMS: OrcaItem[] = [
 function run(over: Partial<OrcaRun> = {}): OrcaRun {
   return {
     kind: 'build', runDir: RUN_DIR, slug: 'staged-typecheck-overlay', runId: 'wf_1', taskId: 'task1',
-    journal: JOURNAL, since: 1000, items: ITEMS, amendPath: null, specEnded: false, idlePrompts: 0,
+    journal: JOURNAL, since: 1000, items: ITEMS, amendPath: null, reviewer: null, specEnded: false, idlePrompts: 0,
     ...over,
   }
 }
 
 function files(over: Partial<RunFiles> = {}): RunFiles {
-  return { runDirExists: true, spec: null, reviews: [], plans: [], merged: null, reportMtimeMs: null, ...over }
+  return { runDirExists: true, spec: null, reviews: [], plans: [], merged: null, reportMtimeMs: null, agents: [], ...over }
 }
+
+const derive = (r: OrcaRun, f: RunFiles, j: JournalRead, now = 1000) => deriveAt(r, f, j, now)
 
 // A journal the way the workflow writes one: started, then result (or not yet).
 function journal(...rows: (readonly [type: 'started' | 'result' | 'failed', key: string, labelOrResult?: unknown])[]): string {
@@ -53,11 +55,12 @@ function rowsOf(r: ReturnType<typeof derive>) {
 // ---------- derivation ----------
 
 describe('spec phase', () => {
-  const spec = (over: Partial<OrcaRun> = {}) => run({ kind: 'spec', items: [], ...over })
+  const spec = (over: Partial<OrcaRun> = {}) => run({ kind: 'spec', items: [], reviewer: 'codex', ...over })
+  const MIN = 60_000
 
-  test('brief alone is drafting, a spec is in review, a review artifact is ready', () => {
+  test('brief alone is drafting, a spec is reviewing, a review artifact is ready', () => {
     expect(specState(spec(), files(), null)).toBe('drafting')
-    expect(specState(spec(), files({ spec: { mtimeMs: 1500, text: null } }), null)).toBe('in review')
+    expect(specState(spec(), files({ spec: { mtimeMs: 1500, text: null } }), null)).toBe('reviewing')
     expect(specState(spec(), files({
       spec: { mtimeMs: 1500, text: null }, reviews: [{ name: 'spec-codex.json', mtimeMs: 1600 }],
     }), null)).toBe('ready')
@@ -71,24 +74,79 @@ describe('spec phase', () => {
   test('a running spec-stage agent overrides the files', () => {
     const ready = files({ spec: { mtimeMs: 1500, text: null }, reviews: [{ name: 'spec-codex.json', mtimeMs: 1600 }] })
     expect(specState(spec(), ready, parseJournal(journal(...done('k1', 'spec'), ['started', 'k2', 'spec-review']))))
-      .toBe('in review')
-    expect(specState(spec(), ready, parseJournal(journal(['started', 'k3', 'spec-revise'])))).toBe('in review')
+      .toBe('reviewing')
+    expect(specState(spec(), ready, parseJournal(journal(['started', 'k3', 'spec-revise'])))).toBe('revising')
     expect(specState(spec(), files(), parseJournal(journal(['started', 'k1', 'spec'])))).toBe('drafting')
   })
 
   test('an amend round reads its own artifact, and a finished spec workflow is ready', () => {
     const amend = spec({ amendPath: `${RUN_DIR}/spec.amendment.md` })
     const f = files({ spec: { mtimeMs: 1500, text: null }, reviews: [{ name: 'spec-codex.json', mtimeMs: 1600 }] })
-    expect(specState(amend, f, null)).toBe('in review')
+    expect(specState(amend, f, null)).toBe('reviewing')
     f.reviews.push({ name: 'spec-amend-codex.json', mtimeMs: 1700 })
     expect(specState(amend, f, null)).toBe('ready')
     expect(specState(spec({ specEnded: true }), files(), null)).toBe('ready')
   })
 
-  test('the band is one line', () => {
-    const out = derive(spec(), files({ spec: { mtimeMs: 1500, text: null } }), { status: 'missing' })
-    expect(out).toEqual({ finished: false, band: {
-      slug: 'staged-typecheck-overlay', phase: 'spec', detail: 'in review', rows: [], source: 'files' } })
+  test('the three stages are rows, timed from the agent files', () => {
+    // agent-a-<key>.meta.json is written at the spawn, agent-a-<key>.jsonl until it returns.
+    const agents = [
+      { name: 'agent-a-s.meta.json', mtimeMs: 0 }, { name: 'agent-a-s.jsonl', mtimeMs: 4 * MIN + 30_000 },
+      { name: 'agent-a-v.meta.json', mtimeMs: 5 * MIN },
+    ]
+    const out = derive(spec(), files({ agents }),
+      ok(journal(...done('s', 'spec', 'summary'), ['started', 'v', 'spec-review'])), 7 * MIN)
+    expect(out.band).toMatchObject({ phase: 'spec', detail: 'reviewing', source: 'journal' })
+    expect(out.band?.rows.map(r => [r.id, r.title, `${r.mark} ${r.status}`])).toEqual([
+      ['spec', 'author spec.md from the brief', '✓ done · 4m'],
+      ['review', 'codex review against brief + codebase', '● reviewing · 2m'],
+      ['revise', 'fold Critical/High findings in', '○ on Critical/High only'],
+    ])
+    expect(rowsOf(derive(spec(), files(), ok(journal(['started', 's', 'spec'])), 7 * MIN)))
+      .toEqual({ spec: '● drafting', review: '○ queued', revise: '○ on Critical/High only' })
+    const amend = derive(spec({ amendPath: `${RUN_DIR}/spec.amendment.md`, reviewer: null }), files(), ok(journal()))
+    expect(amend.band?.rows.map(r => r.title)).toEqual(
+      ['author the amendment', 'independent review against brief + codebase', 'fold Critical/High findings in'])
+  })
+
+  test('what the review found decides the revise row', () => {
+    const at = (...rows: Parameters<typeof journal>) => rowsOf(derive(spec(), files(), ok(journal(...done('s', 'spec'), ...rows))))
+    expect(at(...done('v', 'spec-review', { written: true, total: 0, criticalHigh: 0, reason: '' })))
+      .toMatchObject({ review: '✓ no findings', revise: '– not needed' })
+    expect(at(...done('v', 'spec-review', { written: true, total: 3, criticalHigh: 0, reason: '' })))
+      .toMatchObject({ review: '✓ 3 findings, 0 Critical/High', revise: '– not needed' })
+    const found = done('v', 'spec-review', JSON.stringify({ written: true, total: 1, criticalHigh: 1, reason: '' }))
+    expect(at(...found)).toMatchObject({ review: '✓ 1 finding, 1 Critical/High', revise: '● starting' })
+    expect(at(...found, ['started', 'r', 'spec-revise'])).toMatchObject({ revise: '● revising' })
+    expect(at(...found, ...done('r', 'spec-revise', 'revised summary'))).toMatchObject({ revise: '✓ revised' })
+    expect(at(...found, ['started', 'r', 'spec-revise'], ['failed', 'r']))
+      .toMatchObject({ revise: '✕ died: the findings stand' })
+  })
+
+  test('a failed review attempt retries, and a failed retry fails open', () => {
+    const at = (...rows: Parameters<typeof journal>) => rowsOf(derive(spec(), files(), ok(journal(...done('s', 'spec'), ...rows))))
+    const first = done('v', 'spec-review', { written: false, total: 0, criticalHigh: 0, reason: 'codex timed out' })
+    expect(at(...first)).toMatchObject({ review: '● retrying', revise: '○ on Critical/High only' })
+    expect(at(...first, ['started', 'v2', 'spec-review~retry'])).toMatchObject({ review: '● reviewing (retry)' })
+    expect(at(...first, ...done('v2', 'spec-review~retry', { written: true, total: 1, criticalHigh: 2, reason: '' })))
+      .toEqual({ spec: '✓ done', review: '✕ failed open: impossible count (2 Critical/High of 1)', revise: '– skipped' })
+    expect(at(...first, ['started', 'v2', 'spec-review~retry'], ['failed', 'v2']))
+      .toMatchObject({ review: '✕ failed open: review agent was skipped or died' })
+  })
+
+  test('a spec agent that died skips the rest', () => {
+    expect(rowsOf(derive(spec(), files(), ok(journal(['started', 's', 'spec'], ['result', 's', null])))))
+      .toEqual({ spec: '✕ died', review: '– skipped', revise: '– skipped' })
+  })
+
+  test('without a journal the rows come from the files', () => {
+    const at = (f: RunFiles, over: Partial<OrcaRun> = {}) => derive(spec(over), f, { status: 'missing' })
+    expect(rowsOf(at(files()))).toEqual({ spec: '● drafting', review: '○ queued', revise: '○ on Critical/High only' })
+    const written = files({ spec: { mtimeMs: 1500, text: null } })
+    expect(at(written).band).toMatchObject({ detail: 'reviewing', source: 'files' })
+    expect(rowsOf(at(written))).toEqual({ spec: '✓ done', review: '● reviewing', revise: '○ on Critical/High only' })
+    written.reviews.push({ name: 'spec-codex.json', mtimeMs: 1600 })
+    expect(rowsOf(at(written))).toEqual({ spec: '✓ done', review: '✓ done', revise: '◌ unknown' })
   })
 })
 
@@ -322,6 +380,11 @@ describe('the band in a session', () => {
       expect(await ui.find({ type: 'Text', text: '✓ done' })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: '● implement' })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: '◌ waiting on W2' })).toBeDefined()
+      // A blank row between the transcript and the rule.
+      const [band, rule] = await ui.findAll({ type: 'Box' })
+      expect(band?.props.marginTop).toBe(1)
+      // And one between the rule and the rows.
+      expect(rule?.props.marginBottom).toBe(1)
       await ui.unmount()
     }
 
@@ -361,7 +424,7 @@ describe('the band in a session', () => {
     expect(await ui.find({ type: 'Text', text: 'engine band' })).toBeDefined()
   })
 
-  test('a spec launch shows one line, stays through the checkpoint, and leaves when abandoned', async ($, on) => {
+  test('a spec launch shows its stages, stays through the checkpoint, and leaves when abandoned', async ($, on) => {
     const clock = mock.clock(on, { now: 10_000 })
     const disk = new Map<string, Node>([[`${RUN_DIR}/brief.md`, { text: 'brief', mtimeMs: 1 }]])
     serveFiles(on, disk)
@@ -372,26 +435,36 @@ describe('the band in a session', () => {
     const ui = await $.ui.mount({ plugin: 'orca', surface: 'terminal', ...BAND })
     expect(await ui.find({ type: 'Text', text: 'staged-typecheck-overlay' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'drafting' })).toBeDefined()
-    // The top rule alone: no item rows.
-    expect(await ui.find({ type: 'Text', text: /[✓●◌○✕]/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: '● drafting' })).toBeDefined()
 
+    // The journal and the agent files, under the workflow's transcript directory.
+    const dir = JOURNAL.replace(/\/journal\.jsonl$/, '').replace('wf_1', 'wf_s')
     disk.set(`${RUN_DIR}/spec.md`, { text: 'spec', mtimeMs: 11_000 })
+    disk.set(`${dir}/agent-a-v.meta.json`, { text: '{}', mtimeMs: 11_000 })
+    disk.set(`${dir}/journal.jsonl`, { text: journal(...done('s', 'spec'), ['started', 'v', 'spec-review']), mtimeMs: 11_000 })
     await clock.advance(1500)
     await ui.redraw()
-    expect(await ui.find({ type: 'Text', text: 'in review' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'reviewing' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '● reviewing · <1m' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /codex review against/ })).toBeDefined()
 
     disk.set(`${RUN_DIR}/reviews/spec-codex.json`, { text: '{}', mtimeMs: 11_500 })
+    disk.set(`${dir}/agent-a-v.jsonl`, { text: '{}', mtimeMs: 11_500 })
+    disk.set(`${dir}/journal.jsonl`, { text: journal(...done('s', 'spec'),
+      ...done('v', 'spec-review', { written: true, total: 2, criticalHigh: 0, reason: '' })), mtimeMs: 11_500 })
     await $.prompt.submit({ text: '<task-notification>\n<task-id>spec1</task-id>\n<status>completed</status>\n</task-notification>',
       wait: false, origin: { kind: 'task-notification' } })
     await clock.advance(1500)
     await ui.redraw()
     expect(await ui.find({ type: 'Text', text: 'ready' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '✓ 2 findings, 0 Critical/High · <1m' })).toBeDefined()
 
-    // The checkpoint: the person talks it over, then walks away.
+    // The checkpoint: the person talks it over, then walks away. The rows stay.
     await $.prompt.submit({ text: 'looks good but why W3?', wait: false, origin: { kind: 'composer' } })
     await $.prompt.submit({ text: 'hm', wait: false, origin: { kind: 'composer' } })
     await ui.redraw()
     expect(await ui.find({ type: 'Text', text: 'ready' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '– not needed' })).toBeDefined()
     await $.prompt.submit({ text: 'something else entirely', wait: false, origin: { kind: 'composer' } })
     await ui.redraw()
     expect(await ui.find({ type: 'Text', text: 'engine band' })).toBeDefined()

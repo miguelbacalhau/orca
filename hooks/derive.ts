@@ -18,6 +18,9 @@ export type RunFiles = {
   merged: string | null
   // report.md's mtime, null when absent.
   reportMtimeMs: number | null
+  // The workflow's transcript directory (the journal's own), by name: a spec
+  // launch times its stages from the agent files there.
+  agents: { name: string; mtimeMs: number }[]
 }
 
 export type JournalRead =
@@ -30,6 +33,7 @@ export type Derived = { finished: boolean; band: OrcaBand | null }
 export type JournalStage = {
   seq: number
   label: string
+  agentId: string
   running: boolean
   failed: boolean
   result: unknown
@@ -54,6 +58,7 @@ export function parseJournal(text: string): JournalStage[] {
     if (row.type === 'started' && key !== null) {
       const stage: JournalStage = {
         seq: stages.length, label: typeof row.label === 'string' ? row.label : '',
+        agentId: typeof row.agentId === 'string' ? row.agentId : '',
         running: true, failed: false, result: undefined,
       }
       stages.push(stage)
@@ -78,7 +83,7 @@ export type LabelMeaning =
   | { kind: 'escalate'; ids: string[] }
   | { kind: 'salvage'; id: string }
   | { kind: 'integration'; stage: string }
-  | { kind: 'spec'; state: 'drafting' | 'in review' }
+  | { kind: 'spec'; state: 'drafting' | 'reviewing' | 'revising' }
   | { kind: 'wrap-up' }
   | null
 
@@ -86,7 +91,8 @@ export function classifyLabel(label: string): LabelMeaning {
   // Retries keep their stage: review:W1#0~retry.
   const bare = label.replace(/~retry$/, '')
   if (bare === 'spec') return { kind: 'spec', state: 'drafting' }
-  if (bare === 'spec-review' || bare === 'spec-revise') return { kind: 'spec', state: 'in review' }
+  if (bare === 'spec-review') return { kind: 'spec', state: 'reviewing' }
+  if (bare === 'spec-revise') return { kind: 'spec', state: 'revising' }
   if (bare === 'run-lease-release') return { kind: 'wrap-up' }
   if (bare === 'integration-verify') return { kind: 'integration', stage: 'verify' }
   if (bare === 'integration-review-clean') return { kind: 'integration', stage: 'review' }
@@ -135,10 +141,10 @@ export function classifyLabel(label: string): LabelMeaning {
 
 // ---------- spec phase ----------
 
-export type SpecState = 'drafting' | 'in review' | 'ready'
+export type SpecState = 'drafting' | 'reviewing' | 'revising' | 'ready'
 
 // Files decide by default: no fresh spec is drafting, a fresh spec with no
-// fresh review artifact is in review, both is ready (which covers the
+// fresh review artifact is reviewing, both is ready (which covers the
 // checkpoint wait). "Fresh" is "written since this launch": a checkpoint
 // re-spawn or an iterate amend round runs over a directory that already holds
 // a spec and a review. A running spec-stage agent in the journal overrides
@@ -146,12 +152,117 @@ export type SpecState = 'drafting' | 'in review' | 'ready'
 export function specState(run: OrcaRun, files: RunFiles, stages: JournalStage[] | null): SpecState {
   if (run.specEnded) return 'ready'
   const running = (stages ?? []).filter(s => s.running).map(s => classifyLabel(s.label))
-  const live = running.filter((m): m is { kind: 'spec'; state: 'drafting' | 'in review' } => m?.kind === 'spec').pop()
+  const live = running.filter((m): m is Extract<LabelMeaning, { kind: 'spec' }> => m?.kind === 'spec').pop()
   if (live) return live.state
   if (!files.spec || files.spec.mtimeMs < run.since) return 'drafting'
   const artifact = run.amendPath ? /^spec-amend-[a-z]+\.json$/ : /^spec-[a-z]+\.json$/
   const reviewed = files.reviews.some(r => artifact.test(r.name) && r.mtimeMs >= run.since)
-  return reviewed ? 'ready' : 'in review'
+  return reviewed ? 'ready' : 'reviewing'
+}
+
+// An agent's transcript directory holds agent-<id>.meta.json, written once at
+// its spawn, and agent-<id>.jsonl, appended to until it returns: the spawn and
+// the last word. Whole minutes, so the band redraws once a minute at most.
+export function elapsed(stage: JournalStage, agents: { name: string; mtimeMs: number }[], now: number): string {
+  const meta = agents.find(a => a.name === `agent-${stage.agentId}.meta.json`)
+  const end = stage.running ? now : agents.find(a => a.name === `agent-${stage.agentId}.jsonl`)?.mtimeMs
+  if (!stage.agentId || !meta || end === undefined) return ''
+  const minutes = Math.floor(Math.max(0, end - meta.mtimeMs) / 60_000)
+  return minutes < 1 ? '<1m' : `${minutes}m`
+}
+
+// One review attempt as the spec workflow judges it: a written artifact with
+// possible counts passes; anything else is a failed attempt and its reason.
+type ReviewVerdict = { ok: true; total: number; criticalHigh: number } | { ok: false; reason: string }
+
+function reviewVerdict(stage: JournalStage): ReviewVerdict {
+  let r = stage.result
+  if (typeof r === 'string') { try { r = JSON.parse(r) } catch { r = null } }
+  if (stage.failed || !isRecord(r)) return { ok: false, reason: 'review agent was skipped or died' }
+  if (r.written !== true) return { ok: false, reason: typeof r.reason === 'string' && r.reason ? r.reason : 'no artifact written' }
+  const total = typeof r.total === 'number' ? r.total : 0
+  const criticalHigh = typeof r.criticalHigh === 'number' ? r.criticalHigh : 0
+  if (criticalHigh > total) return { ok: false, reason: `impossible count (${criticalHigh} Critical/High of ${total})` }
+  return { ok: true, total, criticalHigh }
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+
+// The gate's three stages as rows, from the journal: spec.workflow.js labels
+// them spec, spec-review (spec-review~retry for its second attempt) and
+// spec-revise. A stage that returned nothing (skipped, died) is "died".
+function specRowsFromJournal(run: OrcaRun, stages: JournalStage[], agents: RunFiles['agents'], now: number): OrcaRow[] {
+  const bare = (s: JournalStage) => s.label.replace(/~retry$/, '')
+  const last = (label: string) => stages.filter(s => bare(s) === label).pop()
+  const died = (s: JournalStage) => s.failed || s.result === null || s.result === undefined
+  const time = (s: JournalStage) => { const t = elapsed(s, agents, now); return t ? ` · ${t}` : '' }
+  const [specRow, reviewRow, reviseRow] = specRowShells(run)
+
+  const spec = last('spec')
+  const specDied = spec !== undefined && !spec.running && died(spec)
+  if (!spec) specRow.set('●', 'starting', 'live')
+  else if (spec.running) specRow.set('●', `drafting${time(spec)}`, 'live')
+  else if (specDied) specRow.set('✕', 'died', 'blocked')
+  else specRow.set('✓', `done${time(spec)}`, 'done')
+
+  const review = last('spec-review')
+  const retry = review?.label.endsWith('~retry') ?? false
+  const verdict = review && !review.running ? reviewVerdict(review) : null
+  const failedOpen = verdict !== null && !verdict.ok && retry
+  if (specDied) reviewRow.set('–', 'skipped', 'cut')
+  else if (!review) reviewRow.set('○', 'queued', 'queued')
+  else if (review.running) reviewRow.set('●', `reviewing${retry ? ' (retry)' : ''}${time(review)}`, 'live')
+  else if (verdict?.ok) {
+    const found = verdict.total === 0 ? 'no findings'
+      : `${plural(verdict.total, 'finding')}, ${verdict.criticalHigh} Critical/High`
+    reviewRow.set('✓', `${found}${time(review)}`, 'done')
+  } else if (failedOpen) reviewRow.set('✕', `failed open: ${verdict?.ok === false ? verdict.reason : ''}`, 'blocked')
+  else reviewRow.set('●', 'retrying', 'live')
+
+  const revise = last('spec-revise')
+  const criticalHigh = verdict?.ok ? verdict.criticalHigh : 0
+  if (revise?.running) reviseRow.set('●', `revising${time(revise)}`, 'live')
+  else if (revise && died(revise)) reviseRow.set('✕', 'died: the findings stand', 'blocked')
+  else if (revise) reviseRow.set('✓', `revised${time(revise)}`, 'done')
+  else if (specDied || failedOpen) reviseRow.set('–', 'skipped', 'cut')
+  else if (verdict?.ok && criticalHigh === 0) reviseRow.set('–', 'not needed', 'cut')
+  else if (verdict?.ok) reviseRow.set('●', 'starting', 'live')
+  else reviseRow.set('○', 'on Critical/High only', 'queued')
+
+  return [specRow.row, reviewRow.row, reviseRow.row]
+}
+
+// Without a readable journal only the files speak: what was written, never
+// what a review found or whether a revise ran.
+function specRowsFromFiles(run: OrcaRun, state: SpecState): OrcaRow[] {
+  const [specRow, reviewRow, reviseRow] = specRowShells(run)
+  if (state === 'drafting') specRow.set('●', 'drafting', 'live')
+  else specRow.set('✓', 'done', 'done')
+  if (state === 'drafting') reviewRow.set('○', 'queued', 'queued')
+  else if (state === 'ready') reviewRow.set('✓', 'done', 'done')
+  else reviewRow.set('●', 'reviewing', 'live')
+  if (state === 'ready') reviseRow.set('◌', 'unknown', 'wait')
+  else reviseRow.set('○', 'on Critical/High only', 'queued')
+  return [specRow.row, reviewRow.row, reviseRow.row]
+}
+
+function specRowShells(run: OrcaRun) {
+  const shell = (id: string, title: string) => {
+    const row: OrcaRow = { id, title, mark: '○', status: '', tone: 'queued' }
+    return { row, set: (mark: string, status: string, tone: OrcaRow['tone']) => Object.assign(row, { mark, status, tone }) }
+  }
+  return [
+    shell('spec', run.amendPath ? 'author the amendment' : 'author spec.md from the brief'),
+    shell('review', `${run.reviewer ?? 'independent'} review against brief + codebase`),
+    shell('revise', 'fold Critical/High findings in'),
+  ] as const
+}
+
+export function deriveSpec(run: OrcaRun, files: RunFiles, journal: JournalRead, now: number): OrcaBand {
+  const stages = journal.status === 'ok' ? parseJournal(journal.text) : null
+  const state = specState(run, files, stages)
+  const rows = stages ? specRowsFromJournal(run, stages, files.agents, now) : specRowsFromFiles(run, state)
+  return { slug: run.slug, phase: 'spec', detail: state, rows, source: stages ? 'journal' : 'files' }
 }
 
 // ---------- build phase ----------
@@ -346,7 +457,7 @@ export function deriveBuild(run: OrcaRun, files: RunFiles, journal: JournalRead)
 
 // ---------- the whole band ----------
 
-export function derive(run: OrcaRun, files: RunFiles, journal: JournalRead): Derived {
+export function derive(run: OrcaRun, files: RunFiles, journal: JournalRead, now: number): Derived {
   // A run directory that went away (archived, removed) takes the band with it.
   if (!files.runDirExists) return { finished: true, band: null }
   // The feature skill writes report.md after the work loop returns: the run
@@ -354,11 +465,7 @@ export function derive(run: OrcaRun, files: RunFiles, journal: JournalRead): Der
   // iterate round relaunches over a directory whose old report was archived.
   if (run.kind === 'build' && files.reportMtimeMs !== null && files.reportMtimeMs >= run.since)
     return { finished: true, band: null }
-  if (run.kind === 'spec') {
-    const stages = journal.status === 'ok' ? parseJournal(journal.text) : null
-    return { finished: false, band: { slug: run.slug, phase: 'spec',
-      detail: specState(run, files, stages), rows: [], source: stages ? 'journal' : 'files' } }
-  }
+  if (run.kind === 'spec') return { finished: false, band: deriveSpec(run, files, journal, now) }
   return { finished: false, band: deriveBuild(run, files, journal) }
 }
 
@@ -408,7 +515,7 @@ export function headerRule(band: OrcaBand, columns: number): RulePiece[] {
     { text: band.phase, tone: 'phase' },
     { text: band.detail, tone: 'detail' },
   ]
-  if (band.source === 'files' && band.phase !== 'spec') facts.push({ text: 'no journal', tone: 'note' })
+  if (band.source === 'files') facts.push({ text: 'no journal', tone: 'note' })
   const out: RulePiece[] = [{ text: '── ', tone: 'rule' }, { text: 'orca', tone: 'name' }, { text: ' ─ ', tone: 'rule' }]
   let used = out.reduce((n, p) => n + p.text.length, 0)
   // A space and at least two rule cells close the line after the facts.

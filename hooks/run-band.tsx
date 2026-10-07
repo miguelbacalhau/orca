@@ -63,7 +63,7 @@ async function listNames($: EngineInterface, dir: string): Promise<{ name: strin
 }
 
 async function readRunFiles($: EngineInterface, run: OrcaRun): Promise<RunFiles> {
-  const files: RunFiles = { runDirExists: true, spec: null, reviews: [], plans: [], merged: null, reportMtimeMs: null }
+  const files: RunFiles = { runDirExists: true, spec: null, reviews: [], plans: [], merged: null, reportMtimeMs: null, agents: [] }
   let entries
   try { entries = await $.fs.list(run.runDir) } catch {
     files.runDirExists = await $.fs.exists(run.runDir).catch(() => true)
@@ -88,6 +88,7 @@ async function readRunFiles($: EngineInterface, run: OrcaRun): Promise<RunFiles>
     const merged = await readCached($, `${run.runDir}/merged.tsv`)
     files.merged = merged.status === 'ok' ? merged.text : null
   }
+  if (run.kind === 'spec' && run.journal) files.agents = await listNames($, run.journal.replace(/\/[^/]*$/, ''))
   return files
 }
 
@@ -120,7 +121,7 @@ async function tick($: EngineInterface) {
     if (!surfaces.some(s => s === 'terminal' || s === 'desktop')) return
     const files = await readRunFiles($, run)
     const journal: JournalRead = run.journal ? await readCached($, run.journal) : { status: 'missing' }
-    const out = derive(run, files, journal)
+    const out = derive(run, files, journal, await $.clock.now())
     // The run may have ended (a notification) or been replaced (a new launch)
     // while this tick read files; a stale answer must not redraw the band.
     if ((await read($, runAtom))?.runId !== run.runId) return
@@ -168,6 +169,7 @@ async function track($: EngineInterface, kind: OrcaRun['kind'], input: Record<st
     since,
     items: kind === 'build' ? itemsFromArgs(args) : [],
     amendPath: kind === 'spec' && typeof args.amendPath === 'string' ? args.amendPath : null,
+    reviewer: kind === 'spec' && typeof args.reviewer === 'string' && args.reviewer ? args.reviewer : null,
     specEnded: false,
     idlePrompts: 0,
   }
@@ -255,9 +257,11 @@ export const register: Register = on => {
     const { Box, Text } = $.ui.resolve(e)
     const columns = Math.max(24, e.props.bodyColumns || 80)
 
+    // A blank row above the rule sets the band off from the transcript's last
+    // line, and one below it sets the rule off from the rows.
     return (
-      <Box flexDirection="column">
-        <Box>
+      <Box flexDirection="column" marginTop={1}>
+        <Box marginBottom={band.rows.length ? 1 : 0}>
           {headerRule(band, columns).map(piece => (
             <Text {...RULE[piece.tone]} wrap="truncate-end">{piece.text}</Text>
           ))}

@@ -22,6 +22,8 @@ export type OrcaRun = {
   items: OrcaItem[]
   // The iterate skill's amendment file, when the spec launch passed one.
   amendPath: string | null
+  // The spec launch's reviewer (codex, claude); null for a build launch.
+  reviewer: string | null
   // The spec workflow's task notification arrived with status completed.
   specEnded: boolean
   // Prompts the person sent since the spec became ready with no launch.
@@ -37,7 +39,7 @@ export type OrcaBand = {
   slug: string
   // `spec`, `build`, `integrate` or `integrate · <stage>`, `wrapping up`.
   phase: string
-  // The spec state, or `<merged>/<total> merged`.
+  // The spec state (drafting, reviewing, revising, ready), or `<merged>/<total> merged`.
   detail: string
   rows: OrcaRow[]
   // Whether item stages came from the workflow journal or from run files alone.

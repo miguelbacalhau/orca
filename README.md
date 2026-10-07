@@ -319,7 +319,7 @@ Valid stage values — models `haiku` | `sonnet` | `opus` | `fable`, efforts `lo
 On Claude Code 2.1.287 or later, the session that launched a run shows it live in a band above the prompt:
 
 ```text
-orca · staged-typecheck-overlay · build · 3/6 merged
+── orca ─ staged-typecheck-overlay · build · 3/6 merged ────────────
   W1  Overlay view layers      ✓ done
   W2  Whiteout collector       ✓ done
   W3  CLI flag wiring          ● review r2
@@ -328,7 +328,7 @@ orca · staged-typecheck-overlay · build · 3/6 merged
   W6  Telemetry hook           ✕ blocked: <escalation reason>
 ```
 
-During the spec stage it is one line, `orca · <slug> · spec · drafting | in review | ready`. `◌ waiting on` names dependencies that have not merged yet; `✕ blocked` is the terminal escalation that waits on you, and an item behind one reads `waiting on W6 (blocked)`. `–` marks an item the escalation cut. The band follows only the run this session launched, and goes away when the work loop's task ends or `report.md` is written. A spec that finished and then sees three of your prompts without a launch is taken as abandoned.
+The header is the band's top border, a rule across the width in Claude's accent color; the phase, the statuses and their marks take theme colors (green done, blue live, red blocked, dim waiting). During the spec stage it is that one line, `── orca ─ <slug> · spec · drafting | in review | ready ──`. `◌ waiting on` names dependencies that have not merged yet; `✕ blocked` is the terminal escalation that waits on you, and an item behind one reads `waiting on W6 (blocked)`. `–` marks an item the escalation cut. The band follows only the run this session launched, and goes away when the work loop's task ends or `report.md` is written. A spec that finished and then sees three of your prompts without a launch is taken as abandoned.
 
 It is a read-only observer, shipped as a function-hooks module (`hooks/run-band.tsx`): it watches this session's own Workflow launches of `spec.workflow.js` and `work-loop.workflow.js`, then reads the run directory and the workflow's `journal.jsonl` every 1.5 s while that run is tracked. Nothing in the workflows, agents, or skills writes anything for it. Item states come from `merged.tsv`, the journal's running stages, and the escalation results recorded there (blocked, cut, dependencies added mid-run). Without a readable journal it falls back to what plans and review artifacts on disk say, marked `no journal` in the header. Where the band cannot be drawn (VS Code, `claude -p`) it does nothing; collapse it with `[-]` or ctrl+x ctrl+a. The derivation is covered by `tests/run-band.test.ts` (`claude plugin test .`).
 

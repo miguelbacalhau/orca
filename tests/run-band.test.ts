@@ -6,9 +6,9 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { classifyLabel, derive, layoutRows, parseJournal, parseTaskNotifications, specState } from '../hooks/derive'
+import { classifyLabel, derive, headerRule, layoutRows, parseJournal, parseTaskNotifications, specState } from '../hooks/derive'
 import type { JournalRead, RunFiles } from '../hooks/derive'
-import type { OrcaItem, OrcaRun } from '../types'
+import type { OrcaBand, OrcaItem, OrcaRun } from '../types'
 
 const RUN_DIR = '/repo/.orca/20261006-101500-feat-staged-typecheck-overlay'
 const JOURNAL = '/home/.claude/projects/-repo/sess/subagents/workflows/wf_1/journal.jsonl'
@@ -229,6 +229,17 @@ test('rows fit the width they are given', () => {
   expect(first?.lead.startsWith('  W1   A very')).toBe(true)
 })
 
+test('the top rule spans the width with the header set in it', () => {
+  const band: OrcaBand = { slug: 'staged-typecheck-overlay', phase: 'build', detail: '1/3 merged', rows: [], source: 'journal' }
+  const text = (columns: number, b = band) => headerRule(b, columns).map(p => p.text).join('')
+  expect(text(60)).toBe(`── orca ─ staged-typecheck-overlay · build · 1/3 merged ${'─'.repeat(4)}`)
+  for (const columns of [24, 40, 60, 120]) expect(text(columns)).toHaveLength(columns)
+  expect(text(30)).toBe('── orca ─ staged-typecheck… ──')
+  const files = text(80, { ...band, source: 'files' })
+  expect(files.includes('1/3 merged · no journal ')).toBe(true)
+  expect(headerRule(band, 80).find(p => p.tone === 'name')?.text).toBe('orca')
+})
+
 // ---------- the hooks module against the engine ----------
 
 const WORK_LOOP = '/plugins/orca/scripts/work-loop.workflow.js'
@@ -306,7 +317,8 @@ describe('the band in a session', () => {
 
     for (const surface of ['terminal', 'desktop'] as const) {
       const ui = await $.ui.mount({ plugin: 'orca', surface, ...BAND })
-      expect(await ui.find({ type: 'Text', text: 'staged-typecheck-overlay · build · 1/3 merged' })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: 'staged-typecheck-overlay' })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: '1/3 merged' })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: '✓ done' })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: '● implement' })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: '◌ waiting on W2' })).toBeDefined()
@@ -358,26 +370,28 @@ describe('the band in a session', () => {
     await $.tool.call({ tool: 'Workflow', scriptPath: SPEC, args: { runDir: RUN_DIR, prompt: 'p', reviewWorktree: '/wt', reviewer: 'codex' } })
     await clock.settle()
     const ui = await $.ui.mount({ plugin: 'orca', surface: 'terminal', ...BAND })
-    expect(await ui.find({ type: 'Text', text: 'staged-typecheck-overlay · spec · drafting' })).toBeDefined()
-    expect(await ui.findAll({ type: 'Text' })).toHaveLength(2)
+    expect(await ui.find({ type: 'Text', text: 'staged-typecheck-overlay' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'drafting' })).toBeDefined()
+    // The top rule alone: no item rows.
+    expect(await ui.find({ type: 'Text', text: /[✓●◌○✕]/ })).toBeUndefined()
 
     disk.set(`${RUN_DIR}/spec.md`, { text: 'spec', mtimeMs: 11_000 })
     await clock.advance(1500)
     await ui.redraw()
-    expect(await ui.find({ type: 'Text', text: /spec · in review/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'in review' })).toBeDefined()
 
     disk.set(`${RUN_DIR}/reviews/spec-codex.json`, { text: '{}', mtimeMs: 11_500 })
     await $.prompt.submit({ text: '<task-notification>\n<task-id>spec1</task-id>\n<status>completed</status>\n</task-notification>',
       wait: false, origin: { kind: 'task-notification' } })
     await clock.advance(1500)
     await ui.redraw()
-    expect(await ui.find({ type: 'Text', text: /spec · ready/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'ready' })).toBeDefined()
 
     // The checkpoint: the person talks it over, then walks away.
     await $.prompt.submit({ text: 'looks good but why W3?', wait: false, origin: { kind: 'composer' } })
     await $.prompt.submit({ text: 'hm', wait: false, origin: { kind: 'composer' } })
     await ui.redraw()
-    expect(await ui.find({ type: 'Text', text: /spec · ready/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'ready' })).toBeDefined()
     await $.prompt.submit({ text: 'something else entirely', wait: false, origin: { kind: 'composer' } })
     await ui.redraw()
     expect(await ui.find({ type: 'Text', text: 'engine band' })).toBeDefined()

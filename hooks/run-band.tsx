@@ -11,8 +11,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { OrcaBand, OrcaRun, OrcaTone } from '../types'
-import { derive, itemsFromArgs, layoutRows, parseTaskNotifications, projectDirName, slugOf, truncate } from './derive'
-import type { JournalRead, RunFiles } from './derive'
+import { derive, headerRule, itemsFromArgs, layoutRows, parseTaskNotifications, projectDirName, slugOf } from './derive'
+import type { JournalRead, RuleTone, RunFiles } from './derive'
 
 const runAtom = atom({ plugin: 'orca', key: 'run' } as const, null)
 const bandAtom = atom({ plugin: 'orca', key: 'band' } as const, null)
@@ -196,13 +196,26 @@ async function onPrompt($: EngineInterface, origin: string, text: string) {
   }
 }
 
-const TONE: Record<OrcaTone, { color?: string; dimColor?: boolean }> = {
+type Style = { color?: string; dimColor?: boolean; bold?: boolean }
+
+const TONE: Record<OrcaTone, Style> = {
   done: { color: 'success' },
   live: { color: 'suggestion' },
   wait: { dimColor: true },
   queued: { dimColor: true },
   blocked: { color: 'error' },
   cut: { dimColor: true },
+}
+
+// The top border: the rule and the name in Claude's accent, the facts set in it.
+const RULE: Record<RuleTone, Style> = {
+  rule: { color: 'claude', dimColor: true },
+  name: { color: 'claude', bold: true },
+  slug: { bold: true },
+  phase: { color: 'suggestion' },
+  detail: {},
+  sep: { dimColor: true },
+  note: { color: 'warning' },
 }
 
 export const register: Register = on => {
@@ -241,19 +254,19 @@ export const register: Register = on => {
     if (!band || !(await read($, runAtom))) return next(e)
     const { Box, Text } = $.ui.resolve(e)
     const columns = Math.max(24, e.props.bodyColumns || 80)
-    const facts = [band.slug, band.phase, band.detail]
-    if (band.source === 'files' && band.phase !== 'spec') facts.push('no journal')
-    const header = truncate(` · ${facts.join(' · ')}`, columns - 4)
 
     return (
       <Box flexDirection="column">
         <Box>
-          <Text bold>orca</Text>
-          <Text dimColor wrap="truncate-end">{header}</Text>
+          {headerRule(band, columns).map(piece => (
+            <Text {...RULE[piece.tone]} wrap="truncate-end">{piece.text}</Text>
+          ))}
         </Box>
         {layoutRows(band.rows, columns).map(line => (
           <Box>
-            <Text>{line.lead}</Text>
+            <Text>{'  '}</Text>
+            <Text bold>{line.id}</Text>
+            <Text>{`  ${line.title}  `}</Text>
             <Text {...TONE[line.row.tone]} wrap="truncate-end">{line.tail}</Text>
           </Box>
         ))}

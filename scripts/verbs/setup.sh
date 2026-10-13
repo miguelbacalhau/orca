@@ -17,7 +17,7 @@
 #   orca.sh setup status  [--trunk <ref>]
 #   orca.sh setup install <candidate> --sources <paths> [--verified <text>] [--trunk <ref>]
 #
-# ---- the script contract (documented for humans in the README) ----------
+# ---- the script contract (documented for humans in docs/worktrees.md) ----------
 #
 # `.orca/setup` is run as `bash .orca/setup` — never exec'd, so the exec
 # bit is irrelevant (preflight's `test -f` reasoning) — with:

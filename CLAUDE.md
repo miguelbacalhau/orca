@@ -1,6 +1,6 @@
 # orca
 
-A Claude Code plugin for autonomous multi-agent development: `/orca:feature` takes an idea to a committed integration branch. Runs happen in isolated git worktrees, every stage runs in its own subagent, and an independent reviewer (Codex by default, Claude as fallback) attacks each result before it is committed. The README is the authoritative deep description.
+A Claude Code plugin for autonomous multi-agent development: `/orca:feature` takes an idea to a committed integration branch. Runs happen in isolated git worktrees, every stage runs in its own subagent, and an independent reviewer (Codex by default, Claude as fallback) attacks each result before it is committed. The README is the entry point; `docs/` is the authoritative deep description (commands, run anatomy, worktrees, the verb hook, the CLI) — keep both current when behavior changes, and keep design rationale out of them.
 
 ## Layout
 
@@ -11,6 +11,7 @@ A Claude Code plugin for autonomous multi-agent development: `/orca:feature` tak
   - `*.workflow.js` — the Workflow-tool scripts (work loop, spec gate, research). Plain JS, no Node APIs, no TypeScript.
 - `hooks/` — one function-hooks module (`hooks.json` → `index.ts`) registering two parts: the run band (`run-band.tsx`, pure logic in `derive.ts`), drawing the session's own run above the prompt read-only over run files and the workflow journal; and the verb hook (`relay.ts`), the work loop's only way to `orca.sh`: it answers the workflow's `orca:` agent calls by running allow-listed verbs with `$.process.run`, only in bypassPermissions sessions — no fallback, so a session without it fails a run at its first verb. Its `$.state` contract is `types/index.d.ts`; tests are `tests/run-band.test.ts` and `tests/relay.test.ts` (`claude plugin test .`).
 - `tests/*.bats` — Bats suite with hermetic git fixtures (`tests/helpers.bash`). Run with `bats tests/`.
+- `docs/` — user-facing reference linked from the README; not shipped.
 - `plans/` — design docs for features of orca itself; not shipped.
 - `.claude-plugin/plugin.json` — the manifest.
 

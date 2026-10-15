@@ -1,7 +1,7 @@
 // orca spec stage — the gated workflow that spawns orca:spec, then an
 // independent adversarial review of the spec it wrote.
 //
-// The feature skill composes the complete task message (run dir, repo root,
+// The run skill composes the complete task message (run dir, repo root,
 // timestamp, brief, optional Project context line) and invokes this script
 // through the Workflow tool. Routing the spawn through a workflow instead of
 // the Agent tool is what makes spec.effort an ordinary override: the Agent
@@ -168,7 +168,7 @@ const artifact = `${runDir}/reviews/${amendPath ? `spec-amend-${reviewer}` : `sp
 // check unexamined (trusting {total: 0, criticalHigh: 2} would misgate the
 // revise round). A review that cannot complete returns written:false with
 // the last reason — the FAIL-OPEN branch, not an error: a dead reviewer
-// must never brick a feature run, and every downstream gate still stands.
+// must never brick a run, and every downstream gate still stands.
 const review = async () => {
   let lastReason
   for (let attempt = 1; attempt <= 2; attempt++) {

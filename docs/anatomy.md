@@ -1,9 +1,9 @@
 # Anatomy of a run
 
-What `/orca:feature` does between your confirmation and the report.
+What `/orca:run` does between your confirmation and the report.
 
 ```text
-/orca:feature
+/orca:run
    │
    ├─ 0. Triage                     resume an interrupted run · run a queued brief
    │                                · or interview → brief, then run now or queue

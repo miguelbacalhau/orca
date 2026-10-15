@@ -1,5 +1,5 @@
 ---
-description: Diagnose and fix what orca runs depend on, on two axes. Machine readiness — the Codex CLI (presence, version, authentication, and whether its `codex exec` interface still matches what orca drives), the `BASH_MAX_TIMEOUT_MS` settings write, stale orca status line settings cleanup (the verb is retired; leftover blocks break the status bar), the reviewer resolution (codex or claude, pinned or detected), and the optional orca.nvim / orca.vscode install checks for reviewing deliverable branches in the user's editor. Repo readiness — whether fresh worktrees are provisioned: the `.orca/setup` script that installs dependencies and builds artifacts in every run worktree, whether it is absent, current, or drifted since the repo's manifests moved, and an offered deep pass that derives one from the repo's own evidence and proves it in a throwaway worktree. Use when orca:feature's pre-flight fails a machine gate, when codex install, auth, interface, or timeout problems need walking through, when an implement agent reports an unprovisioned tree or a `Provisioning: FAILED` line, or when the user wants to check which reviewer runs will use. Not for repository layout — the bare-repo-with-worktrees conversion is orca:init's job — and not for run state, which is /orca:status's. Does not start runs. Interactive and consent-per-step: diagnosis is free, every write is confirmed first.
+description: Diagnose and fix what orca runs depend on, on two axes. Machine readiness — the Codex CLI (presence, version, authentication, and whether its `codex exec` interface still matches what orca drives), the `BASH_MAX_TIMEOUT_MS` settings write, stale orca status line settings cleanup (the verb is retired; leftover blocks break the status bar), the reviewer resolution (codex or claude, pinned or detected), and the optional orca.nvim / orca.vscode install checks for reviewing deliverable branches in the user's editor. Repo readiness — whether fresh worktrees are provisioned: the `.orca/setup` script that installs dependencies and builds artifacts in every run worktree, whether it is absent, current, or drifted since the repo's manifests moved, and an offered deep pass that derives one from the repo's own evidence and proves it in a throwaway worktree. Use when orca:run's pre-flight fails a machine gate, when codex install, auth, interface, or timeout problems need walking through, when an implement agent reports an unprovisioned tree or a `Provisioning: FAILED` line, or when the user wants to check which reviewer runs will use. Not for repository layout — the bare-repo-with-worktrees conversion is orca:init's job — and not for run state, which is /orca:status's. Does not start runs. Interactive and consent-per-step: diagnosis is free, every write is confirmed first.
 args: <optional focus, e.g. "codex" or "timeout">
 user-invocable: true
 disable-model-invocation: true
@@ -15,7 +15,7 @@ The temperament is like init's: interactive, diagnosis free, consent before ever
 
 ## Step 1: Diagnose
 
-**Inside a git repository**, run orca:feature's pre-flight from the project root — read-only, and its output is the work list:
+**Inside a git repository**, run orca:run's pre-flight from the project root — read-only, and its output is the work list:
 
 ```bash
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh preflight
@@ -139,7 +139,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh review probe vscode
 
 ## Step 6: Verify
 
-Re-run the pre-flight (inside a repository) or the direct codex probes (machine-only) and report gate by gate, plus `orca.sh setup status` when Step 4 ran — a fresh `current <fingerprint>` is that step's deliverable. Name what remains on the user rather than glossing it: a `codex login` not yet done, a session restart pending before the settings env loads, a rank-7 question still unanswered. Close by pointing at the workflow the machine is now ready for: `/orca:feature` to capture a feature's intent and run it — or `/orca:init` first if the layout gate is the one still failing.
+Re-run the pre-flight (inside a repository) or the direct codex probes (machine-only) and report gate by gate, plus `orca.sh setup status` when Step 4 ran — a fresh `current <fingerprint>` is that step's deliverable. Name what remains on the user rather than glossing it: a `codex login` not yet done, a session restart pending before the settings env loads, a rank-7 question still unanswered. Close by pointing at the workflow the machine is now ready for: `/orca:run` to capture a feature's intent and run it — or `/orca:init` first if the layout gate is the one still failing.
 
 ## Guidelines
 

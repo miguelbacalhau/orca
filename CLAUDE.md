@@ -1,10 +1,10 @@
 # orca
 
-A Claude Code plugin for autonomous multi-agent development: `/orca:feature` takes an idea to a committed integration branch. Runs happen in isolated git worktrees, every stage runs in its own subagent, and an independent reviewer (Codex by default, Claude as fallback) attacks each result before it is committed. The README is the entry point; `docs/` is the authoritative deep description (commands, run anatomy, worktrees, the verb hook, the CLI) — keep both current when behavior changes, and keep design rationale out of them.
+A Claude Code plugin for autonomous multi-agent development: `/orca:run` takes an idea to a committed integration branch. Runs happen in isolated git worktrees, every stage runs in its own subagent, and an independent reviewer (Codex by default, Claude as fallback) attacks each result before it is committed. The README is the entry point; `docs/` is the authoritative deep description (commands, run anatomy, worktrees, the verb hook, the CLI) — keep both current when behavior changes, and keep design rationale out of them.
 
 ## Layout
 
-- `skills/<name>/SKILL.md` — the eleven user-facing skills (`feature`, `review`, `iterate`, …). Interview instructions live beside them (`skills/feature/interview.md`).
+- `skills/<name>/SKILL.md` — the eleven user-facing skills (`run`, `review`, `iterate`, …). Interview instructions live beside them (`skills/run/interview.md`).
 - `agents/<stage>.md` — the fifteen stage agents, loaded as `orca:<stage>`.
 - `scripts/` — the deterministic core:
   - `orca.sh` + `lib.sh` + `verbs/*.sh` — the orca CLI: one case-statement dispatcher, a shared lib, one sourced file per verb. Every shell operation the plugin performs goes through this.

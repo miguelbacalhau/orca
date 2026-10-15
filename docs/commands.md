@@ -2,7 +2,7 @@
 
 Every user-facing skill in detail. The [README](../README.md#commands) has the one-paragraph versions.
 
-- [`/orca:feature`](#orcafeature-idea)
+- [`/orca:run`](#orcafeature-idea)
 - [`/orca:review`](#orcareview-branch)
 - [`/orca:pr`](#orcapr-run)
 - [`/orca:retry`](#orcaretry-run)
@@ -14,7 +14,7 @@ Every user-facing skill in detail. The [README](../README.md#commands) has the o
 - [`/orca:doctor`](#orcadoctor)
 - [`/orca:config`](#orcaconfig-assignments--reset)
 
-## `/orca:feature <idea>`
+## `/orca:run <idea>`
 
 A dispatcher over `.orca/` state. Triage offers the first match, never forcing it:
 
@@ -67,7 +67,7 @@ Comments left from vscode, a print-only session, or a dead session are picked up
 
 Publishes a **delivered-but-unlanded run** (newest by default, or the one the argument names) as a GitHub pull request via `gh`. Every fact in the PR body comes from the run's `report.md`; for a branch no run produced, use plain `gh pr create`.
 
-Guards: the report must say `**Deliverable state:** verified` and `## Blocked` must be `None`. Anything else is refused with a pointer to `/orca:feature`'s resume or `/orca:retry`.
+Guards: the report must say `**Deliverable state:** verified` and `## Blocked` must be `None`. Anything else is refused with a pointer to `/orca:run`'s resume or `/orca:retry`.
 
 - **New PRs are always drafts.** Mark it ready on GitHub after your own pass. Refreshing an existing PR never changes its draft status.
 - **Body shape:** the repo's `pull_request_template.md` if it has one; otherwise a plain-language summary of the problem and the change, **What changed**, **Testing**, and **How it works** / **Notes** only when needed — 200–350 words, grouped by outcome rather than by work item, with no orca vocabulary (item IDs, hashes, run paths, `/orca:*` pointers).
@@ -85,13 +85,13 @@ Finishes a finished run's unmet items **inside the same run** — same run direc
 3. Resolves every blocked item's recorded decision with you. This interview is required — a retry without new input would block the same way. You can also restore items the run cut autonomously, and a resolution may let a retried item amend code an earlier item already merged.
 4. Appends your resolutions to `spec.md` as binding Decisions bullets, archives the superseded plans, reviews and report in place (`plans/<ID>.round<N>.md`, `reviews/prev<N>/`, `report.round<N>.md`), and relaunches the work loop over the unmet items only. Surviving item branches (including salvaged WIP commits) are resumed, not restarted.
 
-The rewritten report keeps the whole-run picture, with a Prior rounds section. An *interrupted* run goes to `/orca:feature`'s resume; a `clean` run has nothing to retry.
+The rewritten report keeps the whole-run picture, with a Prior rounds section. An *interrupted* run goes to `/orca:run`'s resume; a `clean` run has nothing to retry.
 
 ## `/orca:followup [run]`
 
 Turns a finished run's *optional follow-ups* — deferred findings, known gaps, improvements reviews flagged without blocking — into a new brief.
 
-It audits the run with `orca:audit` (which items verifiably merged, whether the deliverable branch still exists or already landed) and names any discrepancies. You choose which follow-ups ride along; the rest stay deferred in the old report. The result is a standard brief in `.orca/feat-briefs/`, building on the integration branch or the trunk depending on whether the deliverable landed, with the prior spec's Interfaces and Decisions as binding inputs. `/orca:feature` runs it like any other brief; this skill never launches a run.
+It audits the run with `orca:audit` (which items verifiably merged, whether the deliverable branch still exists or already landed) and names any discrepancies. You choose which follow-ups ride along; the rest stay deferred in the old report. The result is a standard brief in `.orca/feat-briefs/`, building on the integration branch or the trunk depending on whether the deliverable landed, with the prior spec's Interfaces and Decisions as binding inputs. `/orca:run` runs it like any other brief; this skill never launches a run.
 
 A run with unmet items is pointed at `/orca:retry` first; a run whose follow-up brief already exists is surfaced, not duplicated.
 
@@ -104,7 +104,7 @@ New work on a delivered, **still-unlanded** `feature/<slug>` branch, of any size
 3. `orca:spec` writes an **amendment** (`spec.amendment.md`) against a worktree at the branch tip. The delivered spec's Interfaces and Decisions bind it — it may extend them, or explicitly supersede them where the change calls for it. The amendment goes through the same spec review and revise round as a fresh run.
 4. The new items are appended to `spec.md` under a dated iteration heading (continuing the W-id sequence), the old report is archived to `report.round<N>.md`, and the work loop runs over the new items on the same integration branch.
 
-Routing: unmet items → `/orca:retry`; a landed or deleted branch → `/orca:followup`; an interrupted run or iteration → `/orca:feature`'s resume; genuinely unrelated scope → `/orca:feature`.
+Routing: unmet items → `/orca:retry`; a landed or deleted branch → `/orca:followup`; an interrupted run or iteration → `/orca:run`'s resume; genuinely unrelated scope → `/orca:run`.
 
 ## `/orca:status [run]`
 

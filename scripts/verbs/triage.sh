@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 #
-# orca triage — the discovery spine of orca:feature's Step 0, orca:status's dashboard, and the home of the per-run lease.
+# orca triage — the discovery spine of orca:run's Step 0, orca:status's dashboard, and the home of the per-run lease.
 # The read-only boundary runs PER SUBCOMMAND: `discover`, `status`,
 # `snapshot`, and `archive --scan` never write anything; `claim` and
 # `release` are the lease's writer pair — the ONLY writers of
@@ -23,7 +23,7 @@
 # TAB-separated:
 #
 #   RUN:<TAB><run-dir><TAB>interrupted|unlaunched
-#       Feature runs: .orca/*/spec.md at depth 1 (feat-briefs/ has none)
+#       Runs: .orca/*/spec.md at depth 1 (feat-briefs/ has none)
 #       with no sibling report.md. interrupted -> the workflow launched; followed by:
 #         RUNID:<TAB><id|absent>         the LAST **Workflow run:** line
 #                                        (absent when its value is empty —
@@ -42,7 +42,7 @@
 #       to all discovery, feat-briefs/ no longer holding it). Not
 #       journal-resumable; the run skill decides the recovery.
 #   DONE:<TAB><run-dir><TAB>clean|leftovers|unknown
-#       Finished feature runs: depth-1 spec.md WITH a sibling report.md.
+#       Finished runs: depth-1 spec.md WITH a sibling report.md.
 #       Emitted in directory order (timestamped names -> oldest first);
 #       consumed by orca:retry's and orca:followup's run picks. The third
 #       field routes recovery: `leftovers` when report.md's "## Blocked"
@@ -121,7 +121,7 @@
 #       means a lossless prune; unmerged corroborates a kept blocked item.
 #   WORKTREE:<TAB><path><TAB><branch|detached><TAB><run-dir|orphan>
 #       orca-* worktree directories only: orca-<slug>[-W<N>] joins its
-#       feature run dir (*-feat-<slug>).
+#       run dir (*-feat-<slug>).
 #
 #   Read-only, exit 0 always — empty output (beyond TRUNK:) means git holds
 #   no orca footprint. Shares discover's typed failures, FAIL: NOT_GIT / OLD_GIT.
@@ -139,7 +139,7 @@
 #       queued → recovery → housekeeping. Slugs: resume-run, requeue-brief,
 #       run-brief, finish-unmet, review-deliverable, followup,
 #       prune-branch, prune-worktree, inspect-orphan. The owner tag is the
-#       skill that acts on the line (feature, retry, followup,
+#       skill that acts on the line (run, retry, followup,
 #       review; `-` = user housekeeping) so each caller filters its own.
 #       These are ordered CANDIDATES, not commands — the skills present,
 #       never force. A run whose lease reads live gets NO resume action:
@@ -430,7 +430,7 @@ collect_discover() {
   local orca="$repo_root/.orca"
   local runid args value
 
-  # --- feature runs: .orca/*/spec.md at depth 1, no sibling report.md ---
+  # --- runs: .orca/*/spec.md at depth 1, no sibling report.md ---
   # A sibling report.md means the run finished; DONE: lines feed
   # orca:retry's and orca:followup's run picks, in directory order
   # (timestamped names, so oldest first — the last line is the newest run),
@@ -990,7 +990,7 @@ emit_actions() { # <discover-output> <status-output>
         ;;
       BRIEF:)
         cur_kind=""
-        t2+="run-brief"$'\t'"feature"$'\t'"$f2"$'\t'"queued brief"$'\n'
+        t2+="run-brief"$'\t'"run"$'\t'"$f2"$'\t'"queued brief"$'\n'
         ;;
       LEASE:)
         case "$cur_kind" in
@@ -998,9 +998,9 @@ emit_actions() { # <discover-output> <status-output>
             if [[ "$cur_state" == interrupted ]]; then
               # live -> an open session owns the run: no resume candidate.
               [[ "$f2" != live ]] \
-                && t1+="resume-run"$'\t'"feature"$'\t'"$cur_dir"$'\t'"interrupted run; lease $f2"$'\n'
+                && t1+="resume-run"$'\t'"run"$'\t'"$cur_dir"$'\t'"interrupted run; lease $f2"$'\n'
             elif [[ -f "$cur_dir/brief.md" && ! -f "$cur_dir/spec.md" ]]; then
-              t2+="run-brief"$'\t'"feature"$'\t'"$cur_dir"$'\t'"consumed brief, never launched — rerunnable in place"$'\n'
+              t2+="run-brief"$'\t'"run"$'\t'"$cur_dir"$'\t'"consumed brief, never launched — rerunnable in place"$'\n'
             else
               t3+="requeue-brief"$'\t'"-"$'\t'"$cur_dir"$'\t'"unlaunched, not resumable — re-queue $cur_dir/brief.md"$'\n'
             fi

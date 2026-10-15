@@ -460,7 +460,7 @@ export function deriveBuild(run: OrcaRun, files: RunFiles, journal: JournalRead)
 export function derive(run: OrcaRun, files: RunFiles, journal: JournalRead, now: number): Derived {
   // A run directory that went away (archived, removed) takes the band with it.
   if (!files.runDirExists) return { finished: true, band: null }
-  // The feature skill writes report.md after the work loop returns: the run
+  // The run skill writes report.md after the work loop returns: the run
   // is over. Only a report written since this launch counts — a retry or an
   // iterate round relaunches over a directory whose old report was archived.
   if (run.kind === 'build' && files.reportMtimeMs !== null && files.reportMtimeMs >= run.since)

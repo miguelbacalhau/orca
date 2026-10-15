@@ -457,8 +457,8 @@ EOF
   has_line $'RUN:\t'"$PWD/.orca/20250101-feat-alpha"$'\tinterrupted'
   has_line $'TRUNK:\tmain'
   # ranked: interrupted -> queued -> recovery
-  has_line $'ACTION:\t1\tresume-run\tfeature\t'"$PWD/.orca/20250101-feat-alpha"$'\t'
-  has_line $'ACTION:\t2\trun-brief\tfeature\t'"$PWD/.orca/feat-briefs/idea.md"$'\t'
+  has_line $'ACTION:\t1\tresume-run\trun\t'"$PWD/.orca/20250101-feat-alpha"$'\t'
+  has_line $'ACTION:\t2\trun-brief\trun\t'"$PWD/.orca/feat-briefs/idea.md"$'\t'
   has_line $'ACTION:\t3\trequeue-brief\t-\t'"$PWD/.orca/20250102-feat-beta"$'\t'
 }
 
@@ -490,7 +490,7 @@ EOF
   echo '# brief' >.orca/20250101-feat-alpha/brief.md
   run triage snapshot
   [ "$status" -eq 0 ]
-  has_line $'ACTION:\t1\trun-brief\tfeature\t'"$PWD/.orca/20250101-feat-alpha"$'\t'
+  has_line $'ACTION:\t1\trun-brief\trun\t'"$PWD/.orca/20250101-feat-alpha"$'\t'
   refute_line $'ACTION:\t1\trequeue-brief'
 }
 

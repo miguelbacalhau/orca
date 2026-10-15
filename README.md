@@ -4,10 +4,10 @@
 
 <h1 align="center">orca</h1>
 
-A [Claude Code](https://claude.com/claude-code) plugin for autonomous, multi-agent development. Set a repository up once, then **`/orca:feature`** takes an idea to a committed feature branch: an interview captures your intent as a brief, and a deterministic workflow plans, implements, independently reviews, fixes, commits, merges, and verifies it. After the interview you are asked one question (two, if you opt into a checkpoint).
+A [Claude Code](https://claude.com/claude-code) plugin for autonomous, multi-agent development. Set a repository up once, then **`/orca:run`** takes an idea to a committed feature branch: an interview captures your intent as a brief, and a deterministic workflow plans, implements, independently reviews, fixes, commits, merges, and verifies it. After the interview you are asked one question (two, if you opt into a checkpoint).
 
 ```text
-/orca:feature <idea>     # interview → brief → spec → work loop → report
+/orca:run <idea>     # interview → brief → spec → work loop → report
 /orca:review             # review the deliverable in your editor; comments round-trip
 /orca:pr                 # publish a delivered run as a draft GitHub pull request
 /orca:retry              # finish a run's blocked items, after resolving them with you
@@ -96,7 +96,7 @@ To work on the plugin itself, load a checkout for one session with `claude --plu
 
 # 3. Switch the session to bypass permissions (Shift+Tab), then describe the feature.
 #    The interview writes a brief; after one confirmation the run is autonomous.
-/orca:feature add rate limiting to the public API
+/orca:run add rate limiting to the public API
 
 # 4. Review the result in your editor, then land it — or open a draft PR instead.
 /orca:review
@@ -113,7 +113,7 @@ If secrets or a build step are needed for tests to pass in a fresh worktree, see
 
 Full detail for each is in [docs/commands.md](docs/commands.md).
 
-**`/orca:feature <idea>`** — Resumes an interrupted run, runs a queued brief from `.orca/feat-briefs/`, or interviews a new idea. The interview researches the code the idea touches and pushes back on scope until the brief — outcome, features, non-goals, constraints, and a *doubt rule* for ambiguities — is unambiguous. You then confirm the brief once, and the run goes to a report without further questions. Anything it can't resolve becomes a `blocked` item in the report, with the options for you to choose between. You can decline the run and leave the brief queued.
+**`/orca:run <idea>`** — Resumes an interrupted run, runs a queued brief from `.orca/feat-briefs/`, or interviews a new idea. The interview researches the code the idea touches and pushes back on scope until the brief — outcome, features, non-goals, constraints, and a *doubt rule* for ambiguities — is unambiguous. You then confirm the brief once, and the run goes to a report without further questions. Anything it can't resolve becomes a `blocked` item in the report, with the options for you to choose between. You can decline the run and leave the brief queued.
 
 **`/orca:review [branch]`** — Opens the deliverable's diff in your editor: Neovim via [orca.nvim](https://github.com/miguelbacalhau/orca.nvim) in a new tmux window, or VS Code via [orca.vscode](https://github.com/miguelbacalhau/orca.vscode). Comments you leave are saved; when you close the review, orca proposes how it will handle each one (fix, answer, decline, or defer), and on your consent fixes and answers them in the integration worktree, with the resolutions showing inline next time you review.
 
@@ -121,7 +121,7 @@ Full detail for each is in [docs/commands.md](docs/commands.md).
 
 **`/orca:retry [run]`** — Finishes a run's blocked or cut items inside the same run and branch. It audits the run against git, resolves each blocked decision with you, records your answers in the spec, and relaunches the work loop over just those items.
 
-**`/orca:followup [run]`** — Lets you pick from a finished run's optional follow-ups (deferred findings, known gaps) and writes them into a new brief for `/orca:feature`.
+**`/orca:followup [run]`** — Lets you pick from a finished run's optional follow-ups (deferred findings, known gaps) and writes them into a new brief for `/orca:run`.
 
 **`/orca:iterate [instructions]`** — Adds new work to a delivered branch that hasn't landed yet, without starting a new run. The change is confirmed in a short exchange, written as a spec amendment, reviewed, and built by the same work loop.
 
@@ -185,13 +185,13 @@ A run must never hit a permission prompt: one prompt stalls it mid-run, and an a
 
 Enable it with Shift+Tab until the footer shows "bypass permissions", by launching with `claude --dangerously-skip-permissions`, or with `"permissions": { "defaultMode": "bypassPermissions" }` in `.claude/settings.local.json` (which `/orca:doctor` offers).
 
-Bypass mode applies to the **whole session**, not just the run, so a dedicated session is the clean choice. If you decline, `/orca:feature` doesn't start the run and leaves the brief queued.
+Bypass mode applies to the **whole session**, not just the run, so a dedicated session is the clean choice. If you decline, `/orca:run` doesn't start the run and leaves the brief queued.
 
 ## Recovery
 
 `/orca:status` shows where everything stands. Otherwise:
 
-- **Interrupted run** (session died, killed, restarted) — run `/orca:feature` again; it finds the run and resumes from the journal. Completed work replays instantly.
+- **Interrupted run** (session died, killed, restarted) — run `/orca:run` again; it finds the run and resumes from the journal. Completed work replays instantly.
 - **Blocked items** — kept on their branches with any work in progress saved as a `wip:` commit. `/orca:retry` resolves them with you and finishes them in the same run.
 - **Follow-ups you want** — `/orca:followup` turns them into a new brief.
 - **More changes before landing** — `/orca:iterate`.
@@ -211,7 +211,7 @@ Bypass mode applies to the **whole session**, not just the run, so a dedicated s
 | The run used the Claude reviewer unexpectedly | Codex wasn't detected. Fix it with `/orca:doctor`, or pin `reviewer=codex` so a broken Codex fails loudly. |
 | `REVIEWER: FAIL: invalid reviewer` | Fix the `reviewer` key with `/orca:config`. |
 | `PLUGIN_ROOT: FAIL: NO_PLUGIN_ROOT` | The plugin install is incomplete. Reinstall it. |
-| `/orca:feature` says there is no Workflow tool | Your Claude Code build lacks workflows; there is no fallback. |
+| `/orca:run` says there is no Workflow tool | Your Claude Code build lacks workflows; there is no fallback. |
 | Run fails at `run-lease: no answer from orca's verb hook` | orca's hooks module isn't loaded. Enable function hooks, don't use `--bare`, remove any `disableAllHooks`, then resume. See [the verb hook](docs/verb-hook.md#failures). |
 | Run fails at `run-lease: orca's verb hook refused … permission mode is …` | The session wasn't in bypass mode. Switch (Shift+Tab) and launch the run **fresh** — a resume would replay the refusal. |
 | An item blocks with `orca.sh provision` / `worktree-item` `timed out in orca's verb hook` | Worktree setup took over ten minutes. Make `.orca/setup` faster (`/orca:doctor` can re-derive it), then `/orca:retry`. |

@@ -1,12 +1,12 @@
 # Orca: feature — the interview
 
-This file is read by the orca:feature skill when its triage finds no interrupted run and no queued brief: the idea at hand has no captured intent yet, so capture it as a durable brief file. Every run starts from a brief, discovered on disk and confirmed once. The interview is where intent gets captured — unhurried, adversarial about scope, and free to span as many rounds as the idea needs. The product is a brief in exactly the shape the run's opening confirmation (Step 1 of `SKILL.md`) restates, so the run starts with a single yes.
+This file is read by the orca:run skill when its triage finds no interrupted run and no queued brief: the idea at hand has no captured intent yet, so capture it as a durable brief file. Every run starts from a brief, discovered on disk and confirmed once. The interview is where intent gets captured — unhurried, adversarial about scope, and free to span as many rounds as the idea needs. The product is a brief in exactly the shape the run's opening confirmation (Step 1 of `SKILL.md`) restates, so the run starts with a single yes.
 
 The brief is *what and why* — human intent, including the direction decisions the discussion settles. It is not *how it maps onto the codebase*: interfaces, work breakdown, and file ownership belong to the run's spec stage, which grounds them in real codebase exploration. A breakdown written here would be a guess, and a guessed decomposition is where parallel-agent runs go wrong. The interviewer, however, is not forbidden from knowing the system — the opposite: good questions come from friction between the idea and the code as it exists, so the interview researches first and asks from that picture.
 
 ## Input
 
-The user provides a rough idea, usually as the `<idea>` argument to `/orca:feature`. If no idea was provided, ask what they want to build.
+The user provides a rough idea, usually as the `<idea>` argument to `/orca:run`. If no idea was provided, ask what they want to build.
 
 ## Step 1: Research
 

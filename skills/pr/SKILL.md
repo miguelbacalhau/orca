@@ -26,7 +26,7 @@ The candidate set is exact and computed by the script, never re-derived conversa
 - **One candidate** → proceed with it.
 - **Several, no argument** → default to the newest (run-dir names are timestamped; the last `DONE:` line), name the choice, and offer the others as a picker — offer, never force.
 - **An argument** → the `MATCH:` line names the run; `MISS:` is a loud miss — list the `CANDIDATE:` lines, never guess.
-- **None** → say what was found instead, and name the skill that owns that state: the branch exists but reads `merged` (already landed — nothing to do), the run is `RUN: interrupted` (no report yet — `/orca:feature` resumes it), or nothing has been delivered at all (`/orca:feature`). A `DONE:` run whose branch is gone was landed and pruned; say that too.
+- **None** → say what was found instead, and name the skill that owns that state: the branch exists but reads `merged` (already landed — nothing to do), the run is `RUN: interrupted` (no report yet — `/orca:run` resumes it), or nothing has been delivered at all (`/orca:run`). A `DONE:` run whose branch is gone was landed and pruned; say that too.
 - **No `TRUNK:` line, or the branch reads `unknown`** → the base branch cannot be determined (detached or unset bare-repo HEAD); a PR needs a base, so say so and stop rather than guessing one.
 
 Carry forward the run directory, the head branch, and the trunk, exactly as emitted.
@@ -35,7 +35,7 @@ Carry forward the run directory, the head branch, and the trunk, exactly as emit
 
 Read the candidate's `<run-dir>/report.md`. Two gates, in order — even a draft PR asserts "the work is finished," and the report is the authority on whether that is true:
 
-- **`**Deliverable state:**` is not `verified`** → refuse in one line, quoting the report's own stated reason, and point at the owning skill: `unverified` from a died verifier or an interrupted run tail → `/orca:feature`'s resume; `unverified` from review-feedback fixes that left verification failing → `/orca:review`, whose next addressing round owns the fix; unmet or blocked work behind it → `/orca:retry`. Draft status is no fallback here — publishing as a draft is this skill's unconditional default, not an escape hatch, and it still pushes an unverified branch under a description claiming work the run never verified.
+- **`**Deliverable state:**` is not `verified`** → refuse in one line, quoting the report's own stated reason, and point at the owning skill: `unverified` from a died verifier or an interrupted run tail → `/orca:run`'s resume; `unverified` from review-feedback fixes that left verification failing → `/orca:review`, whose next addressing round owns the fix; unmet or blocked work behind it → `/orca:retry`. Draft status is no fallback here — publishing as a draft is this skill's unconditional default, not an escape hatch, and it still pushes an unverified branch under a description claiming work the run never verified.
 - **`## Blocked` is anything other than "None"** → refuse and point at `/orca:retry`. A PR for a branch the run itself records as incomplete misrepresents the deliverable.
 
 ## Step 3: Compose

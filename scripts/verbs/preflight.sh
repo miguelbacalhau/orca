@@ -26,8 +26,8 @@
 #
 # Exit 0 iff every gate passes; non-zero if any gate fails. No side effects.
 #
-# Sourced by orca.sh (orca.sh preflight); the lib is loaded but unused
-# here — this verb keeps its own internal helpers. The fail below is a
+# Sourced by orca.sh (orca.sh preflight); of the lib it uses only
+# codex_binary_check — this verb otherwise keeps its own internal helpers. The fail below is a
 # VARIABLE, distinct from lib.sh's fail() function (bash separates the
 # two namespaces).
 
@@ -100,20 +100,10 @@ fi
 # problems on a detected/pinned codex are CODEX gate failures below, never a
 # silent downgrade to claude (that would swap the reviewer out from under a
 # codex user).
-codex_min_version="0.142.5"
-
-# Binary present at >= min version? Shared by detection and the CODEX gate.
-codex_binary_ok=0
-codex_binary_reason="codex not on PATH"
-if command -v codex >/dev/null 2>&1; then
-  codex_version="$(codex --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
-  oldest="$(printf '%s\n%s\n' "$codex_min_version" "${codex_version:-0}" | sort -V | head -1)"
-  if [[ -n "$codex_version" && "$oldest" == "$codex_min_version" ]]; then
-    codex_binary_ok=1
-  else
-    codex_binary_reason="codex ${codex_version:-unknown} < required $codex_min_version"
-  fi
-fi
+#
+# Binary present at >= min version? Shared by detection and the CODEX gate
+# — and, through lib.sh, with council resolve, so both hold one minimum.
+codex_binary_check
 
 # Extraction is grep-only by design: orca:config (via lib.sh) is the sole
 # writer and only ever writes canonical one-key-per-line reviewer=<value>.

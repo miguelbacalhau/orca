@@ -21,15 +21,19 @@ teardown() {
 #   crash     — exits 3 with a message on stderr
 #   hang      — sleeps past any sane cap
 #   fixture   — copies PAYLOAD_FIXTURE verbatim
+#   claims    — writes a conforming council claims payload
+# It records the --model it was given (empty when none) and the schema
+# file's basename beside the stub, for the council cases to assert on.
 make_codex_exec_stub() { # <bindir> <behavior>
   mkdir -p "$1"
   cat >"$1/codex" <<EOF
 #!/usr/bin/env bash
 [ "\$1" = exec ] || { echo "stub: expected the exec subcommand, got \$1" >&2; exit 64; }
 shift
-out="" schema="" sandbox="" cd_to=""
+out="" schema="" sandbox="" cd_to="" model=""
 while [ \$# -gt 0 ]; do
   case "\$1" in
+    --model)               model="\$2"; shift 2 ;;
     --output-last-message) out="\$2"; shift 2 ;;
     --output-schema)       schema="\$2"; shift 2 ;;
     --sandbox)             sandbox="\$2"; shift 2 ;;
@@ -46,7 +50,9 @@ done
 [ -d "\$cd_to" ]            || { echo "stub: --cd '\$cd_to' is not a directory" >&2; exit 64; }
 [ "\$cd_to" = "\$PWD" ]     || { echo "stub: ran in \$PWD, not the --cd target \$cd_to" >&2; exit 64; }
 [ -s "\$schema" ]           || { echo "stub: --output-schema '\$schema' is not a file" >&2; exit 64; }
-grep -q '"findings"' "\$schema" || { echo "stub: schema does not describe findings" >&2; exit 64; }
+grep -qE '"(findings|claims)"' "\$schema" || { echo "stub: schema describes neither findings nor claims" >&2; exit 64; }
+printf '%s' "\$model" >"$1/seen-model"
+basename "\$schema" >"$1/seen-schema"
 case "$2" in
   ok)       printf '{"findings":[{"severity":"High","file":"a.txt","line":1,"title":"t","body":"b","fix_location":"local code"}]}' >"\$out" ;;
   empty)    : ;;
@@ -55,6 +61,7 @@ case "$2" in
   crash)    echo "codex: stream error" >&2; exit 3 ;;
   hang)     sleep 30 ;;
   fixture)  cp "\$PAYLOAD_FIXTURE" "\$out" ;;
+  claims)   printf '{"summary":"s","claims":[{"claim":"c","evidence":["a.txt:1"],"confidence":"high"}],"open_questions":[]}' >"\$out" ;;
 esac
 EOF
   chmod +x "$1/codex"
@@ -334,4 +341,65 @@ STUB
   cmp -s "$BATS_TEST_TMPDIR/prompt.md" "$BATS_TEST_TMPDIR/seen-on-stdin"
   # The payload is on disk, and an empty findings array is a clean pass.
   [ "$(cat "$BATS_TEST_TMPDIR/o.json")" = '{"findings":[]}' ]
+}
+
+# ---- the council's astra seat: --model and --schema ---------------------
+
+@test "a review passes no model and the findings schema, as before" {
+  run_codex ok
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/stub/seen-model")" = "" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/stub/seen-schema")" = codex-findings.schema.json ]
+}
+
+@test "--model reaches codex exec and --schema council selects the claims schema" {
+  run_codex claims --model gpt-6-astra --schema council
+  [ "$status" -eq 0 ]
+  has_line 'status=ok'
+  [ "$(cat "$BATS_TEST_TMPDIR/stub/seen-model")" = gpt-6-astra ]
+  [ "$(cat "$BATS_TEST_TMPDIR/stub/seen-schema")" = council-claims.schema.json ]
+  [ "$(cat "$OUT")" = '{"summary":"s","claims":[{"claim":"c","evidence":["a.txt:1"],"confidence":"high"}],"open_questions":[]}' ]
+}
+
+@test "the payload guard follows the schema: findings under council is bad_payload" {
+  run_codex ok --schema council
+  has_line 'rc=1'
+  has_line 'status=bad_payload'
+  [ ! -f "$OUT" ]
+}
+
+@test "the payload guard follows the schema: claims under review is bad_payload" {
+  run_codex claims
+  has_line 'rc=1'
+  has_line 'status=bad_payload'
+  [ ! -f "$OUT" ]
+}
+
+@test "a bad --model or --schema fails typed before codex runs" {
+  run_codex claims --model 'gpt 6; rm -rf /' --schema council
+  [ "$status" -eq 1 ]; has_line $'FAIL:\tBAD_ARGS\t--model must be a model id'
+  [ ! -f "$BATS_TEST_TMPDIR/stub/seen-model" ]
+  run_codex claims --schema verdicts
+  [ "$status" -eq 1 ]; has_line $'FAIL:\tBAD_ARGS\t--schema must be review or council'
+  run_codex claims --model
+  [ "$status" -eq 1 ]; has_line $'FAIL:\tBAD_ARGS\t--model needs a value'
+}
+
+@test "the bundled council schema matches the workflow's literal copy" {
+  command -v node >/dev/null || skip "node not available"
+  run node -e '
+    const fs = require("fs")
+    const file = JSON.parse(fs.readFileSync(process.argv[1], "utf8"))
+    const src = fs.readFileSync(process.argv[2], "utf8")
+    const m = src.match(/const CLAIMS = (\{[\s\S]*?\} \} \})\n/)
+    if (!m) { console.log("no CLAIMS literal"); process.exit(1) }
+    const lit = Function(`return (${m[1]})`)()
+    const norm = o => Array.isArray(o) ? o.map(norm)
+      : o && typeof o === "object" ? Object.keys(o).sort().reduce((a, k) => (a[k] = norm(o[k]), a), {}) : o
+    const same = JSON.stringify(norm(file)) === JSON.stringify(norm(lit))
+    console.log(same ? "SAME" : "DRIFT")
+    process.exit(same ? 0 : 1)
+  ' "$SCRIPTS/council-claims.schema.json" "$SCRIPTS/council.workflow.js"
+  [ "$status" -eq 0 ]
+  [ "$output" = SAME ]
 }

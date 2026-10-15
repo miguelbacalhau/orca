@@ -10,6 +10,7 @@ Every user-facing skill in detail. The [README](../README.md#commands) has the o
 - [`/orca:iterate`](#orcaiterate-instructions)
 - [`/orca:status`](#orcastatus-run)
 - [`/orca:archive`](#orcaarchive-run)
+- [`/orca:council`](#orcacouncil-question)
 - [`/orca:init`](#orcainit-path-or-clone-url)
 - [`/orca:doctor`](#orcadoctor)
 - [`/orca:config`](#orcaconfig-assignments--reset)
@@ -122,6 +123,20 @@ A run is archivable only when its report exists, `## Blocked` is `None`, no live
 
 Archiving re-checks the gate, removes the worktrees and then the branches (never `--force`), and writes an `archived` marker beside `report.md` recording each removal and branch tip. An archived run shows as one `ARCHIVED:` line in triage, stays addressable by fragment, and `/orca:followup` can still pick it. `--undo` removes the marker and recreates the branches at their recorded tips.
 
+## `/orca:council <question>`
+
+One read-only question, several independent answers, one merged result. Not part of a run, and never edits or saves anything.
+
+1. **Seating.** `orca.sh council resolve` reads the `council` key — absent means `opus,fable,astra` — and checks Codex. With the default roster, a Codex that is missing or below the minimum version vacates the `astra` seat and the council sits with the rest; a **pinned** `astra` with Codex missing fails `NO_CODEX`. An installed Codex that is unauthenticated or lacks the `codex exec` flags orca drives fails `CODEX_UNUSABLE` either way — fix it with `/orca:doctor`.
+2. **Deliberation.** Every seat gets the identical prompt — your question verbatim, plus the shared rules: read-only, one assertion per claim, each claim anchored to `path:line` or a command's output — in a fresh context, in parallel, blind to the others. Claude seats are `orca:council` agents on their seat's model; the `astra` seat is Codex itself, driven by the `orca:council-codex` courier through `orca.sh codex --model gpt-6-astra --schema council` with a 9-minute cap. A seat that dies or times out is reported, not fatal.
+3. **Merge.** Your session — not another agent — groups claims that say the same thing, counts each group's support (`2/3 — opus, astra`), opens the evidence on both sides of every contradiction and settles it against the code, and never drops a single-seat claim for being outvoted. The answer leads with who sat, then the direct answer, the claims, the contradictions, and the merged open questions.
+
+```bash
+/orca:config council=opus,fable,astra      # the default, pinned (astra now required)
+/orca:config council=opus,opus,opus        # three draws from one model
+/orca:config council=default               # back to the detected default
+```
+
 ## `/orca:init [path or clone URL]`
 
 One-time, consent-per-step setup of the bare-repo-with-worktrees layout:
@@ -167,5 +182,6 @@ Per-repository overrides in `.orca/config`, applied at the **next** run launch (
 - **`reviewer`** — `codex` or `claude`. Absent, each launch detects (codex on PATH at the minimum version → codex, else claude). Setting it pins the choice, so a broken codex becomes a pre-flight `FAIL` instead of a silent Claude run.
 - **Stage model/effort** — models `haiku` | `sonnet` | `opus` | `fable`, efforts `low` | `medium` | `high` | `xhigh` | `max`. The `review` key applies to whichever reviewer agent is active: with codex it only changes the courier that drives Codex, not Codex itself. `fable` is the default for `spec`, `research`, and `plan`; on a plan without fable access, pin them with `/orca:config spec.model=opus research.model=opus plan.model=opus`.
 - **`editor` / `terminal`** — for `/orca:review`.
+- **`council`** — the seats for `/orca:council`: 2 to 5 of `haiku` | `sonnet` | `opus` | `fable` | `astra`, comma-separated, repeats allowed. Absent → `opus,fable,astra` with `astra` dropped when Codex isn't installed; pinned → `astra` requires Codex.
 
 The configurable stages and their defaults are in [Stage agents](anatomy.md#stage-agents). Overrides survive plugin updates.

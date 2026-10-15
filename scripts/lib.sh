@@ -177,11 +177,14 @@ is_marker() { # <value>
 #
 #   reviewer=codex
 #   editor=nvim
+#   council=opus,fable,astra
 #   agents.plan.model=sonnet
 #   agents.review.effort=high
 #
 # Grammar: a line is blank, a # comment, or matches
-# ^[a-z][a-z.]*=[a-z]+$ — anything else is PARSE_ERROR; a key outside
+# ^[a-z][a-z.]*=[a-z]+(,[a-z]+)*$ — anything else is PARSE_ERROR (the
+# comma list exists for council alone; every other key's vocabulary is
+# single tokens, so a list there fails its value check); a key outside
 # the vocabulary is UNKNOWN_KEY; a key seen twice is DUPLICATE_KEY. The
 # grammar cannot express an invalid shape: no quoting, no escaping, no
 # type confusion, and each line validates independently.
@@ -201,6 +204,18 @@ ORCA_EFFORTS="low medium high xhigh max"
 ORCA_REVIEWERS="codex claude"
 ORCA_EDITORS="nvim vscode none"
 ORCA_TERMINALS="tmux none"
+# orca:council's seats: every Claude model, plus astra — Codex on
+# ORCA_ASTRA_MODEL. Derived from ORCA_MODELS, so the Claude half can
+# never drift from it. The council workflow validates Claude seats
+# against its own MODELS copy, which the lockstep check holds to
+# ORCA_MODELS like the others.
+ORCA_COUNCIL_MEMBERS="$ORCA_MODELS astra"
+# shellcheck disable=SC2034  # read by verbs/council.sh
+ORCA_COUNCIL_DEFAULT="opus,fable,astra"
+ORCA_COUNCIL_MIN=2
+ORCA_COUNCIL_MAX=5
+# shellcheck disable=SC2034  # read by verbs/council.sh
+ORCA_ASTRA_MODEL="gpt-6-astra"
 
 in_list() { # <value> <space-separated-list>
   case " $2 " in
@@ -221,6 +236,7 @@ config_allowed_values() {
     reviewer) printf '%s' "$ORCA_REVIEWERS" ;;
     editor)   printf '%s' "$ORCA_EDITORS" ;;
     terminal) printf '%s' "$ORCA_TERMINALS" ;;
+    council)  printf '%s' "$ORCA_COUNCIL_MEMBERS" ;;
     agents.*.model)
       stage="${1#agents.}"; stage="${stage%.model}"
       case "$stage" in *.*) return 1 ;; esac
@@ -242,9 +258,40 @@ config_fail_reason() {
     reviewer) printf 'UNKNOWN_REVIEWER' ;;
     editor)   printf 'UNKNOWN_EDITOR' ;;
     terminal) printf 'UNKNOWN_TERMINAL' ;;
+    council)  printf 'BAD_COUNCIL' ;;
     *.model)  printf 'UNKNOWN_MODEL' ;;
     *)        printf 'UNKNOWN_EFFORT' ;;
   esac
+}
+
+# config_value_ok <key> <value> — the value is legal under the (known)
+# key. Every key takes one token from its allowed list, except council:
+# a comma list of ORCA_COUNCIL_MIN..MAX members, repeats allowed.
+config_value_ok() {
+  local allowed member n=0 rest
+  allowed="$(config_allowed_values "$1")" || return 1
+  if [ "$1" != council ]; then
+    in_list "$2" "$allowed"
+    return
+  fi
+  rest="$2,"
+  while [ -n "$rest" ]; do
+    member="${rest%%,*}"
+    rest="${rest#*,}"
+    in_list "$member" "$allowed" || return 1
+    n=$((n + 1))
+  done
+  [ "$n" -ge "$ORCA_COUNCIL_MIN" ] && [ "$n" -le "$ORCA_COUNCIL_MAX" ]
+}
+
+# config_allowed_hint <key> — the "allowed values" detail for a bad value.
+config_allowed_hint() {
+  if [ "$1" = council ]; then
+    printf '%s to %s of %s, comma-separated, repeats allowed' \
+      "$ORCA_COUNCIL_MIN" "$ORCA_COUNCIL_MAX" "$(commas "$ORCA_COUNCIL_MEMBERS")"
+  else
+    commas "$(config_allowed_values "$1")"
+  fi
 }
 
 # config_parse <file> — strict parse. On success: the file's key=value
@@ -259,7 +306,7 @@ config_parse() {
     case "$line" in
       ''|'#'*) continue ;;
     esac
-    if ! [[ $line =~ ^[a-z][a-z.]*=[a-z]+$ ]]; then
+    if ! [[ $line =~ ^[a-z][a-z.]*=[a-z]+(,[a-z]+)*$ ]]; then
       errs="$errs$(printf 'FAIL:\t%s\t%s' PARSE_ERROR "invalid line in $file: \"$line\" — a line is blank, a # comment, or lowercase key=value; fix by hand or orca.sh config reset")
 "
       continue
@@ -267,7 +314,7 @@ config_parse() {
     key="${line%%=*}"
     value="${line#*=}"
     if ! allowed="$(config_allowed_values "$key")"; then
-      errs="$errs$(printf 'FAIL:\t%s\t%s' UNKNOWN_KEY "$key in $file — keys are reviewer, editor, terminal, agents.<stage>.<model|effort>; stages are $(commas "$ORCA_STAGES")")
+      errs="$errs$(printf 'FAIL:\t%s\t%s' UNKNOWN_KEY "$key in $file — keys are reviewer, editor, terminal, council, agents.<stage>.<model|effort>; stages are $(commas "$ORCA_STAGES")")
 "
       continue
     fi
@@ -277,9 +324,9 @@ config_parse() {
       continue
     fi
     seen="$seen$key "
-    if ! in_list "$value" "$allowed"; then
+    if ! config_value_ok "$key" "$value"; then
       reason="$(config_fail_reason "$key")"
-      errs="$errs$(printf 'FAIL:\t%s\t%s' "$reason" "$key=$value — allowed values: $(commas "$allowed")")
+      errs="$errs$(printf 'FAIL:\t%s\t%s' "$reason" "$key=$value — allowed values: $(config_allowed_hint "$key")")
 "
       continue
     fi
@@ -300,14 +347,14 @@ config_lookup() {
 }
 
 # config_write <file> — canonical write of the key=value lines on
-# stdin: fixed order (reviewer, editor, terminal, then stages in
+# stdin: fixed order (reviewer, editor, terminal, council, then stages in
 # vocabulary order, model before effort), atomic (temp file + rename,
 # so a concurrent grep-reader never observes a truncated file), and a
 # file that would be empty is deleted instead. Emits WROTE:/DELETED:.
 config_write() {
   local file="$1" cfg out="" k s f v dir tmp
   cfg="$(cat)"
-  for k in reviewer editor terminal; do
+  for k in reviewer editor terminal council; do
     v="$(config_lookup "$cfg" "$k")"
     [ -n "$v" ] && out="$out$k=$v
 "
@@ -336,6 +383,32 @@ config_write() {
     fail WRITE_ERROR "could not write $file"
   fi
   printf 'WROTE:\t%s\n' "$file"
+}
+
+# ---- codex binary ------------------------------------------------------
+# codex_binary_check — is the global codex on PATH at >= the minimum
+# version? Sets codex_binary_ok (1|0), codex_binary_reason (why not),
+# and codex_version. Binary-at-version is the whole of DETECTION for
+# both the reviewer (preflight) and the council (council resolve): an
+# installed codex that is unauthenticated or speaks the wrong interface
+# is a loud failure in each verb, never a silent downgrade.
+ORCA_CODEX_MIN_VERSION="0.142.5"
+codex_binary_check() {
+  local oldest
+  # shellcheck disable=SC2034  # set for the sourcing caller
+  codex_binary_ok=0
+  # shellcheck disable=SC2034  # set for the sourcing caller
+  codex_binary_reason="codex not on PATH"
+  codex_version=""
+  command -v codex >/dev/null 2>&1 || return 0
+  codex_version="$(codex --version 2>/dev/null </dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+  oldest="$(printf '%s\n%s\n' "$ORCA_CODEX_MIN_VERSION" "${codex_version:-0}" | sort -V | head -1)"
+  # shellcheck disable=SC2034  # set for the sourcing caller
+  if [[ -n "$codex_version" && "$oldest" == "$ORCA_CODEX_MIN_VERSION" ]]; then
+    codex_binary_ok=1
+  else
+    codex_binary_reason="codex ${codex_version:-unknown} < required $ORCA_CODEX_MIN_VERSION"
+  fi
 }
 
 # ---- banned-attribution check -----------------------------------------

@@ -20,7 +20,8 @@ Skills call verbs through the Bash tool; the work loop calls its subset through 
 | `decisions render` | Rebuilds `.orca/decisions.md` from trunk commit history. |
 | `init-convert check\|convert\|cleanup\|recover` | `/orca:init`'s conventional-to-bare conversion: gates, NUL-safe untracked moves, a crash journal, recovery, and the manifest-checked cleanup. |
 | `init-link check\|apply` | `/orca:init`'s root-linking of `.claude` and `CLAUDE.md`. |
-| `codex` | The Codex reviewer's transport: `codex exec` read-only over a prompt file, the findings schema enforced, the payload written straight to the artifact path, under an 18-minute process-group watchdog. A failed review writes nothing and returns a retryable status. |
+| `codex` | The Codex reviewer's transport: `codex exec` read-only over a prompt file, the findings schema enforced, the payload written straight to the artifact path, under an 18-minute process-group watchdog. A failed review writes nothing and returns a retryable status. `--schema council` swaps in the claims schema and `--model` pins a Codex model — both for `/orca:council`'s `astra` seat; reviews use neither. |
+| `council resolve` | `/orca:council`'s roster: the `council` key or the default, Codex detection (a default `astra` seat is dropped without Codex; a pinned one fails `NO_CODEX`), the checkout the seats explore, and a scratch directory for the Codex seat. |
 | `review discover\|open\|probe\|wait\|notes` | `/orca:review`'s deliverable discovery, editor/terminal resolution, probes, launch, and notes. |
 | `secrets place\|remove` | Links `.orca/secrets/` into a worktree as relative symlinks, or strips them. |
 | `setup run\|verify\|status\|install` | Sole owner of `.orca/setup`: `run` executes it (closed stdin, captured output, 9-minute process-group watchdog), `verify` proves a candidate in a throwaway worktree, `status` is the cheap drift read, `install` writes it with its fingerprint. |

@@ -1,5 +1,7 @@
-# Validate one complete JSON object with a top-level findings array.
-# Exit status only: never rewrite the payload or interpret finding counts.
+# Validate one complete JSON object with a top-level array under
+# root_key (-v root_key=…; findings when unset — the review contract,
+# claims for the council's). Exit status only: never rewrite the payload
+# or interpret entry counts.
 # POSIX awk keeps this usable on stock macOS as well as Linux.
 
 { document = document $0 "\n" }
@@ -29,7 +31,7 @@ function next_token(    rest) {
 
 # Recognize the root key even when its ASCII letters use Unicode escapes.
 # Other keys need no decoding: their contents do not affect validation.
-function is_findings(quoted,    i, c, hex, n, j, key) {
+function is_root(quoted,    i, c, hex, n, j, key) {
     for (i = 2; i < length(quoted); i++) {
         c = substr(quoted, i, 1)
         if (c == "\\") {
@@ -44,7 +46,7 @@ function is_findings(quoted,    i, c, hex, n, j, key) {
         }
         key = key c
     }
-    return key == "findings"
+    return key == root_key
 }
 
 function value(depth,    closing, object, finding) {
@@ -59,7 +61,7 @@ function value(depth,    closing, object, finding) {
             finding = 0
             if (object) {
                 if (substr(token, 1, 1) != "\"") invalid()
-                finding = depth == 0 && is_findings(token)
+                finding = depth == 0 && is_root(token)
                 next_token()
                 if (token != ":") invalid()
                 next_token()
@@ -79,6 +81,7 @@ function value(depth,    closing, object, finding) {
 }
 
 END {
+    if (root_key == "") root_key = "findings"
     position = 1
     next_token()
     if (token != "{") invalid()

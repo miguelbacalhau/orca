@@ -72,6 +72,7 @@ case "\$1" in
       echo "Usage: codex exec [OPTIONS] [PROMPT]"
     else
       echo "Usage: codex exec [OPTIONS] [PROMPT]"
+      echo "  -m, --model <MODEL>"
       echo "  -s, --sandbox <SANDBOX_MODE>"
       echo "  -C, --cd <DIR>"
       echo "      --output-schema <FILE>"

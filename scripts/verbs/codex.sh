@@ -2,10 +2,13 @@
 #
 # orca codex — the transport for the cross-model reviewer: run one
 # Codex review non-interactively and land its JSON findings on disk.
+# orca:council rides the same transport for its astra seat, with its
+# own schema and a pinned model.
 #
 # Usage:
 #   orca.sh codex <prompt-file> --cwd <dir> --out <file>
 #                 [--archive <file>] [--timeout <s>]
+#                 [--model <id>] [--schema review|council]
 #
 # Why a verb and not an MCP tool. Through orca 0.32.0 the reviewer was
 # reached over MCP, via a bundled registration that ran `codex
@@ -35,8 +38,15 @@
 # asked is the agent's judgment, what happens to the process is this
 # verb's.
 #
-# Auth, model, and reasoning effort come from the user's own codex
-# config — orca pins none of them. The binary is whatever `codex` is
+# Auth and reasoning effort come from the user's own codex config, and
+# so does the model for a review — orca pins none of them. --model
+# exists for the council alone, whose roster names a Codex model the way
+# it names Claude ones.
+#
+# --schema picks the payload contract: review (the default) is the
+# findings shape the review gates count; council is the claims shape
+# orca:council merges. Each is enforced by Codex via --output-schema and
+# re-checked here by the same awk guard, keyed on its root array. The binary is whatever `codex` is
 # first on $PATH, exactly as the MCP registration was: a shadowed or
 # tampered `codex` there runs with the review's permissions, so PATH
 # hygiene stays part of the review trust story.
@@ -82,8 +92,10 @@ codex_cwd=""
 codex_out=""
 codex_archive=""
 codex_cap="$CODEX_TIMEOUT"
+codex_model=""
+codex_kind="review"
 
-[ $# -ge 1 ] || fail BAD_ARGS "usage: orca.sh codex <prompt-file> --cwd <dir> --out <file> [--archive <file>] [--timeout <s>]"
+[ $# -ge 1 ] || fail BAD_ARGS "usage: orca.sh codex <prompt-file> --cwd <dir> --out <file> [--archive <file>] [--timeout <s>] [--model <id>] [--schema review|council]"
 codex_prompt="$1"; shift
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -91,12 +103,24 @@ while [ $# -gt 0 ]; do
     --out)     [ $# -ge 2 ] || fail BAD_ARGS "--out needs a value";     codex_out="$2";     shift 2 ;;
     --archive) [ $# -ge 2 ] || fail BAD_ARGS "--archive needs a value"; codex_archive="$2"; shift 2 ;;
     --timeout) [ $# -ge 2 ] || fail BAD_ARGS "--timeout needs a value"; codex_cap="$2";     shift 2 ;;
-    *) fail BAD_ARGS "unknown argument '$1' — usage: orca.sh codex <prompt-file> --cwd <dir> --out <file> [--archive <file>] [--timeout <s>]" ;;
+    --model)   [ $# -ge 2 ] || fail BAD_ARGS "--model needs a value";   codex_model="$2";   shift 2 ;;
+    --schema)  [ $# -ge 2 ] || fail BAD_ARGS "--schema needs a value";  codex_kind="$2";    shift 2 ;;
+    *) fail BAD_ARGS "unknown argument '$1' — usage: orca.sh codex <prompt-file> --cwd <dir> --out <file> [--archive <file>] [--timeout <s>] [--model <id>] [--schema review|council]" ;;
   esac
 done
 
 [ -n "$codex_cwd" ] || fail BAD_ARGS "--cwd is required"
 [ -n "$codex_out" ] || fail BAD_ARGS "--out is required"
+# A model id reaches codex as one argv word, never through a shell, but it
+# is still checked against the shape model ids have: the caller is an
+# agent, and a typo should fail typed here, not as an opaque exec_failed.
+[ -z "$codex_model" ] || [[ "$codex_model" =~ ^[a-z0-9][a-z0-9._-]*$ ]] \
+  || fail BAD_ARGS "--model must be a model id like gpt-6-astra: $codex_model"
+case "$codex_kind" in
+  review)  codex_schema_file="codex-findings.schema.json"; codex_root_key="findings" ;;
+  council) codex_schema_file="council-claims.schema.json"; codex_root_key="claims" ;;
+  *) fail BAD_ARGS "--schema must be review or council: $codex_kind" ;;
+esac
 
 # A newline in a path would be a second line inside the frame, which the
 # decoder reads as another key — lib.sh's framing contract says a value
@@ -123,7 +147,7 @@ codex_out="$(canonicalize "$codex_out")"
 [[ "$codex_cap" =~ ^[0-9]+$ ]] && [ "$codex_cap" -gt 0 ] || fail BAD_ARGS "--timeout must be a positive integer: $codex_cap"
 command -v codex >/dev/null 2>&1 || fail NO_CODEX "codex not on PATH — install the Codex CLI from its official non-npm distribution (orca:doctor walks this through), or pin reviewer=claude via orca:config"
 
-codex_schema="$orca_scripts_dir/codex-findings.schema.json"
+codex_schema="$orca_scripts_dir/$codex_schema_file"
 [ -f "$codex_schema" ] || fail WRITE_ERROR "missing bundled schema: $codex_schema"
 
 codex_scratch="$(mktemp -d "${TMPDIR:-/tmp}/orca-codex.XXXXXX")" \
@@ -142,6 +166,7 @@ set -m
 (
   cd "$codex_cwd" || exit 125
   exec codex exec \
+    ${codex_model:+--model "$codex_model"} \
     --sandbox read-only \
     --cd "$codex_cwd" \
     --output-schema "$codex_schema" \
@@ -181,10 +206,10 @@ fi
 
 # Validate the entire JSON document before replacing either destination.
 # An inner object's closing brace is not evidence that the document is
-# complete. Codex enforces the finding schema; this portable awk guard
-# checks JSON syntax and the top-level findings array without changing
-# bytes or counting findings (which remains the review agent's job).
-LC_ALL=C awk -f "$orca_scripts_dir/codex-payload.awk" "$codex_payload" \
+# complete. Codex enforces the schema; this portable awk guard checks
+# JSON syntax and the top-level array (findings or claims) without
+# changing bytes or counting entries (which remains the caller's job).
+LC_ALL=C awk -v root_key="$codex_root_key" -f "$orca_scripts_dir/codex-payload.awk" "$codex_payload" \
   || codex_give_up bad_payload
 
 # Publish by rename, never by writing into the destination. A cp into

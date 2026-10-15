@@ -4,11 +4,11 @@ A Claude Code plugin for autonomous multi-agent development: `/orca:run` takes a
 
 ## Layout
 
-- `skills/<name>/SKILL.md` — the eleven user-facing skills (`run`, `review`, `iterate`, …). Interview instructions live beside them (`skills/run/interview.md`).
-- `agents/<stage>.md` — the fifteen stage agents, loaded as `orca:<stage>`.
+- `skills/<name>/SKILL.md` — the twelve user-facing skills (`run`, `review`, `iterate`, `council`, …). Interview instructions live beside them (`skills/run/interview.md`).
+- `agents/<stage>.md` — the seventeen stage agents, loaded as `orca:<stage>`.
 - `scripts/` — the deterministic core:
   - `orca.sh` + `lib.sh` + `verbs/*.sh` — the orca CLI: one case-statement dispatcher, a shared lib, one sourced file per verb. Every shell operation the plugin performs goes through this.
-  - `*.workflow.js` — the Workflow-tool scripts (work loop, spec gate, research). Plain JS, no Node APIs, no TypeScript.
+  - `*.workflow.js` — the Workflow-tool scripts (work loop, spec gate, research, council). Plain JS, no Node APIs, no TypeScript.
 - `hooks/` — one function-hooks module (`hooks.json` → `index.ts`) registering two parts: the run band (`run-band.tsx`, pure logic in `derive.ts`), drawing the session's own run above the prompt read-only over run files and the workflow journal; and the verb hook (`relay.ts`), the work loop's only way to `orca.sh`: it answers the workflow's `orca:` agent calls by running allow-listed verbs with `$.process.run`, only in bypassPermissions sessions — no fallback, so a session without it fails a run at its first verb. Its `$.state` contract is `types/index.d.ts`; tests are `tests/run-band.test.ts` and `tests/relay.test.ts` (`claude plugin test .`).
 - `tests/*.bats` — Bats suite with hermetic git fixtures (`tests/helpers.bash`). Run with `bats tests/`.
 - `docs/` — user-facing reference linked from the README; not shipped.

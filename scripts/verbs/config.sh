@@ -16,7 +16,7 @@
 # Usage:
 #   orca.sh config show
 #   orca.sh config validate
-#   orca.sh config set <field>=<value> [...]     # plan.model=sonnet reviewer=claude
+#   orca.sh config set <field>=<value> [...]     # plan.model=sonnet reviewer=claude council=opus,astra
 #   orca.sh config clear <field> [...]           # plan.model reviewer
 #   orca.sh config reset [stage]
 #
@@ -26,6 +26,9 @@
 #     REVIEWER:<TAB><codex|claude><TAB>pinned      or  REVIEWER:<TAB>absent
 #     EDITOR:<TAB><nvim|vscode|none|absent>
 #     TERMINAL:<TAB><tmux|none|absent>
+#     COUNCIL:<TAB><member,member,...><TAB>pinned   or  COUNCIL:<TAB>absent
+#       (absent → orca:council seats the default roster; the council verb
+#       resolves it, this script never does)
 #     OVERRIDE:<TAB><stage><TAB><model|effort><TAB><value>    one per set field
 #     DEFAULT:<TAB><stage><TAB><model><TAB><effort>           from the plugin's
 #       agents/<stage>.md frontmatter, stages in vocabulary order. The review
@@ -37,8 +40,9 @@
 #   validate (read-only):
 #     VALID:<TAB><compact-json>    exit 0 — the canonical launch block: the
 #       pinned reviewer plus the agents overrides, exactly what the run
-#       skills hold for the Workflow args. editor/terminal are validated but
-#       excluded — they are orca:review preferences, not launch args. An
+#       skills hold for the Workflow args. editor/terminal/council are
+#       validated but excluded — they are orca:review and orca:council
+#       preferences, not launch args. An
 #       absent file is a valid state: VALID:<TAB>{}
 #       (The one place JSON survives the format migration: the launch
 #       skills pass this object straight into Workflow args, and the
@@ -63,12 +67,12 @@
 #       reasons: NOT_GIT OLD_GIT BAD_ARGS PARSE_ERROR DUPLICATE_KEY
 #                UNKNOWN_KEY UNKNOWN_STAGE UNKNOWN_MODEL UNKNOWN_EFFORT
 #                UNKNOWN_REVIEWER UNKNOWN_EDITOR UNKNOWN_TERMINAL
-#                WRITE_ERROR
+#                BAD_COUNCIL WRITE_ERROR
 #
 # Canonical write shape — the contract the grep-readers in the preflight and
 # review verbs assume (they stay grep-only BECAUSE this script is the sole
 # writer): one key=value per line, fixed order (reviewer, editor, terminal,
-# then stages in vocabulary order, model before effort), cleared keys
+# council, then stages in vocabulary order, model before effort), cleared keys
 # removed entirely (never "default"), and a file that would be empty is
 # deleted instead.
 #
@@ -143,14 +147,16 @@ load_config() {
   fi
 }
 
-# The state lines shared by show and every write: REVIEWER/EDITOR/TERMINAL
-# plus one OVERRIDE per set stage field, stages in vocabulary order.
+# The state lines shared by show and every write: REVIEWER/EDITOR/TERMINAL/
+# COUNCIL plus one OVERRIDE per set stage field, stages in vocabulary order.
 emit_state() { # <cfg-lines>
   local cfg="$1" v s f
   v="$(config_lookup "$cfg" reviewer)"
   if [ -n "$v" ]; then printf 'REVIEWER:\t%s\tpinned\n' "$v"; else printf 'REVIEWER:\tabsent\n'; fi
   printf 'EDITOR:\t%s\n' "$(config_lookup "$cfg" editor | grep . || echo absent)"
   printf 'TERMINAL:\t%s\n' "$(config_lookup "$cfg" terminal | grep . || echo absent)"
+  v="$(config_lookup "$cfg" council)"
+  if [ -n "$v" ]; then printf 'COUNCIL:\t%s\tpinned\n' "$v"; else printf 'COUNCIL:\tabsent\n'; fi
   for s in $ORCA_STAGES; do
     for f in model effort; do
       v="$(config_lookup "$cfg" "agents.$s.$f")"
@@ -180,7 +186,7 @@ launch_json() { # <cfg-lines>
 }
 
 # parse_field <token> — sets ckey to the token's canonical file key
-# (reviewer | editor | terminal | agents.<stage>.<model|effort>); on a
+# (reviewer | editor | terminal | council | agents.<stage>.<model|effort>); on a
 # bad field, records the typed error and returns 1. Sets a variable
 # rather than printing: run in a command substitution, err()'s
 # accumulation would be lost in the subshell. The CLI spelling stays
@@ -189,7 +195,7 @@ parse_field() {
   local tok="$1" stage field
   ckey=""
   case "$tok" in
-    reviewer|editor|terminal) ckey="$tok"; return 0 ;;
+    reviewer|editor|terminal|council) ckey="$tok"; return 0 ;;
     *.*)
       stage="${tok%%.*}"
       field="${tok#*.}"
@@ -202,7 +208,7 @@ parse_field() {
         *) err UNKNOWN_KEY "$tok — a stage takes model or effort"; return 1 ;;
       esac ;;
     *)
-      err UNKNOWN_KEY "$tok — settable fields are <stage>.model, <stage>.effort, reviewer, editor, terminal"
+      err UNKNOWN_KEY "$tok — settable fields are <stage>.model, <stage>.effort, reviewer, editor, terminal, council"
       return 1 ;;
   esac
 }
@@ -283,9 +289,8 @@ case "$sub" in
         add_op clear "$ckey"
         continue
       fi
-      allowed="$(config_allowed_values "$ckey")"
-      if ! in_list "$value" "$allowed"; then
-        err "$(config_fail_reason "$ckey")" "$tok — allowed values: $(commas "$allowed"), default"
+      if ! config_value_ok "$ckey" "$value"; then
+        err "$(config_fail_reason "$ckey")" "$tok — allowed values: $(config_allowed_hint "$ckey"), default"
         continue
       fi
       add_op set "$ckey" "$value"

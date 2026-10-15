@@ -15,6 +15,7 @@ A [Claude Code](https://claude.com/claude-code) plugin for autonomous, multi-age
 /orca:iterate            # more work on a delivered, unlanded branch, in the same run
 /orca:status             # read-only dashboard: what's in flight and what to do next
 /orca:archive            # retire runs whose branches have landed
+/orca:council <question> # one question to several models at once, answers merged
 /orca:init               # one-time repository layout setup
 /orca:doctor             # machine and repository readiness checks
 /orca:config             # per-repo reviewer and model/effort overrides
@@ -57,7 +58,7 @@ A run's deliverable is a `feature/<slug>` branch in its own worktree. You review
 | **Repository layout** | Bare repository with worktrees (`.bare/` plus peer worktrees). `/orca:init` sets it up, including converting an existing checkout. |
 | **Codex CLI** *(codex reviewer only)* | The global `codex` binary ≥ 0.142.5, authenticated with `codex login`. Install with `brew install codex` or the official release binaries — **never via npm**. Plus `BASH_MAX_TIMEOUT_MS=1200000` in a settings `env` block, which `/orca:doctor` writes for you. |
 
-The fifteen stage agents and the CLI ship inside the plugin; nothing else is installed per repository.
+The seventeen stage agents and the CLI ship inside the plugin; nothing else is installed per repository.
 
 ## Installation
 
@@ -129,6 +130,8 @@ Full detail for each is in [docs/commands.md](docs/commands.md).
 
 **`/orca:archive [run]`** — Retires finished runs whose branches have all merged into the trunk, removing their worktrees and branches so triage stays short. Run directories and reports are kept, and `--undo` recreates the branches.
 
+**`/orca:council <question>`** — Puts one read-only question about the repository to several independent agents on different models at once — by default Opus, Fable, and Codex on `gpt-6-astra` — then merges their answers in your session: matching claims grouped with how many models back each, contradictions settled against the code. Nothing is edited or saved. Without Codex installed, the default council sits with its two Claude seats.
+
 **`/orca:init [path or clone URL]`** — Creates, clones, or converts a repository into the bare-repo-with-worktrees layout, asking before each step. Conversion keeps untracked and ignored files (`.env`s, caches) and is reversible until the final cleanup.
 
 **`/orca:doctor`** — Checks and fixes what runs depend on: the Codex CLI (installed, authenticated, compatible), `BASH_MAX_TIMEOUT_MS`, which reviewer runs will use, the editor companions, and whether the repository has a worktree provisioning script — offering to derive and test one. Every change is confirmed first.
@@ -167,12 +170,14 @@ The full lifecycle — pre-flight gates, escalation rules, the run band, the dec
 reviewer=claude
 editor=nvim
 terminal=tmux
+council=opus,fable,astra
 agents.plan.effort=high
 agents.implement.model=opus
 ```
 
 - **`reviewer`** — `codex` or `claude`. When absent, each launch detects: codex if it's installed at the minimum version, otherwise claude. Setting it pins the choice, so a broken Codex fails the pre-flight instead of silently falling back.
 - **`editor`** (`nvim`|`vscode`|`none`) and **`terminal`** (`tmux`|`none`) — for `/orca:review`. Absent means detect; `none` prints the command to run instead.
+- **`council`** — the seats `/orca:council` convenes: 2 to 5 of `haiku`|`sonnet`|`opus`|`fable`|`astra` (Codex on `gpt-6-astra`), comma-separated, repeats allowed. Absent means `opus,fable,astra`, dropping `astra` when Codex isn't installed; a pinned `astra` with Codex missing fails instead.
 - **`agents.<stage>.model|effort`** — models `haiku`|`sonnet`|`opus`|`fable`, efforts `low` through `max`. `spec`, `research`, and `plan` default to `fable`; if your plan doesn't offer it, run `/orca:config spec.model=opus research.model=opus plan.model=opus`. Defaults are listed in [Stage agents](docs/anatomy.md#stage-agents).
 
 **`BASH_MAX_TIMEOUT_MS`** (codex reviewer only) — Codex reviews run through the Bash tool, whose default timeout is too short. `/orca:doctor` writes `{ "env": { "BASH_MAX_TIMEOUT_MS": "1200000" } }` into `.claude/settings.local.json` or `~/.claude/settings.json`; restart the session afterwards. orca itself stops a review at 18 minutes, inside that limit.
@@ -231,8 +236,8 @@ Bypass mode applies to the **whole session**, not just the run, so a dedicated s
 
 | Path | Contents |
 |---|---|
-| `skills/<name>/SKILL.md` | The eleven skills. |
-| `agents/<stage>.md` | The fifteen stage agents, loaded as `orca:<stage>`. |
+| `skills/<name>/SKILL.md` | The twelve skills. |
+| `agents/<stage>.md` | The seventeen stage agents, loaded as `orca:<stage>`. |
 | `scripts/orca.sh`, `scripts/lib.sh`, `scripts/verbs/` | The [orca CLI](docs/cli.md). |
 | `scripts/*.workflow.js` | Workflow scripts: the work loop, the spec gate, research. |
 | `hooks/` | The function-hooks module: the run band and the verb hook. `$.state` types in `types/index.d.ts`. |

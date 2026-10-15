@@ -258,3 +258,64 @@ agents.plan.model=opus' ]
   [ "$status" -eq 0 ]
   git check-ignore -q .orca/config
 }
+
+# ---- council: the one comma-list key -----------------------------------
+
+@test "council is set, shown, written after terminal, and kept out of the launch block" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  run cfg show
+  has_line $'COUNCIL:\tabsent'
+  run cfg set plan.model=sonnet council=opus,opus,astra terminal=tmux reviewer=claude
+  [ "$status" -eq 0 ]
+  has_line $'COUNCIL:\topus,opus,astra\tpinned'
+  [ "$(cat .orca/config)" = 'reviewer=claude
+terminal=tmux
+council=opus,opus,astra
+agents.plan.model=sonnet' ]
+  run cfg validate
+  has_line $'VALID:\t{"reviewer":"claude","agents":{"plan":{"model":"sonnet"}}}'
+  run cfg set council=default
+  [ "$status" -eq 0 ]
+  has_line $'COUNCIL:\tabsent'
+  run cfg clear reviewer terminal plan.model
+  [ ! -e .orca/config ]
+}
+
+@test "council takes 2 to 5 known seats, and only council takes a list" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  run cfg set council=opus
+  assert_fail_reason BAD_COUNCIL
+  [[ "$output" == *"2 to 5 of haiku, sonnet, opus, fable, astra"* ]]
+  run cfg set council=opus,fable,astra,haiku,sonnet,opus
+  assert_fail_reason BAD_COUNCIL
+  run cfg set council=opus,gemini
+  assert_fail_reason BAD_COUNCIL
+  run cfg set council=opus,,fable
+  assert_fail_reason BAD_COUNCIL
+  run cfg set reviewer=codex,claude
+  assert_fail_reason UNKNOWN_REVIEWER
+  [ ! -e .orca/config ]
+  run cfg set council=haiku,sonnet,opus,fable,astra
+  [ "$status" -eq 0 ]
+}
+
+@test "a council list in the file parses; a malformed or bad one fails typed" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  mkdir -p .orca
+  printf 'council=fable,astra\n' >.orca/config
+  run cfg show
+  [ "$status" -eq 0 ]
+  has_line $'COUNCIL:\tfable,astra\tpinned'
+  printf 'council=fable,\n' >.orca/config
+  run cfg show
+  assert_fail_reason PARSE_ERROR
+  printf 'council=fable,gpt\n' >.orca/config
+  run cfg show
+  assert_fail_reason BAD_COUNCIL
+  printf 'editor=nvim,vscode\n' >.orca/config
+  run cfg show
+  assert_fail_reason UNKNOWN_EDITOR
+}

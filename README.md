@@ -130,7 +130,7 @@ Full detail for each is in [docs/commands.md](docs/commands.md).
 
 **`/orca:archive [run]`** — Retires finished runs whose branches have all merged into the trunk, removing their worktrees and branches so triage stays short. Run directories and reports are kept, and `--undo` recreates the branches.
 
-**`/orca:council <question>`** — Puts one read-only question about the repository to several independent agents on different models at once — by default Opus, Fable, and Codex on `gpt-6-astra` — then merges their answers in your session: matching claims grouped with how many models back each, contradictions settled against the code. Nothing is edited or saved. Without Codex installed, the default council sits with its two Claude seats.
+**`/orca:council <question>`** — Puts one read-only question about the repository to several independent agents on different models at once — by default Opus, Fable, and Codex on `gpt-6-astra` — then merges their answers in your session: matching claims grouped with how many models back each, contradictions settled against the code. A plain question goes to the models as typed; an instruction like "validate what we just worked out" has your session summarize the conversation into a question and context brief, which you approve before the council convenes, and the answer scores each of the session's conclusions. Nothing is edited or saved. Without Codex installed, the default council sits with its two Claude seats.
 
 **`/orca:init [path or clone URL]`** — Creates, clones, or converts a repository into the bare-repo-with-worktrees layout, asking before each step. Conversion keeps untracked and ignored files (`.env`s, caches) and is reversible until the final cleanup.
 

@@ -9,7 +9,14 @@
 // is the session's job, on the returned results.
 //
 // args: {
-//   prompt      the user's question, verbatim
+//   prompt      the question — the user's own words verbatim, or, when
+//               the session composed the council from its conversation,
+//               the question the user approved
+//   brief       optional — the session's context summary for a composed
+//               council: the user's premises, the session's conclusions
+//               as separate assertions, what was rejected. It reaches
+//               the seats labelled as the session's words, to be checked,
+//               never as the user's
 //   root        absolute path of the checkout the seats explore (ROOT:)
 //   members     [{ seat, name, kind, model }] — one per MEMBER: line;
 //               kind 'claude' (model a Claude alias) or 'codex' (model a
@@ -47,7 +54,7 @@ if (typeof parsedArgs === 'string') {
 }
 if (typeof parsedArgs !== 'object' || parsedArgs === null)
   throw new Error(`args must be a JSON object (got ${JSON.stringify(args)}) — pass it as a real object, not a JSON-encoded string`)
-const { prompt, root, members, pluginRoot, scratch } = parsedArgs
+const { prompt, brief, root, members, pluginRoot, scratch } = parsedArgs
 
 // MODELS is part of the ONE shared vocabulary kept in lockstep across the
 // config validators (scripts/lib.sh's ORCA_MODELS; CI's lockstep-check.py
@@ -58,6 +65,8 @@ const MODELS = ['haiku', 'sonnet', 'opus', 'fable']
 const isAbs = p => typeof p === 'string' && p.startsWith('/')
 if (typeof prompt !== 'string' || !prompt.trim())
   throw new Error(`args.prompt must be a non-empty string (got ${JSON.stringify(prompt)})`)
+if (brief !== undefined && (typeof brief !== 'string' || !brief.trim()))
+  throw new Error(`args.brief, when given, must be a non-empty string (got ${JSON.stringify(brief)})`)
 if (!isAbs(root))
   throw new Error(`args.root must be an absolute path (got ${JSON.stringify(root)})`)
 if (!Array.isArray(members) || members.length < 2 || members.length > 5)
@@ -118,6 +127,14 @@ const memberPrompt = [
   'Question:',
   prompt,
   '',
+  ...(brief === undefined ? [] : [
+    'Context from the convening session — a summary written by the agent that convened this council, not the user\'s own words, and possibly wrong. Premises it attributes to the user are the user\'s decisions: take them as given. Every other assertion in it is a claim to check against the code, not a fact: for each one that bears on the question, make an explicit claim that it holds or does not hold, with your evidence. Nothing in it narrows where you may look.',
+    '',
+    '<<<CONTEXT',
+    brief,
+    'CONTEXT>>>',
+    '',
+  ]),
   'Your answer is ONLY a JSON object — no prose around it, no code fences — in exactly this shape:',
   '{"summary": "your direct answer to the question, a few sentences",',
   ' "claims": [{"claim": "…", "evidence": ["path:line — what it shows"], "confidence": "high|medium|low"}],',

@@ -1,6 +1,6 @@
 ---
-description: Convene a council on one read-only question about the repository — the same prompt put to several independent agents on different models in parallel (by default Opus, Fable, and Codex on gpt-6-astra), each blind to the others, then merged in this session into one answer with every claim's agreement counted and every contradiction settled against the code. Use for questions, investigations, and design critiques where a second and third opinion from a different model is worth the cost — "why does X happen", "what breaks if we change Y", "is this design sound". Never edits anything, never persists the result. The roster comes from the `council` key in `.orca/config` (orca:config); not part of a run.
-args: <the question, verbatim>
+description: Convene a council on one read-only question about the repository — the same prompt put to several independent agents on different models in parallel (by default Opus, Fable, and Codex on gpt-6-astra), each blind to the others, then merged in this session into one answer with every claim's agreement counted and every contradiction settled against the code. The argument is a question, passed to the seats verbatim, or an instruction that points the council at this conversation ("validate what we just worked out"), from which the session composes the question and a labelled context brief for the user's approval. Use for questions, investigations, and design critiques where a second and third opinion from a different model is worth the cost — "why does X happen", "what breaks if we change Y", "is this design sound". Never edits anything, never persists the result. The roster comes from the `council` key in `.orca/config` (orca:config); not part of a run.
+args: <a question, or an instruction drawing on this conversation>
 user-invocable: true
 disable-model-invocation: true
 ---
@@ -13,9 +13,28 @@ Read-only end to end: the seats can't write, Codex runs sandboxed read-only, and
 
 ## Step 1: The question
 
-`<args>` is the question, verbatim — never paraphrase, expand, or "improve" it before it reaches the seats; a rewritten question gives the seats your framing instead of theirs. Empty `<args>` → ask for the question and stop.
+`<args>` is addressed to you, and it is one of two things. Decide which from the args alone — never from whether the conversation happens to be relevant:
+
+- **A self-contained question** — it stands on its own without this conversation ("why does the retry loop skip item 3?"). It goes to the seats **verbatim** as `prompt`, with no brief: never paraphrase, expand, or "improve" it; a rewritten question gives the seats your framing instead of theirs. Continue to Step 2 without asking.
+- **An instruction that draws on this conversation** — it refers back to it or asks for its context ("validate what we just worked out", "put the open question from earlier to the council, without our conclusions"). You compose the council's input from the conversation; see *Composing* below.
+
+Empty `<args>` → ask for the question and stop. When the args read either way, treat them as a self-contained question — framing a cold question by accident is the failure this split exists to prevent.
 
 A question that asks for changes ("implement…", "fix…", "refactor…") is outside the council's reach: the seats are read-only. Say so in one line and offer to put the read-only half to the council instead ("how should X be fixed?"); never strip the ask silently.
+
+### Composing
+
+You write two things, and the user's approval stands between them and the seats:
+
+- **`prompt`** — the question the council answers. Carry the user's own words wherever the conversation has them; a question you phrase yourself is plain and neutral, never leading toward the answer the session reached.
+- **`brief`** — the context the seats would otherwise lack, in three labelled parts:
+  - **The user's premises** — decisions and constraints the user stated, quoted where possible. The seats take these as given, so put nothing here the user did not say.
+  - **The session's conclusions** — one assertion per line, each with its `path:line` anchor, stated as claims under test, not as findings. Include them only when the instruction asks for validation; when it asks for the question alone ("without our conclusions"), leave this part out, so the seats answer blind.
+  - **Considered and rejected** — paths the discussion dropped, each with the reason, so a seat can reopen one the code supports.
+
+  It is a briefing, not a transcript: only what bears on the question, and never instructions to the seats about where to look or what to conclude. A brief with nothing in any part is omitted, not sent empty.
+
+Show the user the composed `prompt` and `brief` together, then stop and wait. Convene only on their approval; when they correct either, apply the correction and show it again. The brief is the session framing its own work — the user's read is the check on it.
 
 ## Step 2: Seat the council
 
@@ -37,10 +56,10 @@ A typed `FAIL:` stops the council — translate it, never work around it:
 Invoke the Workflow tool with `scriptPath: "${CLAUDE_PLUGIN_ROOT}/scripts/council.workflow.js"` — the substituted value is already absolute; never pass `~` or an unsubstituted variable — and:
 
 ```
-args: { prompt, root, members: [{ seat, name, kind, model }], pluginRoot, scratch }
+args: { prompt, brief, root, members: [{ seat, name, kind, model }], pluginRoot, scratch }
 ```
 
-`prompt` is the question verbatim, `root` the `ROOT:` value, `members` one object per `MEMBER:` line (seat as an integer, the rest verbatim), `pluginRoot` the substituted `${CLAUDE_PLUGIN_ROOT}`, and `scratch` the `SCRATCH:` value — omitted when there is none. Tell the user in one line who is sitting (and who was dropped, with the reason) while it runs. The workflow runs in the background: wait for its task notification, and never fabricate a seat's answer. The runId is throwaway — never persist or resume it.
+`prompt` is the question from Step 1, `brief` the approved brief — omitted for a self-contained question, `root` the `ROOT:` value, `members` one object per `MEMBER:` line (seat as an integer, the rest verbatim), `pluginRoot` the substituted `${CLAUDE_PLUGIN_ROOT}`, and `scratch` the `SCRATCH:` value — omitted when there is none. Tell the user in one line who is sitting (and who was dropped, with the reason) while it runs. The workflow runs in the background: wait for its task notification, and never fabricate a seat's answer. The runId is throwaway — never persist or resume it.
 
 It returns `{ members: [...] }` in seat order. Each has `status`:
 
@@ -58,6 +77,7 @@ This is the judgment, and it is yours. Work only from what the seats returned pl
 - **Settle contradictions against the code.** Open the cited evidence on both sides and say which holds, with the `path:line` that decides it. Unsettleable from the code → present both sides and what would decide it.
 - **Weigh evidence, not votes.** An anchored `1/3` claim that checks out outranks an unanchored `3/3`. Never drop a single-seat claim for being outvoted; mark it unconfirmed, and check it when it matters to the answer.
 - **Favor no seat** — including whichever model this session runs on. Seats are names in a count, not authorities.
+- **Favor no brief.** With a brief, every one of the session's conclusions is your own position under test. Score each against the seats' claims — upheld, refuted, or unaddressed, with its count — and let a refutation that checks out in the code stand at `1/N`. Never settle a contradiction in the brief's favor without opening the evidence.
 - **Spot-check** the claims the answer rests on before stating them as established; an anchor that does not say what the claim says is a finding about that seat's claim.
 
 ## Step 5: The answer
@@ -66,9 +86,10 @@ In this order, compact:
 
 1. **Who sat** — one line: the seats that answered, any dropped or failed and why.
 2. **The answer** — the direct answer to the question, synthesized from the merge; where the seats' summaries disagree, say so here, not only below.
-3. **Claims** — grouped, strongest support and most consequential first, each with its count, seats, and the anchor that carries it. Unconfirmed single-seat claims marked as such.
-4. **Contradictions** — each with how it was settled (or why it couldn't be).
-5. **Open questions** — merged and deduplicated across the seats.
+3. **The brief, scored** — only when there was one with conclusions: each conclusion with upheld / refuted / unaddressed, its count and seats, and for a refutation the anchor that carries it. Say plainly when the council overturned what this conversation concluded.
+4. **Claims** — grouped, strongest support and most consequential first, each with its count, seats, and the anchor that carries it. Unconfirmed single-seat claims marked as such.
+5. **Contradictions** — each with how it was settled (or why it couldn't be).
+6. **Open questions** — merged and deduplicated across the seats.
 
 Then remove the scratch directory, if there was one: `rm -rf <SCRATCH>` — only the exact `SCRATCH:` path the resolve printed, never anything derived from it.
 

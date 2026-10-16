@@ -10,7 +10,7 @@ Every user-facing skill in detail. The [README](../README.md#commands) has the o
 - [`/orca:iterate`](#orcaiterate-instructions)
 - [`/orca:status`](#orcastatus-run)
 - [`/orca:archive`](#orcaarchive-run)
-- [`/orca:council`](#orcacouncil-question)
+- [`/orca:council`](#orcacouncil-question-or-instruction)
 - [`/orca:init`](#orcainit-path-or-clone-url)
 - [`/orca:doctor`](#orcadoctor)
 - [`/orca:config`](#orcaconfig-assignments--reset)
@@ -123,13 +123,15 @@ A run is archivable only when its report exists, `## Blocked` is `None`, no live
 
 Archiving re-checks the gate, removes the worktrees and then the branches (never `--force`), and writes an `archived` marker beside `report.md` recording each removal and branch tip. An archived run shows as one `ARCHIVED:` line in triage, stays addressable by fragment, and `/orca:followup` can still pick it. `--undo` removes the marker and recreates the branches at their recorded tips.
 
-## `/orca:council <question>`
+## `/orca:council <question or instruction>`
 
 One read-only question, several independent answers, one merged result. Not part of a run, and never edits or saves anything.
 
+The argument is either a self-contained question, which goes to the seats exactly as typed, or an instruction that points at the current conversation (`/orca:council validate the retry design we just settled`). For an instruction, your session composes the question plus a context brief — your stated premises, its own conclusions as claims to check (left out when you ask for the question alone), and what was rejected — and shows you both. The council convenes only once you approve them. The seats see the brief labelled as the session's summary, not your words.
+
 1. **Seating.** `orca.sh council resolve` reads the `council` key — absent means `opus,fable,astra` — and checks Codex. With the default roster, a Codex that is missing or below the minimum version vacates the `astra` seat and the council sits with the rest; a **pinned** `astra` with Codex missing fails `NO_CODEX`. An installed Codex that is unauthenticated or lacks the `codex exec` flags orca drives fails `CODEX_UNUSABLE` either way — fix it with `/orca:doctor`.
-2. **Deliberation.** Every seat gets the identical prompt — your question verbatim, plus the shared rules: read-only, one assertion per claim, each claim anchored to `path:line` or a command's output — in a fresh context, in parallel, blind to the others. Claude seats are `orca:council` agents on their seat's model; the `astra` seat is Codex itself, driven by the `orca:council-codex` courier through `orca.sh codex --model gpt-6-astra --schema council` with a 9-minute cap. A seat that dies or times out is reported, not fatal.
-3. **Merge.** Your session — not another agent — groups claims that say the same thing, counts each group's support (`2/3 — opus, astra`), opens the evidence on both sides of every contradiction and settles it against the code, and never drops a single-seat claim for being outvoted. The answer leads with who sat, then the direct answer, the claims, the contradictions, and the merged open questions.
+2. **Deliberation.** Every seat gets the identical prompt — the question and any approved brief, plus the shared rules: read-only, one assertion per claim, each claim anchored to `path:line` or a command's output — in a fresh context, in parallel, blind to the others. Claude seats are `orca:council` agents on their seat's model; the `astra` seat is Codex itself, driven by the `orca:council-codex` courier through `orca.sh codex --model gpt-6-astra --schema council` with a 9-minute cap. A seat that dies or times out is reported, not fatal.
+3. **Merge.** Your session — not another agent — groups claims that say the same thing, counts each group's support (`2/3 — opus, astra`), opens the evidence on both sides of every contradiction and settles it against the code, and never drops a single-seat claim for being outvoted. With a brief, each of the session's conclusions is scored upheld, refuted, or unaddressed by the seats. The answer leads with who sat, then the direct answer, the scored brief (if any), the claims, the contradictions, and the merged open questions.
 
 ```bash
 /orca:config council=opus,fable,astra      # the default, pinned (astra now required)

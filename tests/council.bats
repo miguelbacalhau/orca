@@ -164,6 +164,30 @@ LANDED='{"written":true,"status":"ok","reason":""}'
   [ "$output" = PASS ]
 }
 
+@test "no brief means no context block in the prompt" {
+  run_wf "$ARGS" '['"$ANSWER"','"$ANSWER"','"$LANDED"']'
+  [[ "$output" == *'"ok":true'* ]]
+  [[ "$output" != *'<<<CONTEXT'* ]]
+  [[ "$output" != *'Context from the convening session'* ]]
+}
+
+@test "a brief reaches every seat after the question, labelled as the session's words" {
+  args='{"prompt":"Is the retry ordering sound?","brief":"Session concluded: retries run in seat order (scripts/x.js:10).","root":"/repo","members":'"$SEATS"',"pluginRoot":"/plug","scratch":"/tmp/s"}'
+  run_wf "$args" '['"$ANSWER"','"$ANSWER"','"$LANDED"']'
+  [[ "$output" == *'"ok":true'* ]]
+  run node -e '
+    const r = JSON.parse(process.argv[1])
+    const [a, b, c] = r.calls
+    const q = a.prompt.indexOf("Is the retry ordering sound?")
+    const ctx = a.prompt.indexOf("<<<CONTEXT\nSession concluded: retries run in seat order (scripts/x.js:10).\nCONTEXT>>>")
+    const ok = a.prompt === b.prompt && q >= 0 && ctx > q
+      && a.prompt.includes("not the user\u0027s own words")
+      && c.prompt.includes("<<<ORCA-COUNCIL-PROMPT\n" + a.prompt + "\nORCA-COUNCIL-PROMPT>>>")
+    console.log(ok ? "PASS" : JSON.stringify(r, null, 1))
+  ' "$output"
+  [ "$output" = PASS ]
+}
+
 @test "a dead seat and a failed courier are reported, never fatal" {
   run_wf "$ARGS" '[{"die":true},'"$ANSWER"',{"written":false,"status":"timeout","reason":"codex hit the 540s cap"}]'
   [[ "$output" == *'"ok":true'* ]]
@@ -182,6 +206,9 @@ LANDED='{"written":true,"status":"ok","reason":""}'
 @test "launch validation rejects malformed args before any seat sits" {
   run_wf '{"root":"/repo","members":'"$SEATS"',"pluginRoot":"/plug","scratch":"/tmp/s"}' '[]'
   [[ "$output" == *'args.prompt must be a non-empty string'* ]]
+  [[ "$output" == *'"calls":[]'* ]]
+  run_wf '{"prompt":"q","brief":"  ","root":"/repo","members":'"$SEATS"',"pluginRoot":"/plug","scratch":"/tmp/s"}' '[]'
+  [[ "$output" == *'args.brief, when given, must be a non-empty string'* ]]
   [[ "$output" == *'"calls":[]'* ]]
   run_wf '{"prompt":"q","root":"repo","members":'"$SEATS"',"pluginRoot":"/plug","scratch":"/tmp/s"}' '[]'
   [[ "$output" == *'args.root must be an absolute path'* ]]

@@ -168,17 +168,8 @@ read_config_key() {
   echo "$values"
 }
 
-# The review-notes key: the head branch with anything outside
-# [A-Za-z0-9._-] replaced by '-' — orca.nvim's rule, mirrored exactly.
+# The review-notes key is lib.sh's notes_key (shared with the loop verb).
 # The path is fixed by the plugin: <repo-root>/.orca/review-notes/<key>.json.
-# Known limitation: the sanitization can collide (feature/foo and
-# feature-foo share a key). Disambiguating (e.g. a branch-hash suffix) must
-# land in LOCKSTEP with orca.nvim and orca.vscode — they write these files
-# under the same rule — so it is deliberately not fixed unilaterally here;
-# a key change on one side alone would silently orphan the other side's
-# comments. Tracked as a cross-repo change.
-notes_key() { printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-'; }
-
 notes_path_for_branch() { # <branch> — requires review_resolve_repo to have run
   printf '%s/.orca/review-notes/%s.json' "$repo_root" "$(notes_key "$1")"
 }

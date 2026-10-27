@@ -13,6 +13,7 @@ A [Claude Code](https://claude.com/claude-code) plugin for autonomous, multi-age
 /orca:retry              # finish a run's blocked items, after resolving them with you
 /orca:followup           # turn a run's optional follow-ups into the next brief
 /orca:iterate            # more work on a delivered, unlanded branch, in the same run
+/orca:loop [change]      # a small change in your checkout: implement, review, fix until clean, commit
 /orca:status             # read-only dashboard: what's in flight and what to do next
 /orca:archive            # retire runs whose branches have landed
 /orca:council <question> # one question to several models at once, answers merged
@@ -58,7 +59,7 @@ A run's deliverable is a `feature/<slug>` branch in its own worktree. You review
 | **Repository layout** | Bare repository with worktrees (`.bare/` plus peer worktrees). `/orca:init` sets it up, including converting an existing checkout. |
 | **Codex CLI** *(codex reviewer only)* | The global `codex` binary ≥ 0.142.5, authenticated with `codex login`. Install with `brew install codex` or the official release binaries — **never via npm**. Plus `BASH_MAX_TIMEOUT_MS=1200000` in a settings `env` block, which `/orca:doctor` writes for you. |
 
-The seventeen stage agents and the CLI ship inside the plugin; nothing else is installed per repository.
+The twenty agents and the CLI ship inside the plugin; nothing else is installed per repository.
 
 ## Installation
 
@@ -125,6 +126,8 @@ Full detail for each is in [docs/commands.md](docs/commands.md).
 **`/orca:followup [run]`** — Lets you pick from a finished run's optional follow-ups (deferred findings, known gaps) and writes them into a new brief for `/orca:run`.
 
 **`/orca:iterate [instructions]`** — Adds new work to a delivered branch that hasn't landed yet, without starting a new run. The change is confirmed in a short exchange, written as a spec amendment, reviewed, and built by the same work loop.
+
+**`/orca:loop [instructions]`** — For a change too small for a run: in the checkout you're already in, an agent implements it and runs the repository's checks, a fresh reviewer (Codex by default) attacks it, and the agent fixes what was found — round after round until no Critical/High finding remains — then commits it. No interview: your session writes a short brief from the conversation, and work it can't describe in a few lines goes to `/orca:run`. A disputed Critical/High finding, or a loop that stops making progress, comes to you. Needs a clean tree and never creates a worktree or branch; on a run's deliverable branch it records the change in the report for `/orca:pr`.
 
 **`/orca:status [run]`** — A read-only dashboard combining `.orca/` state and git: interrupted runs, queued briefs, unmerged deliverables, leftover branches and worktrees, each naming the command that handles it. It suggests cleanup commands where deletion is provably safe but never runs them.
 
@@ -199,7 +202,7 @@ Bypass mode applies to the **whole session**, not just the run, so a dedicated s
 - **Interrupted run** (session died, killed, restarted) — run `/orca:run` again; it finds the run and resumes from the journal. Completed work replays instantly.
 - **Blocked items** — kept on their branches with any work in progress saved as a `wip:` commit. `/orca:retry` resolves them with you and finishes them in the same run.
 - **Follow-ups you want** — `/orca:followup` turns them into a new brief.
-- **More changes before landing** — `/orca:iterate`.
+- **More changes before landing** — `/orca:iterate`; for a small one, `/orca:loop` in the integration worktree.
 - **Landed runs piling up** — `/orca:archive`.
 - **Abandoned run** — prefer resuming; otherwise remove its `orca-*` worktrees (`git worktree list`) and `feature/<slug>*` branches. `/orca:status` prints the safe commands.
 - **Plugin upgrades** — finish a run on the plugin version that started it. Resuming across an upgrade is best-effort.
@@ -236,8 +239,8 @@ Bypass mode applies to the **whole session**, not just the run, so a dedicated s
 
 | Path | Contents |
 |---|---|
-| `skills/<name>/SKILL.md` | The twelve skills. |
-| `agents/<stage>.md` | The seventeen stage agents, loaded as `orca:<stage>`. |
+| `skills/<name>/SKILL.md` | The thirteen skills. |
+| `agents/<stage>.md` | The twenty agents, loaded as `orca:<stage>`. |
 | `scripts/orca.sh`, `scripts/lib.sh`, `scripts/verbs/` | The [orca CLI](docs/cli.md). |
 | `scripts/*.workflow.js` | Workflow scripts: the work loop, the spec gate, research. |
 | `hooks/` | The function-hooks module: the run band and the verb hook. `$.state` types in `types/index.d.ts`. |

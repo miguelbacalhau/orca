@@ -5,13 +5,13 @@
 # holder for the conventions every verb must agree on: typed failures,
 # the framed-output contract, base64 encoding, repository
 # resolution, the symlink canonicalizer, the path and marker guards,
-# and the banned-attribution regex.
+# the branch key, and the banned-attribution regex.
 #
 # Sourced, never executed. bash has textual inclusion, not modules, so
 # the rules are conventions, enforced by review: this file owns its
 # function names (fail, emit_frame, b64_encode, b64_decode,
 # resolve_repo, canonicalize, is_run_dir, is_worktree_root, is_marker,
-# is_banned) and verbs never redefine them;
+# notes_key, is_banned) and verbs never redefine them;
 # callers source it via an absolute path ("$PLUGIN_ROOT/scripts/lib.sh"
 # — `source` resolves relative paths against the working directory, not
 # the sourcing script); and a sourced file's `exit` kills the caller —
@@ -170,6 +170,19 @@ is_worktree_root() { # <path> — an absolute directory that is the top level of
 is_marker() { # <value>
   [[ $1 =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]]
 }
+
+# ---- branch key -------------------------------------------------------
+# notes_key <branch> — a branch as a filename: anything outside
+# [A-Za-z0-9._-] replaced by '-' — orca.nvim's rule for review-notes
+# files, mirrored exactly, and reused for the loop verb's scratch
+# directories so one branch has one key everywhere.
+# Known limitation: the sanitization can collide (feature/foo and
+# feature-foo share a key). Disambiguating (e.g. a branch-hash suffix) must
+# land in LOCKSTEP with orca.nvim and orca.vscode — they write review-notes
+# files under the same rule — so it is deliberately not fixed unilaterally
+# here; a key change on one side alone would silently orphan the other
+# side's comments. Tracked as a cross-repo change.
+notes_key() { printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-'; }
 
 # ---- config: vocabulary, parser, canonical writer ---------------------
 # The config file is <repo-root>/.orca/config — flat dotted key=value,

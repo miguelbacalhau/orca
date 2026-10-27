@@ -115,7 +115,7 @@ Rule-shaped knowledge ("never install X via npm") goes in the report under **Kno
 
 ## Stage agents
 
-Seventeen agents ship in `agents/<stage>.md`, loaded as `orca:<stage>`. Each runs in its own context; stages pass context through artifact files.
+Twenty agents ship in `agents/<stage>.md`, loaded as `orca:<stage>`. Each runs in its own context; stages pass context through artifact files.
 
 | Stage | Role | Model | Effort | Configurable |
 |---|---|---|---|---|
@@ -136,5 +136,8 @@ Seventeen agents ship in `agents/<stage>.md`, loaded as `orca:<stage>`. Each run
 | `doctor` | Derives and proves `.orca/setup`, for `/orca:doctor` and `/orca:init` | opus | high | |
 | `council` | One Claude seat of `/orca:council`; the model is the seat's | per seat | high | ✓ (`council` roster) |
 | `council-codex` | Courier driving `/orca:council`'s Codex seat via `orca.sh codex` | sonnet | medium | |
+| `loop-implement` | Implements, fixes, and commits `/orca:loop`'s change, kept alive across rounds | opus | high | |
+| `loop-review-codex` | Courier driving one `/orca:loop` round's Codex review via `orca.sh codex` | sonnet | medium | |
+| `loop-review-claude` | Performs one `/orca:loop` round's review itself | opus | high | |
 
 The resolved reviewer picks both the item reviewer and the spec reviewer. The workflow's internal helper agents (reconciliation, escalation) are not configurable.

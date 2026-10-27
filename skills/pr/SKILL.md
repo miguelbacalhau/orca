@@ -48,6 +48,8 @@ The reader has never heard of orca, so run vocabulary is translated or dropped �
 
 **Review rounds:** a report's `## Review rounds` section records fixes landed after the run from the user's own review comments. Each `addressed` resolution is part of what the branch does — fold it into What changed by outcome, as the behavior now shipped, never as "review feedback" or a correction; a round's passing verification counts toward Testing. Comment ids, answered comments, timestamps, and archive paths are dropped.
 
+**Loop rounds:** a report's `## Loop rounds` section records small changes committed on the branch after the run by `/orca:loop`. Each entry's change is part of what the branch does — fold it into What changed by outcome, as the behavior now shipped; its passing checks count toward Testing. Timestamps, round counts, hashes, and declines are dropped.
+
 **Title:** conventional and imperative, from the report's one-line idea summary — the same register as the run's commit subjects.
 
 ### The repo's own template wins

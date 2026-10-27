@@ -8,6 +8,7 @@ Every user-facing skill in detail. The [README](../README.md#commands) has the o
 - [`/orca:retry`](#orcaretry-run)
 - [`/orca:followup`](#orcafollowup-run)
 - [`/orca:iterate`](#orcaiterate-instructions)
+- [`/orca:loop`](#orcaloop-instructions)
 - [`/orca:status`](#orcastatus-run)
 - [`/orca:archive`](#orcaarchive-run)
 - [`/orca:council`](#orcacouncil-question-or-instruction)
@@ -105,7 +106,24 @@ New work on a delivered, **still-unlanded** `feature/<slug>` branch, of any size
 3. `orca:spec` writes an **amendment** (`spec.amendment.md`) against a worktree at the branch tip. The delivered spec's Interfaces and Decisions bind it — it may extend them, or explicitly supersede them where the change calls for it. The amendment goes through the same spec review and revise round as a fresh run.
 4. The new items are appended to `spec.md` under a dated iteration heading (continuing the W-id sequence), the old report is archived to `report.round<N>.md`, and the work loop runs over the new items on the same integration branch.
 
-Routing: unmet items → `/orca:retry`; a landed or deleted branch → `/orca:followup`; an interrupted run or iteration → `/orca:run`'s resume; genuinely unrelated scope → `/orca:run`.
+Routing: unmet items → `/orca:retry`; a landed or deleted branch → `/orca:followup`; an interrupted run or iteration → `/orca:run`'s resume; genuinely unrelated scope → `/orca:run`; a change small enough to describe in a few lines → `/orca:loop`.
+
+## `/orca:loop [instructions]`
+
+A small change in a checkout you already have, independently reviewed and committed — no interview, spec, plan, workflow, or new worktree. Your session orchestrates and stays your point of contact; the work happens in subagents.
+
+Routing between the four ways to change code: a new outcome → `/orca:run`; a run's unmet items → `/orca:retry`; new work on an unlanded deliverable that deserves a spec → `/orca:iterate`; anything you can state in a few lines → `/orca:loop`, on any branch.
+
+1. **Target.** The checkout comes from the conversation or the argument, or the session asks. It must be on a branch and **clean**: with uncommitted changes of your own, the loop asks you to commit or stash them first — it never touches them itself.
+2. **Reviewer.** The configured `reviewer`, else the detected one — the same resolution as a run. A codex reviewer whose `CODEX:` gate fails stops the loop with the remediation; it never switches reviewer for you. The bare layout and bypass mode are *not* required.
+3. **Brief.** The session writes a short brief — intent, one to three acceptance lines, scope — from the conversation, without asking you to confirm it. It is the reviewer's yardstick. If it can't be written without asking, the session points you at `/orca:run` instead.
+4. **Implement.** One `orca:loop-implement` agent builds the change and runs the repository's checks (tests, lint, typecheck, found from its conventions). It is kept alive for the whole loop. When it needs a decision, the session asks you and passes the answer back.
+5. **Review and fix, until clean.** Each round, secrets are stripped, a fresh `orca:loop-review-codex` or `orca:loop-review-claude` reviews the uncommitted change against the brief, and secrets are put back. Findings in the change with Critical/High severity go back to the implementer, which fixes each one or **disputes** it — every dispute comes to you, and one you accept is recorded as settled so later rounds don't re-raise it. Medium/Low findings are fixed alongside but never trigger a round of their own; any left in the clean round are fixed without a re-review and listed as such. Findings outside the change (pre-existing defects, work the brief doesn't ask for) are reported to you and never block the loop. Red checks block it like a Critical finding, unless you choose to carry on with a failure the implementer can't fix (one that predates the change, say) — that failure then stops gating.
+6. **Stall.** There is no round cap. From the second round, a round whose Critical/High count didn't shrink, or a fixed finding that comes back, is a stall: you choose to continue, commit anyway, or stop.
+7. **Commit.** The implementer writes one Conventional Commit of everything in the tree. `orca.sh loop check` judges it against a snapshot taken just before: a commit holding anything else — a commit hook that rewrote code, say — is undone, its changes kept staged, and goes through checks and review before the next commit; the implementer is told never to mention Claude, AI, agents, or orca, and a message the attribution check catches — naming Claude or Anthropic, or carrying a Co-Authored-By or Generated-with line — is undone (changes kept staged) and rewritten; a commit that missed files is sent back.
+8. **Report entry.** When the branch is a run's deliverable, a `## Loop rounds` entry is added to its `report.md` (before `## Review rounds`, else before `## Landing`): the change, reviewer and rounds, Medium/Low fixed after the last review, settled declines, Medium/Low findings left unfixed with their reasons, and checks. `/orca:pr` folds it into the PR body. Committing anyway with failing checks or unfixed findings marks the deliverable `unverified`.
+
+The loop's scratch — the brief, each round's findings, the settled declines — lives in `.orca/loops/<branch-key>/` and is removed when the loop ends, however it ends. There is no resume: a session that dies mid-loop leaves the changes in the tree. The closing summary lists the commit, rounds, fixes, declines, out-of-scope findings, and checks.
 
 ## `/orca:status [run]`
 

@@ -22,7 +22,7 @@ A dispatcher over `.orca/` state. Triage offers the first match, never forcing i
 
 1. **An interrupted run** — a run directory whose `spec.md` records a workflow runId but has no `report.md`. Offers to resume from the journal: completed work replays instantly, only in-flight and remaining work runs live.
 2. **A queued brief** — anything at the top level of `.orca/feat-briefs/`. Offers to run one, or to interview a new idea instead.
-3. **Nothing waiting** — interviews the idea into a brief, then asks: run it now, or leave it queued?
+3. **Nothing waiting** — interviews the idea into a brief, restates it once with the trunk and reviewer, and asks: run it now, leave it queued, or revise?
 
 ### The interview
 
@@ -39,7 +39,7 @@ The brief is *what and why*, never *how*: no work breakdown, interfaces, or file
 
 You are asked exactly:
 
-1. **One confirmation** of the restated brief, plus the trunk branch. This authorizes everything that follows, and it is asked even if the brief was written seconds earlier.
+1. **One confirmation** of the restated brief, plus the trunk branch. This authorizes everything that follows. Fresh from the interview, it is the interview's closing run-now answer, so you approve a new brief once; a queued brief is restated, age-checked, and confirmed when its run starts.
 2. **One optional checkpoint**, only if the brief opted in: approve the spec and work breakdown before any code.
 
 After that nothing asks you anything. Ambiguities resolve against the spec and the doubt rule; what cannot be resolved becomes a `blocked` item in `report.md`, with the options you must choose between. See [Anatomy of a run](anatomy.md).

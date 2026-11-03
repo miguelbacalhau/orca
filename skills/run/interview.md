@@ -61,7 +61,7 @@ Push back throughout. Play devil's advocate on scope, hunt for unstated non-goal
 
 Stay at intent level in what you *write down*: direction decisions with their rationale are brief content; interfaces, work items, and file ownership are not — grounding the decomposition in code is the spec stage's job, with fresh context and real exploration. If the conversation turns into walking the user through source at length, it has drifted from *what* into *how*; steer it back.
 
-## Step 3: Early pre-flight (optional, never blocking)
+## Step 3: Early pre-flight (never blocking)
 
 Run the run's environment pre-flight now, from the project root — it ships in this plugin:
 
@@ -69,7 +69,7 @@ Run the run's environment pre-flight now, from the project root — it ships in 
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh preflight
 ```
 
-This is an early warning, not a gate: a `FAIL` here is something to fix before the *run*, at leisure — it never blocks writing the brief. It also spares a second run: if the brief runs now, the run's own environment pre-flight reuses this output rather than re-running the script. Report any failing gate and point at the right fixer — orca:init for the layout gate (`BARE_REPO`), orca:doctor for the machine gates (`CODEX`, an invalid `REVIEWER`) — then continue. A `CODEX: SKIPPED` line just means the run will use the Claude reviewer; nothing to fix.
+This is an early warning, not a gate: a `FAIL` here is something to fix before the *run*, at leisure — it never blocks writing the brief. Its output also feeds the closing question in `SKILL.md` — the trunk and reviewer it restates come from here — and if the brief runs now, the run's own environment pre-flight reuses it rather than re-running the script. Report any failing gate and point at the right fixer — orca:init for the layout gate (`BARE_REPO`), orca:doctor for the machine gates (`CODEX`, an invalid `REVIEWER`) — then continue. A `CODEX: SKIPPED` line just means the run will use the Claude reviewer; nothing to fix.
 
 ## Step 4: Write the brief
 
@@ -128,13 +128,13 @@ Use `date +"%Y-%m-%d %H:%M"` for the `Created` line — it survives the file's l
 
 **The quality bar:** the spec agent must be able to act on the brief without guessing. Every tension and unknown the research surfaced appears either *resolved* — in Direction, Constraints, or Non-goals — or *explicitly delegated* to the doubt rule. The brief carries reasoning, not just conclusions: a non-goal with its why survives contact with an autonomous run; a bare bullet invites reinterpretation.
 
-Read the written brief back to the user in summary and incorporate corrections until they approve it. Their approval is what makes the file authoritative — a later orca run treats it as the whole of their intent.
+Do not read the brief back here. The read-back is `SKILL.md`'s closing question, which restates the written file once and takes the user's approval and their run-now-or-queue choice in the same answer — a separate read-back first would have them approve the same brief twice. Their approval is what makes the file authoritative: a later orca run treats it as the whole of their intent.
 
 There is no status field. Location is status: everything at the top level of `.orca/feat-briefs/` is ready and unconsumed, and the run moves a brief into its run directory when it starts from it. If the discussion needs another sitting, park the file in `.orca/feat-briefs/drafts/` instead and move it up one level when it is done — triage only discovers the top level.
 
 ## Step 5: Hand back
 
-The brief is written and approved. Return to `SKILL.md`'s run-now-or-queue question (the end of Step 0) — whether this brief starts its run now or waits queued is the user's call, made there. The run's own pre-flight and confirmation gates run in the same skill, so there is nothing to hand off.
+The brief is written. Return to `SKILL.md`'s closing question (the end of Step 0) — the single read-back where the user approves the brief, or revises it, and decides whether it runs now or waits queued. A run-now answer there is the run's confirmation, so the run continues in the same skill without asking again; there is nothing to hand off.
 
 ## Guidelines
 

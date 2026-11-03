@@ -6,9 +6,11 @@ What `/orca:run` does between your confirmation and the report.
 /orca:run
    │
    ├─ 0. Triage                     resume an interrupted run · run a queued brief
-   │                                · or interview → brief, then run now or queue
+   │                                · or interview → brief, restated once:
+   │                                  run now (= the confirmation) or queue
    ├─ 1. Pre-flight + confirm       orca.sh preflight gates, Workflow tool
    │                                check, bypassPermissions; ONE user confirmation
+   │                                (already given when fresh from the interview)
    ├─ 2. Spec (orca:spec)           read-only codebase exploration → spec.md with
    │                                Interfaces + a 2–8 item dependency-ordered
    │                                Work Breakdown with file ownership

@@ -1,33 +1,9 @@
 # Validate one complete JSON object with a top-level array under
 # root_key (-v root_key=…; findings when unset — the review contract,
 # claims for the council's). Exit status only: never rewrite the payload
-# or interpret entry counts.
+# or interpret entry counts. Loads after the shared tokenizer:
+# awk -f json-tokens.awk -f codex-payload.awk.
 # POSIX awk keeps this usable on stock macOS as well as Linux.
-
-{ document = document $0 "\n" }
-
-function invalid() { exit 1 }
-
-# Consume a token, preserving quoted strings so punctuation in a finding's
-# prose cannot affect the grammar. JSON permits only these four whitespace
-# characters, these escapes, and unescaped bytes above the control range.
-function next_token(    rest) {
-    rest = substr(document, position)
-    if (match(rest, /^[ \t\r\n]+/)) {
-        position += RLENGTH
-        rest = substr(rest, RLENGTH + 1)
-    }
-    if (rest == "") { token = ""; return }
-    if (match(rest, /^"([^"\\\001-\037]|\\(["\\\/bfnrt]|u[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]))*"/) ||
-        match(rest, /^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?/) ||
-        match(rest, /^(true|false|null)/) ||
-        match(rest, /^[{}\[\],:]/)) {
-        token = substr(rest, 1, RLENGTH)
-        position += RLENGTH
-        return
-    }
-    invalid()
-}
 
 # Recognize the root key even when its ASCII letters use Unicode escapes.
 # Other keys need no decoding: their contents do not affect validation.

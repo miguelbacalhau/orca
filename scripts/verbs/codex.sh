@@ -209,7 +209,8 @@ fi
 # complete. Codex enforces the schema; this portable awk guard checks
 # JSON syntax and the top-level array (findings or claims) without
 # changing bytes or counting entries (which remains the caller's job).
-LC_ALL=C awk -v root_key="$codex_root_key" -f "$orca_scripts_dir/codex-payload.awk" "$codex_payload" \
+LC_ALL=C awk -v root_key="$codex_root_key" -f "$orca_scripts_dir/json-tokens.awk" \
+  -f "$orca_scripts_dir/codex-payload.awk" "$codex_payload" \
   || codex_give_up bad_payload
 
 # Publish by rename, never by writing into the destination. A cp into

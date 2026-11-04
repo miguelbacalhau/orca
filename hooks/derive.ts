@@ -3,12 +3,12 @@
 // (and owns every engine call), so everything below is testable as plain data.
 
 import type { OrcaBand, OrcaItem, OrcaRow, OrcaRun } from '../types'
+import type { FileRead } from './read-cache'
 
 // What run-band.tsx reads from the run directory on one tick.
 export type RunFiles = {
   runDirExists: boolean
-  // spec.md (or the amendment file on an iterate spec launch): its mtime,
-  // and its text when the caller needed it.
+  // spec.md: its mtime, and its text when the caller needed it.
   spec: { mtimeMs: number; text: string | null } | null
   // reviews/ entries, by name.
   reviews: { name: string; mtimeMs: number }[]
@@ -23,9 +23,7 @@ export type RunFiles = {
   agents: { name: string; mtimeMs: number }[]
 }
 
-export type JournalRead =
-  | { status: 'ok'; text: string }
-  | { status: 'missing' | 'unreadable' | 'too-large' }
+export type JournalRead = FileRead
 
 export type Derived = { finished: boolean; band: OrcaBand | null }
 
@@ -146,8 +144,7 @@ export type SpecState = 'drafting' | 'reviewing' | 'revising' | 'ready'
 // Files decide by default: no fresh spec is drafting, a fresh spec with no
 // fresh review artifact is reviewing, both is ready (which covers the
 // checkpoint wait). "Fresh" is "written since this launch": a checkpoint
-// re-spawn or an iterate amend round runs over a directory that already holds
-// a spec and a review. A running spec-stage agent in the journal overrides
+// re-spawn runs over a directory that already holds a spec and a review. A running spec-stage agent in the journal overrides
 // the files, and a completed spec workflow is ready.
 export function specState(run: OrcaRun, files: RunFiles, stages: JournalStage[] | null): SpecState {
   if (run.specEnded) return 'ready'
@@ -155,8 +152,7 @@ export function specState(run: OrcaRun, files: RunFiles, stages: JournalStage[] 
   const live = running.filter((m): m is Extract<LabelMeaning, { kind: 'spec' }> => m?.kind === 'spec').pop()
   if (live) return live.state
   if (!files.spec || files.spec.mtimeMs < run.since) return 'drafting'
-  const artifact = run.amendPath ? /^spec-amend-[a-z]+\.json$/ : /^spec-[a-z]+\.json$/
-  const reviewed = files.reviews.some(r => artifact.test(r.name) && r.mtimeMs >= run.since)
+  const reviewed = files.reviews.some(r => /^spec-[a-z]+\.json$/.test(r.name) && r.mtimeMs >= run.since)
   return reviewed ? 'ready' : 'reviewing'
 }
 
@@ -252,7 +248,7 @@ function specRowShells(run: OrcaRun) {
     return { row, set: (mark: string, status: string, tone: OrcaRow['tone']) => Object.assign(row, { mark, status, tone }) }
   }
   return [
-    shell('spec', run.amendPath ? 'author the amendment' : 'author spec.md from the brief'),
+    shell('spec', 'author spec.md from the brief'),
     shell('review', `${run.reviewer ?? 'independent'} review against brief + codebase`),
     shell('revise', 'fold Critical/High findings in'),
   ] as const
@@ -461,8 +457,8 @@ export function derive(run: OrcaRun, files: RunFiles, journal: JournalRead, now:
   // A run directory that went away (archived, removed) takes the band with it.
   if (!files.runDirExists) return { finished: true, band: null }
   // The run skill writes report.md after the work loop returns: the run
-  // is over. Only a report written since this launch counts — a retry or an
-  // iterate round relaunches over a directory whose old report was archived.
+  // is over. Only a report written since this launch counts — a retry
+  // relaunches over a directory whose old report was archived.
   if (run.kind === 'build' && files.reportMtimeMs !== null && files.reportMtimeMs >= run.since)
     return { finished: true, band: null }
   if (run.kind === 'spec') return { finished: false, band: deriveSpec(run, files, journal, now) }
@@ -493,72 +489,6 @@ export function slugOf(runDir: string): string {
 // not a letter or a digit becomes '-'.
 export function projectDirName(cwd: string): string {
   return cwd.replace(/[^a-zA-Z0-9]/g, '-')
-}
-
-// ---------- layout ----------
-
-export function truncate(text: string, width: number): string {
-  const flat = text.replace(/\s+/g, ' ').trim()
-  if (width <= 0) return ''
-  return flat.length <= width ? flat : `${flat.slice(0, Math.max(0, width - 1))}…`
-}
-
-// The band's top border: a rule across the width with the header set in it,
-// `── orca ─ slug · phase · detail ─────`. Each piece keeps its own tone; the
-// facts are cut from the end to fit and the rule takes whatever is left.
-export type RuleTone = 'rule' | 'name' | 'slug' | 'phase' | 'detail' | 'sep' | 'note'
-export type RulePiece = { text: string; tone: RuleTone }
-
-export function headerRule(band: OrcaBand, columns: number): RulePiece[] {
-  const facts: RulePiece[] = [
-    { text: band.slug, tone: 'slug' },
-    { text: band.phase, tone: 'phase' },
-    { text: band.detail, tone: 'detail' },
-  ]
-  if (band.source === 'files') facts.push({ text: 'no journal', tone: 'note' })
-  const out: RulePiece[] = [{ text: '── ', tone: 'rule' }, { text: 'orca', tone: 'name' }, { text: ' ─ ', tone: 'rule' }]
-  let used = out.reduce((n, p) => n + p.text.length, 0)
-  // A space and at least two rule cells close the line after the facts.
-  let room = columns - used - 3
-  let first = true
-  for (const fact of facts) {
-    const text = fact.text.replace(/\s+/g, ' ').trim()
-    if (!text) continue
-    if (!first) {
-      // A separator with nothing after it says nothing: stop instead.
-      if (room < 5) break
-      out.push({ text: ' · ', tone: 'sep' })
-      room -= 3
-    }
-    first = false
-    if (room <= 0) break
-    const cut = truncate(text, room)
-    out.push({ text: cut, tone: fact.tone })
-    room -= cut.length
-    if (cut !== text) break
-  }
-  used = out.reduce((n, p) => n + p.text.length, 0)
-  out.push({ text: ` ${'─'.repeat(Math.max(2, columns - used - 1))}`, tone: 'rule' })
-  return out
-}
-
-// Fits the rows to the band's width: ids padded to one column, titles cut to
-// what is left beside the widest status (statuses capped so a long blocked
-// reason never squeezes every title away), statuses cut to the remainder.
-// `lead` is `  <id>  <title>  `, with `id` and `title` its two padded cells.
-export function layoutRows(rows: OrcaRow[], columns: number): { lead: string; id: string; title: string; tail: string; row: OrcaRow }[] {
-  const idW = Math.max(0, ...rows.map(r => r.id.length))
-  const statusW = Math.min(30, Math.max(0, ...rows.map(r => r.status.length + 2)))
-  const lead = 2 + idW + 2
-  const titleMax = Math.max(0, ...rows.map(r => r.title.replace(/\s+/g, ' ').trim().length))
-  const titleW = Math.min(titleMax, Math.max(8, columns - lead - 2 - statusW))
-  return rows.map(row => {
-    const id = row.id.padEnd(idW)
-    const title = truncate(row.title, titleW).padEnd(titleW)
-    const head = `  ${id}  ${title}  `
-    const tail = truncate(`${row.mark} ${row.status}`, Math.max(1, columns - head.length))
-    return { lead: head, id, title, tail, row }
-  })
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {

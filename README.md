@@ -4,18 +4,19 @@
 
 <h1 align="center">orca</h1>
 
-A [Claude Code](https://claude.com/claude-code) plugin for autonomous, multi-agent development. Set a repository up once, then **`/orca:run`** takes an idea to a committed feature branch: an interview captures your intent as a brief, and a deterministic workflow plans, implements, independently reviews, fixes, commits, merges, and verifies it. After the interview you are asked one question (two, if you opt into a checkpoint).
+A [Claude Code](https://claude.com/claude-code) plugin for autonomous, multi-agent development. Set a repository up once, then **`/orca:run`** takes an idea to a committed feature branch: an interview captures your intent as a brief, and a deterministic workflow plans, implements, independently reviews, fixes, commits, merges, and verifies it. After the interview you are asked one question (two, if you opt into a checkpoint). For work you expect to come back to, **`/orca:new`** starts an *objective* instead: a recorded discussion, a reviewed plan of sequential phases, and each phase built and reviewed round by round until clean — re-opened with **`/orca:open`** whenever there is more to do.
 
 ```text
-/orca:run <idea>     # interview → brief → spec → work loop → report
+/orca:run <idea>         # interview → brief → spec → work loop → report
+/orca:new <idea>         # an objective: discussion → decisions → reviewed phase plan → phase loop
+/orca:open [objective]   # re-open an objective and carry it forward from where it stands
 /orca:review             # review the deliverable in your editor; comments round-trip
-/orca:pr                 # publish a delivered run as a draft GitHub pull request
+/orca:pr                 # publish a delivered run or objective as a draft GitHub pull request
 /orca:retry              # finish a run's blocked items, after resolving them with you
 /orca:followup           # turn a run's optional follow-ups into the next brief
-/orca:iterate            # more work on a delivered, unlanded branch, in the same run
-/orca:loop [change]      # a small change in your checkout: implement, review, fix until clean, commit
+/orca:loop [change]      # one small phase in this session's objective: implement, review, fix until clean, commit
 /orca:status             # read-only dashboard: what's in flight and what to do next
-/orca:archive            # retire runs whose branches have landed
+/orca:archive            # retire landed runs, and objectives landed or abandoned
 /orca:council <question> # one question to several models at once, answers merged
 /orca:init               # one-time repository layout setup
 /orca:doctor             # machine and repository readiness checks
@@ -32,6 +33,7 @@ A run's deliverable is a `feature/<slug>` branch in its own worktree. You review
 - [Quick start](#quick-start)
 - [Commands](#commands)
 - [What a run does](#what-a-run-does)
+- [Objectives](#objectives)
 - [Configuration](#configuration)
 - [Permissions](#permissions)
 - [Recovery](#recovery)
@@ -54,12 +56,12 @@ A run's deliverable is a `feature/<slug>` branch in its own worktree. You review
 | | |
 |---|---|
 | **Claude Code** | With the Workflow tool and function hooks (mods) — 2.1.290 or later. Function hooks must be enabled (`CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` in a settings `env` block where they are off by default), the session not started with `--bare`, and no `disableAllHooks` in any settings file. |
-| **Permission mode** | `bypassPermissions` for the session running the run. See [Permissions](#permissions). |
+| **Permission mode** | `bypassPermissions` for the session running the run; objectives don't need it. See [Permissions](#permissions). |
 | **git** | ≥ 2.31; ≥ 2.42 for `/orca:init` to create a brand-new repository. |
 | **Repository layout** | Bare repository with worktrees (`.bare/` plus peer worktrees). `/orca:init` sets it up, including converting an existing checkout. |
 | **Codex CLI** *(codex reviewer only)* | The global `codex` binary ≥ 0.142.5, authenticated with `codex login`. Install with `brew install codex` or the official release binaries — **never via npm**. Plus `BASH_MAX_TIMEOUT_MS=1200000` in a settings `env` block, which `/orca:doctor` writes for you. |
 
-The twenty agents and the CLI ship inside the plugin; nothing else is installed per repository.
+The twenty-four agents and the CLI ship inside the plugin; nothing else is installed per repository.
 
 ## Installation
 
@@ -117,21 +119,23 @@ Full detail for each is in [docs/commands.md](docs/commands.md).
 
 **`/orca:run <idea>`** — Resumes an interrupted run, runs a queued brief from `.orca/feat-briefs/`, or interviews a new idea. The interview researches the code the idea touches and pushes back on scope until the brief — outcome, features, non-goals, constraints, and a *doubt rule* for ambiguities — is unambiguous. You then confirm the brief once, and the run goes to a report without further questions. Anything it can't resolve becomes a `blocked` item in the report, with the options for you to choose between. You can decline the run and leave the brief queued.
 
-**`/orca:review [branch]`** — Opens the deliverable's diff in your editor: Neovim via [orca.nvim](https://github.com/miguelbacalhau/orca.nvim) in a new tmux window, or VS Code via [orca.vscode](https://github.com/miguelbacalhau/orca.vscode). Comments you leave are saved; when you close the review, orca proposes how it will handle each one (fix, answer, decline, or defer), and on your consent fixes and answers them in the integration worktree, with the resolutions showing inline next time you review.
+**`/orca:new <idea>`** — Starts an objective under `.orca/objectives/`. Its files are created at once, and its worktree is set up in the background while the code the idea touches is researched. The discussion then writes the outcome, non-goals, and constraints into `objective.md`, and every question into `decisions.md` as it is raised or settled. When no decision is open and you say go, a planner proposes sequential phases, an independent reviewer attacks the plan, and you confirm it once. Each phase then runs in the objective's worktree: one agent implements it, fixes every round, and commits; a fresh reviewer attacks each round; a deterministic round engine decides every next step until a round has no Critical/High. Disputes, stalls, and questions come to you and are recorded as decisions — or block the phase until you decide. Each phase adds its entry and follow-ups to the objective's report. See [Objectives](docs/objectives.md).
 
-**`/orca:pr [run]`** — Pushes a delivered run's branch and opens a **draft** pull request via `gh`, with a short plain-language description built from the run's report (or your repo's PR template). Refused unless the run verified its work and has no blocked items. You see the exact title and body first.
+**`/orca:open [objective]`** — Re-opens an objective in this session (one session drives an objective at a time) and loads only a bounded digest of it, then continues where its files say it stands: the discussion, the planning gate, the phase loop — resuming an interrupted phase with a fresh implementer — or what's next once every phase is done.
+
+**`/orca:review [branch]`** — Opens the deliverable's diff — a run's, or an objective's — in your editor: Neovim via [orca.nvim](https://github.com/miguelbacalhau/orca.nvim) in a new tmux window, or VS Code via [orca.vscode](https://github.com/miguelbacalhau/orca.vscode). Comments you leave are saved; when you close the review, orca proposes how it will handle each one (fix, answer, decline, or defer), and on your consent fixes and answers them in the integration worktree, with the resolutions showing inline next time you review.
+
+**`/orca:pr [run]`** — Pushes a delivered run's or objective's branch and opens a **draft** pull request via `gh`, with a short plain-language description built from its report (or your repo's PR template). Refused unless the work is verified and nothing is blocked — for an objective, no phase still pending or active. You see the exact title and body first.
 
 **`/orca:retry [run]`** — Finishes a run's blocked or cut items inside the same run and branch. It audits the run against git, resolves each blocked decision with you, records your answers in the spec, and relaunches the work loop over just those items.
 
 **`/orca:followup [run]`** — Lets you pick from a finished run's optional follow-ups (deferred findings, known gaps) and writes them into a new brief for `/orca:run`.
 
-**`/orca:iterate [instructions]`** — Adds new work to a delivered branch that hasn't landed yet, without starting a new run. The change is confirmed in a short exchange, written as a spec amendment, reviewed, and built by the same work loop.
+**`/orca:loop [instructions]`** — For a change too small to plan, inside the objective this session has open: your session writes it as one short phase from the conversation, without asking you to confirm it, and runs it through the objective's phase loop — implemented, independently reviewed round after round until no Critical/High finding remains, and committed in the objective's worktree. Outside an objective it refuses and points at `/orca:new` and `/orca:open`; work it can't describe in a few lines goes to the objective's discussion.
 
-**`/orca:loop [instructions]`** — For a change too small for a run: in the checkout you're already in, an agent implements it and runs the repository's checks, a fresh reviewer (Codex by default) attacks it, and the agent fixes what was found — round after round until no Critical/High finding remains — then commits it. No interview: your session writes a short brief from the conversation, and work it can't describe in a few lines goes to `/orca:run`. A disputed Critical/High finding, or a loop that stops making progress, comes to you. Needs a clean tree and never creates a worktree or branch; on a run's deliverable branch it records the change in the report for `/orca:pr`.
+**`/orca:status [run]`** — A read-only dashboard combining `.orca/` state and git: interrupted runs, queued briefs, objectives by state, unmerged deliverables, leftover branches and worktrees, each naming the command that handles it. It suggests cleanup commands where deletion is provably safe but never runs them.
 
-**`/orca:status [run]`** — A read-only dashboard combining `.orca/` state and git: interrupted runs, queued briefs, unmerged deliverables, leftover branches and worktrees, each naming the command that handles it. It suggests cleanup commands where deletion is provably safe but never runs them.
-
-**`/orca:archive [run]`** — Retires finished runs whose branches have all merged into the trunk, removing their worktrees and branches so triage stays short. Run directories and reports are kept, and `--undo` recreates the branches.
+**`/orca:archive [run]`** — Retires finished runs whose branches have all merged into the trunk, removing their worktrees and branches so triage stays short. Objectives retire here too, landed or not: abandoning one saves its uncommitted work as a `wip:` commit and keeps its branch tip under a hidden ref. Run and objective directories are kept, and `--undo` recreates the branches.
 
 **`/orca:council <question>`** — Puts one read-only question about the repository to several independent agents on different models at once — by default Opus, Fable, and Codex on `gpt-6-astra` — then merges their answers in your session: matching claims grouped with how many models back each, contradictions settled against the code. A plain question goes to the models as typed; an instruction like "validate what we just worked out" has your session summarize the conversation into a question and context brief, which you approve before the council convenes, and the answer scores each of the session's conclusions. Nothing is edited or saved. Without Codex installed, the default council sits with its two Claude seats.
 
@@ -164,6 +168,28 @@ While it runs, the session shows a live band above the prompt with each item's s
 ```
 
 The full lifecycle — pre-flight gates, escalation rules, the run band, the decision log, and the stage agents — is in [docs/anatomy.md](docs/anatomy.md).
+
+## Objectives
+
+```text
+/orca:new <idea> → files + worktree ∥ research → discussion → decisions → phase plan → plan review → confirm → phase loop
+```
+
+1. **Discussion** — the outcome, non-goals, and constraints land in `objective.md`; every question lands in `decisions.md` as `open`, `decided`, or `deferred`, the moment it is raised or settled.
+2. **Planning** — with no decision open, `orca:phases` proposes sequential phases (goal, acceptance lines, the decisions each realizes), a verb validates the proposal, and the reviewer attacks it; Critical/High findings get one revise round. You confirm the plan once.
+3. **Phase loop** — each phase, in order, on `feature/<slug>` in one worktree: one implementer, kept alive for the phase, implements, fixes every round, and commits; a fresh reviewer attacks each round; `orca.sh rounds next` reads the phase's files and decides every next step until a round has no Critical/High. What only you can decide comes to you and is recorded as a decision; deciding later blocks the phase and stops the pass until a replan.
+4. **Report** — each phase adds its entry (review rounds, declines, checks) and its follow-ups to `report.md`, which `/orca:review` and `/orca:pr` read like a run's.
+
+Everything is a file under `.orca/objectives/`, so `/orca:open` continues an objective from any session, and the objective band shows its decisions or phases above the prompt:
+
+```text
+── orca ─ rate-limit-public-api · P2/4 · 2 follow-ups ──────────────────
+  P1  Token bucket + store                 ✓ done a1b2c3d
+  P2  Middleware on public routes          ● review r2
+  P3  429 responses + headers              ◌ pending
+```
+
+The files, states, and every step are in [docs/objectives.md](docs/objectives.md).
 
 ## Configuration
 
@@ -202,8 +228,9 @@ Bypass mode applies to the **whole session**, not just the run, so a dedicated s
 - **Interrupted run** (session died, killed, restarted) — run `/orca:run` again; it finds the run and resumes from the journal. Completed work replays instantly.
 - **Blocked items** — kept on their branches with any work in progress saved as a `wip:` commit. `/orca:retry` resolves them with you and finishes them in the same run.
 - **Follow-ups you want** — `/orca:followup` turns them into a new brief.
-- **More changes before landing** — `/orca:iterate`; for a small one, `/orca:loop` in the integration worktree.
-- **Landed runs piling up** — `/orca:archive`.
+- **More changes before landing** — on a run's deliverable, by hand or through `/orca:review`'s address flow; on an objective, `/orca:open` for more decisions and phases, or `/orca:loop` for a small one.
+- **Interrupted objective** — `/orca:open` in any session; an interrupted phase resumes with a fresh implementer from its files.
+- **Landed runs piling up, or an objective you're done with** — `/orca:archive`.
 - **Abandoned run** — prefer resuming; otherwise remove its `orca-*` worktrees (`git worktree list`) and `feature/<slug>*` branches. `/orca:status` prints the safe commands.
 - **Plugin upgrades** — finish a run on the plugin version that started it. Resuming across an upgrade is best-effort.
 
@@ -231,6 +258,7 @@ Bypass mode applies to the **whole session**, not just the run, so a dedicated s
 
 - [Commands](docs/commands.md) — every skill in detail.
 - [Anatomy of a run](docs/anatomy.md) — pre-flight gates, spec review, the work loop, escalation, the run band, the decision log, stage agents.
+- [Objectives](docs/objectives.md) — the files and their formats, derived states, planning and plan review, the phase loop, follow-ups, archive, the objective band.
 - [Worktrees, secrets, and provisioning](docs/worktrees.md) — the repository layout, `.orca/secrets/`, and the `.orca/setup` contract.
 - [The verb hook](docs/verb-hook.md) — how the work loop runs shell steps, its guards, and its failure modes.
 - [The orca CLI](docs/cli.md) — the `orca.sh` verbs.
@@ -239,11 +267,11 @@ Bypass mode applies to the **whole session**, not just the run, so a dedicated s
 
 | Path | Contents |
 |---|---|
-| `skills/<name>/SKILL.md` | The thirteen skills. |
-| `agents/<stage>.md` | The twenty agents, loaded as `orca:<stage>`. |
+| `skills/<name>/SKILL.md` | The fourteen skills. |
+| `agents/<stage>.md` | The twenty-four agents, loaded as `orca:<stage>`. |
 | `scripts/orca.sh`, `scripts/lib.sh`, `scripts/verbs/` | The [orca CLI](docs/cli.md). |
 | `scripts/*.workflow.js` | Workflow scripts: the work loop, the spec gate, research. |
-| `hooks/` | The function-hooks module: the run band and the verb hook. `$.state` types in `types/index.d.ts`. |
+| `hooks/` | The function-hooks module: the run band, the objective band, and the verb hook. `$.state` types in `types/index.d.ts`. |
 | `tests/` | Bats suite (`bats tests/`) and hook tests (`claude plugin test .`). |
 
 Commit with Conventional Commit messages and don't edit the version in `.claude-plugin/plugin.json`: CI bumps it on every push to `main` that changes shipped files, sized from the commit types.

@@ -7,7 +7,7 @@ disable-model-invocation: true
 
 # Orca: review
 
-Hand a run's deliverable to the human, in their editor — and take their comments back. A finished run leaves a branch — `feature/<slug>` — checked out in an integration worktree; this skill opens that worktree in the user's editor running an orca review session — orca.nvim's `:OrcaReview` in a new tmux window, or orca.vscode's review session via `code --open-url` — so the user walks the merge-base diff with their own file list, LSP, and colors. Comments they leave with `:OrcaComment` persist to `.orca/review-notes/<key>.json`; when the review session ends, this skill reads them, lays out a per-comment plan, and — only with the user's consent to that plan — converts them into fixes and answers, writing each resolution back into the same file, where the next `:OrcaReview` renders it inline under its anchor. When the review comes back clean, the user lands the branch with `git merge --no-ff`.
+Hand a run's or an objective's deliverable to the human, in their editor — and take their comments back. A finished run, or an objective's done phases, leaves a branch — `feature/<slug>` — checked out in a worktree; this skill opens that worktree in the user's editor running an orca review session — orca.nvim's `:OrcaReview` in a new tmux window, or orca.vscode's review session via `code --open-url` — so the user walks the merge-base diff with their own file list, LSP, and colors. Comments they leave with `:OrcaComment` persist to `.orca/review-notes/<key>.json`; when the review session ends, this skill reads them, lays out a per-comment plan, and — only with the user's consent to that plan — converts them into fixes and answers, writing each resolution back into the same file, where the next `:OrcaReview` renders it inline under its anchor. When the review comes back clean, the user lands the branch with `git merge --no-ff`.
 
 The deterministic spine — deliverable discovery, editor/terminal resolution, probes, the launch, the window wait, and the validated notes read — lives in the bundled script; its header comment documents the full output contract. This skill is the conversational shell around it: triage, failure translation, the per-comment plan, the consent gate, and the parting message.
 
@@ -21,7 +21,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh review discover
 
 Exit 1 with a typed `FAIL:` (`NOT_GIT`, `NOT_BARE`) means there is nothing to review outside the bare-repo layout — say so and point at `/orca:init`. Otherwise read the `DELIVERABLE:` lines — tab-separated `branch`, `worktree`, `ok`/`missing` — and triage in the house style, offering the first match, never forcing it:
 
-- **None** → say so plainly: nothing to review; runs produce deliverables, so point at `/orca:run`.
+- **None** → say so plainly: nothing to review; runs and objectives produce deliverables, so point at `/orca:run` or `/orca:new`.
 - **One** → open it (Step 2 onward).
 - **Several** → ask which. An `<args>` branch that names one skips the ask; an `<args>` branch that names nothing discovered is a loud miss — list what was found, never guess.
 - **`missing`** → the branch is unmerged but its worktree is gone; still reviewable. Offer to add the worktree back on the existing branch, and on consent run — both values verbatim from the `DELIVERABLE:` line, never rebuilt by guessing —
@@ -35,7 +35,9 @@ Exit 1 with a typed `FAIL:` (`NOT_GIT`, `NOT_BARE`) means there is nothing to re
 
 **Unconsumed comments.** A `DELIVERABLE:` followed by a `NOTES:` line (path, then `open,addressed,answered` counts) has review comments waiting from an earlier session — the decoupled pick-up that covers the vscode tier and any session where the waiter died. When the open count is nonzero, offer the choice before the plain open: "the review of `<branch>` has N unaddressed comments — address them, or open the review again?" Addressing goes to Step 4's gate (lay out the per-comment plan first, then ask — the same three-way gate); re-opening proceeds to Step 2 with the comments intact. A `NOTES_VERSION:` line after a deliverable is a version skew — surface it as Step 4 describes before anything else touches that deliverable.
 
-Carry the selected deliverable forward as the pair `<branch>` + `<worktree>`, exactly as emitted.
+**Where it came from.** A `DELIVERABLE:` may be followed by an `OBJECTIVE_DIR:` line — `<objective-dir>`, the live objective that owns the branch, named by its `objective.md` whether or not it has a report yet — and by a `REPORT:` line — `<report.md>` and `run` or `objective` — naming the report that records the branch as its deliverable. The deliverable's **objective directory** is the `OBJECTIVE_DIR:` line's; its **run directory** is a `run` report's parent. Neither line means nothing orca ran produced it. Never grep for either yourself.
+
+Carry the selected deliverable forward as the pair `<branch>` + `<worktree>`, exactly as emitted, with its `OBJECTIVE_DIR:` and `REPORT:` lines when it has them.
 
 ## Step 2: Open
 
@@ -83,17 +85,29 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh review notes <worktree>
   - **Leave for later** → end the turn; everything stays in place. The file persists, and the next `/orca:review` triage rediscovers it.
 
   However many times the loop comes back around, the same gate applies.
+
+  On an objective's deliverable, a comment that changes the objective's direction — not a fix to what was built, but a different choice about what to build — is not addressed here: plan it as too-big-for-review and tell the user it becomes a decision at the next `/orca:open`. Plain fixes go through the address flow as usual.
 - **`NOTES:` with zero open** (all `addressed`/`answered` — the user was re-reviewing resolutions) → say so and print the landing command.
 
 ## Step 5: Address — consented, one agent, one snapshot
 
-Only ever entered through Step 4's gate (or the identical gate offered from Step 1's pick-up). Around the agent, in order:
+Only ever entered through Step 4's gate (or the identical gate offered from Step 1's pick-up).
 
-1. **Archive first.** Find the run directory by grepping `.orca/*/report.md` for the `` **Deliverable:** `<branch>` `` line. Found → copy the pre-addressing notes file to `<run-dir>/reviews/comments-<timestamp>.json` (timestamp via `date +%Y%m%d-%H%M%S`). No run dir — orca.nvim works in any orca-managed repo, so a notes file can exist for a branch no run produced — archive beside it as `.orca/review-notes/<key>.<timestamp>.json`.
-2. **Spawn the `orca:address` agent.** The spawn runs in the background: wait for its task notification before the commit in item 3, and never fabricate the result. Its task message carries: the integration worktree path, the notes file path, the run directory when one exists (no run dir → say so: there is no spec; the comments themselves are the intent), and the per-comment plan as consented at the gate — bucket and approach per `#N`, with any corrections or answers from the conversation folded in. The agent classifies, fixes change requests, answers questions, and writes the notes file back as one whole-file snapshot with statuses and human-readable resolutions.
+**An objective's deliverable: this session must own it, idle.** When the deliverable has an `OBJECTIVE_DIR:` line — with or without a report — run, before anything below:
+
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh objective idle <objective-dir>
+```
+
+A frame → this session owns the objective and no phase is mid-loop; its claim holds for the whole address flow, so no other session can open it meanwhile. A typed `FAIL:` → do not archive, spawn, or commit anything: `NOT_OWNER` — another session drives it, or none does — refuse and point at `/orca:open <slug>` in the session that should address the comments, then `/orca:review` there; `PHASE_ACTIVE` — a phase's implementer works the same worktree — refuse: finish or block the phase through `/orca:open` first; `PHASE_BLOCKED` / `RESTART_PENDING` — a phase keeps a base a commit now would fall inside — refuse: settle and run it through `/orca:open` first; anything else (`ARCHIVED`, `NO_SESSION_ID`) — relay it. The comments stay in the notes file for that later round.
+
+Around the agent, in order:
+
+1. **Archive first.** The deliverable's directory from `discover`: the `OBJECTIVE_DIR:` line's, else a `run` report's parent. Found → copy the pre-addressing notes file to `<dir>/reviews/comments-<timestamp>.json` (timestamp via `date +%Y%m%d-%H%M%S`). Neither — orca.nvim works in any orca-managed repo, so a notes file can exist for a branch nothing orca ran produced — archive beside it as `.orca/review-notes/<key>.<timestamp>.json`.
+2. **Spawn the `orca:address` agent.** The spawn runs in the background: wait for its task notification before the commit in item 3, and never fabricate the result. Its task message carries: the integration worktree path, the notes file path, the run directory when one exists (no run dir → say so: there is no spec; the comments themselves are the intent — and for an objective's deliverable, add that its intent is recorded in `<objective-dir>/objective.md` and `<objective-dir>/decisions.md`), and the per-comment plan as consented at the gate — bucket and approach per `#N`, with any corrections or answers from the conversation folded in. The agent classifies, fixes change requests, answers questions, and writes the notes file back as one whole-file snapshot with statuses and human-readable resolutions.
 3. **Commit** the fixes on the deliverable branch in the integration worktree — same attribution rules as every run commit: a subject shaped like an ordinary review-feedback commit, never mentioning Claude, AI, agents, or orca, no Co-Authored-By or Generated-with trailers. Read the message back from `git log` to check before moving on. Nothing to commit (answers only) → skip, and say so.
 4. **Verify the write-back:** re-run `orca.sh review notes <worktree>` — zero `open` remaining, version still 1. Anything else → report what the agent left undone rather than papering over it.
-5. **Record the round in the report.** Run dir found in item 1 → edit its `report.md`, which is otherwise a pre-review snapshot: `/orca:pr` composes the PR body from it without reading the diff, and gates on its `**Deliverable state:**` line. Keep a `## Review rounds` section immediately before `## Landing` — create it on the first round, append on later ones — with one entry per round:
+5. **Record the round in the report.** A directory found in item 1 with a `report.md` (an objective has none until its first phase is done; then skip this item) → edit it — a run's is otherwise a pre-review snapshot, an objective's is rewritten only by its phases, which keep this section as it is: `/orca:pr` composes the PR body from it without reading the diff, and gates on its `**Deliverable state:**` line. Keep a `## Review rounds` section immediately before `## Landing` — create it on the first round, append on later ones — with one entry per round:
 
    ```markdown
    ### <YYYY-MM-DD HH:MM> — <commit hash, or "no commit (answers only)">
@@ -106,14 +120,14 @@ Only ever entered through Step 4's gate (or the identical gate offered from Step
    Comments archived at `reviews/comments-<timestamp>.json`.
    ```
 
-   Timestamp via `date +"%Y-%m-%d %H:%M"`, the report's own format. When verification failed and the state reads `verified`, rewrite that one line to `unverified — review-feedback fixes (<hash>) left verification failing`: a branch whose latest commit broke the suite is not the verified deliverable the report claims, and `/orca:pr` must refuse it. Never upgrade a state, and touch nothing else in the report — its other sections stay the run's record; a later `/orca:retry` or `/orca:iterate` archives the whole file, rounds included. No run dir → there is no report; skip this item.
+   Timestamp via `date +"%Y-%m-%d %H:%M"`, the report's own format. When verification failed and the state reads `verified`, rewrite that one line to `unverified — review-feedback fixes (<hash>) left verification failing`: a branch whose latest commit broke the suite is not the verified deliverable the report claims, and `/orca:pr` must refuse it. Never upgrade a state, and touch nothing else in the report — its other sections stay the run's or the objective's record; a later `/orca:retry` archives a run's whole file, rounds included. No directory → there is no report; skip this item.
 6. **Parting message:** what was addressed vs answered (per `#N`, with each resolution), the commit hash, any Deliverable state downgrade and why, that re-running `/orca:review` shows each resolution inline under its anchor — editing a comment there re-opens it for the next round; that loop is the convergence mechanism — and the `git merge --no-ff <branch>` landing command for when they're satisfied.
 
 There is deliberately no machine re-review after addressing: the human re-running `:OrcaReview` and seeing resolutions at their anchors *is* the review.
 
 ## Guidelines
 
-- Never merge anything, and never write in a worktree or in `.orca/review-notes/` outside two sanctioned paths: the consented `git worktree add` in Step 1 (which touches no worktree that exists — the secrets placement that follows it, writing only symlinks into that fresh worktree, is part of the same consent), and the consented addressing flow of Step 5 (the agent's fixes and notes snapshot, the commit that follows, and the round recorded in the run's `report.md`). The deliverable is landed by the user's own hand.
+- Never merge anything, and never write in a worktree or in `.orca/review-notes/` outside two sanctioned paths: the consented `git worktree add` in Step 1 (which touches no worktree that exists — the secrets placement that follows it, writing only symlinks into that fresh worktree, is part of the same consent), and the consented addressing flow of Step 5 (the agent's fixes and notes snapshot, the commit that follows, and the round recorded in the run's or objective's `report.md`). The deliverable is landed by the user's own hand.
 - One writer at a time: never write the notes file — and never start addressing — while an editor session may be live. The gate right after window death is the sequencing; the residual race (the user reopens nvim mid-addressing) is accepted, per the contract's sequential-workflow assumption.
 - Never edit `.orca/config` — pinning or clearing `editor`/`terminal` belongs to orca:config; a failed probe's install belongs to orca:doctor. Recommend both by name.
 - This is the *human* half of review. The automated adversarial review stage lives inside runs (`agents.review`, the `reviewer` key) and is not touched, configured, or replaced here — and addressing comments must stay convergent (small deltas the user re-reads inline at their anchors), never become an unplanned work loop.

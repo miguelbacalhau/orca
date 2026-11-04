@@ -657,6 +657,19 @@ make_finished() {
   [[ "$output" != *orca-alpha* ]]
 }
 
+@test "archive: an untracked file keeps the run even with status.showUntrackedFiles=no" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  make_finished 20250101-feat-alpha None
+  git branch feature/alpha
+  git worktree add orca-alpha feature/alpha >/dev/null 2>&1
+  git config status.showUntrackedFiles no
+  echo new >orca-alpha/untracked.txt
+  [ -z "$(git -C orca-alpha status --porcelain)" ]
+  run triage archive --scan
+  has_line $'KEPT:\t'"$PWD/.orca/20250101-feat-alpha"$'\tWORKTREE_IN_USE\torca-alpha(uncommitted changes)'
+}
+
 @test "archive: uncommitted work in a run worktree keeps the whole run" {
   make_repo "$BATS_TEST_TMPDIR/r"
   cd "$BATS_TEST_TMPDIR/r"
@@ -870,4 +883,100 @@ make_finished() {
   has_line $'MISS:\tzulu'
   has_line $'CANDIDATE:\t'"$PWD/.orca/20250101-feat-alpha"
   has_line $'CANDIDATE:\t'"$PWD/.orca/20250102-feat-beta"
+}
+
+# ---- objectives: their footprint is joined, never housekeeping ----
+
+# make_objective <slug> — an objective directory carrying <slug>, with
+# its branch and worktree; prints the directory.
+make_objective() {
+  local d="$PWD/.orca/objectives/20261103-120000-$1"
+  mkdir -p "$d"
+  printf '# %s\n' "$1" >"$d/objective.md"
+  git branch "feature/$1"
+  git worktree add "orca-$1" "feature/$1" >/dev/null 2>&1
+  printf '%s' "$d"
+}
+
+@test "status joins an objective's branch and worktree to its directory" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  local d
+  d="$(make_objective alpha)"
+  # a run dir with the same slug does not take the objective's footprint
+  mkdir -p .orca/20250101-feat-alpha
+  run triage status
+  [ "$status" -eq 0 ]
+  has_line $'BRANCH:\tfeature/alpha\tmerged\tahead:0\t'"$d"
+  has_line $'WORKTREE:\t'"$PWD/orca-alpha"$'\tfeature/alpha\t'"$d"
+  # an archived objective joins nothing: the run dir takes the slug again
+  printf 'state=abandoned\n' >"$d/archived"
+  run triage status
+  has_line $'BRANCH:\tfeature/alpha\tmerged\tahead:0\t'"$PWD/.orca/20250101-feat-alpha"
+}
+
+@test "status: slug alpha never claims slug x-alpha's objective; a dir without objective.md is not one" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  make_objective x-alpha >/dev/null
+  git branch feature/alpha
+  mkdir -p .orca/objectives/20261103-130000-beta
+  git branch feature/beta
+  run triage status
+  [ "$status" -eq 0 ]
+  has_line $'BRANCH:\tfeature/alpha\tmerged\tahead:0\torphan'
+  has_line $'BRANCH:\tfeature/beta\tmerged\tahead:0\torphan'
+}
+
+@test "snapshot: an objective's branch and worktree get no housekeeping action, and objectives are not runs" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  make_objective alpha >/dev/null
+  git -C orca-alpha commit -q --allow-empty -m 'phase work'
+  make_objective beta >/dev/null
+  run triage snapshot
+  [ "$status" -eq 0 ]
+  refute_line 'ACTION:'
+  refute_line 'RUN:'
+  refute_line 'DONE:'
+  # the same footprint with the objective gone is housekeeping again
+  rm -r .orca/objectives
+  run triage snapshot
+  has_line $'ACTION:\t1\tinspect-orphan\t-\tfeature/alpha\t'
+  has_line $'ACTION:\t2\tprune-branch\t-\tfeature/beta\t'
+}
+
+# What /orca:archive's abandon confirmation reads: the snapshot's BRANCH
+# line joined to the objective's directory, with its ahead count.
+@test "snapshot: an unlanded objective's branch carries its ahead count, joined to its directory" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  local d
+  d="$(make_objective alpha)"
+  git -C orca-alpha commit -q --allow-empty -m 'phase one'
+  git -C orca-alpha commit -q --allow-empty -m 'phase two'
+  run triage snapshot
+  [ "$status" -eq 0 ]
+  has_line $'BRANCH:\tfeature/alpha\tunmerged\tahead:2\t'"$d"
+}
+
+@test "archive and unarchive refuse an objective directory; the scan never lists one" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  local d
+  d="$(make_objective alpha)"
+  printf '# report\n\n## Blocked\n\nNone\n' >"$d/report.md"
+  git worktree remove orca-alpha
+  run triage archive "$d"
+  assert_fail_reason BAD_ARGS
+  [[ "$output" == *'objective archive'* ]] || return 1
+  [ ! -e "$d/archived" ]
+  git rev-parse -q --verify refs/heads/feature/alpha
+  printf 'state=abandoned\ntip=-\n' >"$d/archived"
+  run triage unarchive "$d"
+  assert_fail_reason BAD_ARGS
+  grep -qx 'state=abandoned' "$d/archived"
+  run triage archive --scan
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }

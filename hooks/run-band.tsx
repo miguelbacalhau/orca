@@ -5,21 +5,22 @@
 // is tracked. It writes nothing anywhere but its own $.state, and draws
 // nothing where the AbovePrompt band is not raised (VS Code, `claude -p`).
 //
-// The derivation itself is pure and lives in ./derive.ts.
+// The derivation itself is pure and lives in ./derive.ts; the drawing, and
+// the events both bands hear, are shared with the objective band
+// (./bands.tsx).
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { OrcaBand, OrcaRun, OrcaTone } from '../types'
-import { derive, headerRule, itemsFromArgs, layoutRows, parseTaskNotifications, projectDirName, slugOf } from './derive'
-import type { JournalRead, RuleTone, RunFiles } from './derive'
+import type { OrcaBand, OrcaRun } from '../types'
+import { derive, itemsFromArgs, parseTaskNotifications, projectDirName, slugOf } from './derive'
+import type { JournalRead, RunFiles } from './derive'
+import { listNames, readCached } from './read-cache'
 
 const runAtom = atom({ plugin: 'orca', key: 'run' } as const, null)
 const bandAtom = atom({ plugin: 'orca', key: 'band' } as const, null)
 
 const TICK_MS = 1500
-// $.fs.read refuses anything larger.
-const MAX_READ = 4 * 1024 * 1024
 // A spec that finished and then sat through this many of the person's own
 // prompts with no work-loop launch was abandoned at the checkpoint.
 const SPEC_IDLE_PROMPTS = 3
@@ -29,7 +30,6 @@ const SPEC_IDLE_PROMPTS = 3
 // that dispatch ends (checked under `claude -p` on 2.1.290).
 let ticker: Timer | null = null
 let ticking = false
-const textCache = new Map<string, { size: number; mtimeMs: number; text: string }>()
 
 function kindOf(scriptPath: unknown): OrcaRun['kind'] | null {
   if (typeof scriptPath !== 'string') return null
@@ -43,25 +43,6 @@ function record(v: unknown): Record<string, unknown> | null {
   return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null
 }
 
-// Reads a file through a size+mtime cache: an unchanged journal is not read
-// again every tick. 'too-large' past what $.fs.read takes.
-async function readCached($: EngineInterface, path: string): Promise<JournalRead> {
-  let stat
-  try { stat = await $.fs.stat(path) } catch { return { status: 'missing' } }
-  if (stat.size > MAX_READ) return { status: 'too-large' }
-  const hit = textCache.get(path)
-  if (hit && hit.size === stat.size && hit.mtimeMs === stat.mtimeMs) return { status: 'ok', text: hit.text }
-  try {
-    const text = await $.fs.read(path)
-    textCache.set(path, { size: stat.size, mtimeMs: stat.mtimeMs, text })
-    return { status: 'ok', text }
-  } catch { return { status: 'unreadable' } }
-}
-
-async function listNames($: EngineInterface, dir: string): Promise<{ name: string; mtimeMs: number }[]> {
-  try { return (await $.fs.list(dir)).map(f => ({ name: f.name, mtimeMs: f.mtimeMs })) } catch { return [] }
-}
-
 async function readRunFiles($: EngineInterface, run: OrcaRun): Promise<RunFiles> {
   const files: RunFiles = { runDirExists: true, spec: null, reviews: [], plans: [], merged: null, reportMtimeMs: null, agents: [] }
   let entries
@@ -72,16 +53,11 @@ async function readRunFiles($: EngineInterface, run: OrcaRun): Promise<RunFiles>
   const named = new Map(entries.map(f => [f.name, f]))
   const report = named.get('report.md')
   files.reportMtimeMs = report ? report.mtimeMs : null
-  if (run.amendPath) {
-    const st = await $.fs.stat(run.amendPath).catch(() => null)
-    files.spec = st ? { mtimeMs: st.mtimeMs, text: null } : null
-  } else {
-    const spec = named.get('spec.md')
-    // spec.md's text is needed only when the launch's own item list was unreadable.
-    const needText = run.kind === 'build' && run.items.length === 0
-    const text = spec && needText ? await readCached($, `${run.runDir}/spec.md`) : null
-    files.spec = spec ? { mtimeMs: spec.mtimeMs, text: text && text.status === 'ok' ? text.text : null } : null
-  }
+  const spec = named.get('spec.md')
+  // spec.md's text is needed only when the launch's own item list was unreadable.
+  const needText = run.kind === 'build' && run.items.length === 0
+  const text = spec && needText ? await readCached($, `${run.runDir}/spec.md`) : null
+  files.spec = spec ? { mtimeMs: spec.mtimeMs, text: text && text.status === 'ok' ? text.text : null } : null
   if (named.has('reviews')) files.reviews = await listNames($, `${run.runDir}/reviews`)
   if (named.has('plans')) files.plans = (await listNames($, `${run.runDir}/plans`)).map(f => f.name)
   if (run.kind === 'build' && named.has('merged.tsv')) {
@@ -168,7 +144,6 @@ async function track($: EngineInterface, kind: OrcaRun['kind'], input: Record<st
     journal: await journalPath($, result.transcriptDir, runId),
     since,
     items: kind === 'build' ? itemsFromArgs(args) : [],
-    amendPath: kind === 'spec' && typeof args.amendPath === 'string' ? args.amendPath : null,
     reviewer: kind === 'spec' && typeof args.reviewer === 'string' && args.reviewer ? args.reviewer : null,
     specEnded: false,
     idlePrompts: 0,
@@ -198,35 +173,27 @@ async function onPrompt($: EngineInterface, origin: string, text: string) {
   }
 }
 
-type Style = { color?: string; dimColor?: boolean; bold?: boolean }
-
-const TONE: Record<OrcaTone, Style> = {
-  done: { color: 'success' },
-  live: { color: 'suggestion' },
-  wait: { dimColor: true },
-  queued: { dimColor: true },
-  blocked: { color: 'error' },
-  cut: { dimColor: true },
+// The band's share of the events both bands hear, registered in ./bands.tsx.
+export async function runStart($: EngineInterface) {
+  // A hot reload drops the timer; the tracked run is still in $.state.
+  if (await read($, runAtom)) follow($)
 }
 
-// The top border: the rule and the name in Claude's accent, the facts set in it.
-const RULE: Record<RuleTone, Style> = {
-  rule: { color: 'claude', dimColor: true },
-  name: { color: 'claude', bold: true },
-  slug: { bold: true },
-  phase: { color: 'suggestion' },
-  detail: {},
-  sep: { dimColor: true },
-  note: { color: 'warning' },
+export async function runPrompt($: EngineInterface, origin: string, text: string) {
+  await onPrompt($, origin, text)
+}
+
+export async function runEnd($: EngineInterface) {
+  await forget($)
+}
+
+// The band to draw now; null leaves the slot to the objective band.
+export async function runBand($: EngineInterface): Promise<OrcaBand | null> {
+  const band = await read($, bandAtom)
+  return band && (await read($, runAtom)) ? band : null
 }
 
 export const register: Register = on => {
-  on('session.start', async ($, e, next) => {
-    // A hot reload drops the timer; the tracked run is still in $.state.
-    if (await read($, runAtom)) follow($)
-    return next(e)
-  })
-
   on('tool.call', { tool: 'Workflow' }, async ($, e, next) => {
     // Only the main conversation's own launches: the skills launch from there.
     if (e.tool !== 'Workflow' || e.agentId !== undefined) return next(e)
@@ -239,42 +206,4 @@ export const register: Register = on => {
     }
     return ran
   }).catch(($, e, next) => next(e)) // an observer never stands in a call's way
-
-  on('prompt.submit', async ($, e, next) => {
-    try { await onPrompt($, e.origin.kind, e.text) } catch { /* observe only */ }
-    return next(e)
-  }).catch(($, e, next) => next(e))
-
-  on('session.end', async ($, e, next) => {
-    try { await forget($) } catch { /* observe only */ }
-    return next(e)
-  })
-
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey) return next(e)
-    const band = await read($, bandAtom)
-    if (!band || !(await read($, runAtom))) return next(e)
-    const { Box, Text } = $.ui.resolve(e)
-    const columns = Math.max(24, e.props.bodyColumns || 80)
-
-    // A blank row above the rule sets the band off from the transcript's last
-    // line, and one below it sets the rule off from the rows.
-    return (
-      <Box flexDirection="column" marginTop={1}>
-        <Box marginBottom={band.rows.length ? 1 : 0}>
-          {headerRule(band, columns).map(piece => (
-            <Text {...RULE[piece.tone]} wrap="truncate-end">{piece.text}</Text>
-          ))}
-        </Box>
-        {layoutRows(band.rows, columns).map(line => (
-          <Box>
-            <Text>{'  '}</Text>
-            <Text bold>{line.id}</Text>
-            <Text>{`  ${line.title}  `}</Text>
-            <Text {...TONE[line.row.tone]} wrap="truncate-end">{line.tail}</Text>
-          </Box>
-        ))}
-      </Box>
-    )
-  })
 }

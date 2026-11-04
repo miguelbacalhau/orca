@@ -39,18 +39,6 @@
 //                   orca:spec-review-<reviewer>. No overrides apply to it:
 //                   like reconcile and escalate, its cost/judgment profile
 //                   lives in the agent frontmatter
-//   amendPath       optional absolute path marking this an AMEND round —
-//                   the iterate skill's spec stage, where the agent writes
-//                   an amendment file (spec.amendment.md) beside the
-//                   delivered spec instead of authoring <runDir>/spec.md.
-//                   When set: the revise prompt's hardcoded lines point at
-//                   <amendPath> ("rewrite <amendPath> in place") instead of
-//                   <runDir>/spec.md; the review spawn's task message gains
-//                   an `Amendment path: <amendPath>` line; and the review
-//                   artifact becomes spec-amend-<reviewer>.json, never
-//                   clobbering the original run's spec review. When absent,
-//                   the fresh-spec path is byte-identical to before the arg
-//                   existed.
 // }
 //
 // Return: { summary, died, review } —
@@ -97,16 +85,13 @@ if (typeof parsedArgs === 'string') {
 }
 if (typeof parsedArgs !== 'object' || parsedArgs === null)
   throw new Error(`args must be a JSON object (got ${JSON.stringify(args)}) — pass it as a real object, not a JSON-encoded string`)
-const { prompt, model, effort, runDir, reviewWorktree, reviewer, amendPath, pluginRoot } = parsedArgs
+const { prompt, model, effort, runDir, reviewWorktree, reviewer, pluginRoot } = parsedArgs
 for (const [k, v] of Object.entries({ prompt, runDir, reviewWorktree }))
   if (typeof v !== 'string' || !v)
     throw new Error(`args.${k} must be a non-empty string (got ${JSON.stringify(v)})`)
-if (amendPath !== undefined && (typeof amendPath !== 'string' || !amendPath))
-  throw new Error(`args.amendPath must be a non-empty string when present (got ${JSON.stringify(amendPath)})`)
 // Absolute paths only: the reviewer resolves them from its own working
 // directory, so a relative path silently points it somewhere else.
-for (const [k, v] of Object.entries(amendPath !== undefined
-  ? { runDir, reviewWorktree, amendPath } : { runDir, reviewWorktree }))
+for (const [k, v] of Object.entries({ runDir, reviewWorktree }))
   if (!v.startsWith('/'))
     throw new Error(`args.${k} must be an absolute path (got ${JSON.stringify(v)})`)
 if (reviewer !== 'codex' && reviewer !== 'claude')
@@ -157,11 +142,9 @@ const REVIEW = { type: 'object', additionalProperties: false, required: ['writte
     reason: { type: 'string' } } }
 
 const reviewAgentType = `orca:spec-review-${reviewer}`
-// An amend round's review artifact gets its own name so it never clobbers
-// the original run's spec review; across iteration rounds (and checkpoint
-// re-spawns) the artifact is latest-wins, matching report.md's rewrite
-// posture.
-const artifact = `${runDir}/reviews/${amendPath ? `spec-amend-${reviewer}` : `spec-${reviewer}`}.json`
+// Across checkpoint re-spawns the artifact is latest-wins, matching
+// report.md's rewrite posture.
+const artifact = `${runDir}/reviews/spec-${reviewer}.json`
 
 // The one review: two workflow-level attempts on top of the agent's
 // internal retries; the returned counts never pass the impossible-count
@@ -173,9 +156,7 @@ const review = async () => {
   let lastReason
   for (let attempt = 1; attempt <= 2; attempt++) {
     const r = await agent(
-      [`Review worktree: ${reviewWorktree}`, `Run directory: ${runDir}`,
-       ...(amendPath ? [`Amendment path: ${amendPath}`] : []),
-       `Artifact path: ${artifact}`,
+      [`Review worktree: ${reviewWorktree}`, `Run directory: ${runDir}`, `Artifact path: ${artifact}`,
        // Only the codex courier shells out; the claude reviewer's prompt
        // stays byte-identical to what it has always been.
        ...(reviewer === 'codex' ? [`Plugin root: ${pluginRoot}`] : [])].join('\n'),
@@ -211,7 +192,7 @@ if (r1.criticalHigh === 0)
 // over the spec. The revise prompt reuses the original prompt verbatim so
 // the agent still holds the brief, the repo root, and the project context.
 log(`spec review: ${r1.total} finding(s), ${r1.criticalHigh} Critical/High — revising`)
-const reviseTarget = amendPath || `${runDir}/spec.md`
+const reviseTarget = `${runDir}/spec.md`
 const revisePrompt = [
   prompt,
   '',

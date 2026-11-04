@@ -11,7 +11,7 @@
 # the rules are conventions, enforced by review: this file owns its
 # function names (fail, emit_frame, b64_encode, b64_decode,
 # resolve_repo, canonicalize, is_run_dir, is_worktree_root, is_marker,
-# notes_key, is_banned) and verbs never redefine them;
+# worktree_tree, notes_key, is_banned) and verbs never redefine them;
 # callers source it via an absolute path ("$PLUGIN_ROOT/scripts/lib.sh"
 # — `source` resolves relative paths against the working directory, not
 # the sourcing script); and a sourced file's `exit` kills the caller —
@@ -171,11 +171,32 @@ is_marker() { # <value>
   [[ $1 =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]]
 }
 
+# worktree_tree <worktree> — the tree `git add -A` would commit right
+# now, built in a throwaway copy of the index (blobs land in the object
+# store, nothing else changes); sets worktree_tree_id. Returns 1 when git
+# cannot build it.
+worktree_tree() {
+  local index tmp
+  index="$(git -C "$1" rev-parse --path-format=absolute --git-path index 2>/dev/null)" || return 1
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/orca-tree.XXXXXX" 2>/dev/null)" || return 1
+  if [ -f "$index" ] && ! cp "$index" "$tmp/index" 2>/dev/null; then
+    rm -rf "$tmp"
+    return 1
+  fi
+  if GIT_INDEX_FILE="$tmp/index" git -C "$1" add -A >/dev/null 2>&1 \
+    && worktree_tree_id="$(GIT_INDEX_FILE="$tmp/index" git -C "$1" write-tree 2>/dev/null)"; then
+    rm -rf "$tmp"
+    is_marker "$worktree_tree_id"
+    return
+  fi
+  rm -rf "$tmp"
+  return 1
+}
+
 # ---- branch key -------------------------------------------------------
 # notes_key <branch> — a branch as a filename: anything outside
 # [A-Za-z0-9._-] replaced by '-' — orca.nvim's rule for review-notes
-# files, mirrored exactly, and reused for the loop verb's scratch
-# directories so one branch has one key everywhere.
+# files, mirrored exactly.
 # Known limitation: the sanitization can collide (feature/foo and
 # feature-foo share a key). Disambiguating (e.g. a branch-hash suffix) must
 # land in LOCKSTEP with orca.nvim and orca.vscode — they write review-notes
@@ -438,22 +459,20 @@ is_banned() { # <text> — exit 0 iff the text trips the attribution regex
 
 # ---- lease reading ----------------------------------------------------
 # The read side of the per-run lease (atomic mkdir <run-dir>/.lock with
-# a machine-readable owner file inside). Writing — claim, release,
-# steal, and the pid-capture rule — lives solely in verbs/triage.sh,
-# the lease's single home; the reader lives here so any verb needing
-# the verdict shares one implementation.
+# a machine-readable owner file inside) and of an objective's `owner`
+# claim, which carries the same host=/pid=/pidstart=/taken= fields.
+# Writing — the run lease's claim, release, and steal — lives solely in
+# verbs/triage.sh, the lease's single home, and the objective claim in
+# verbs/objective.sh; the verdict and the pid-capture rule live here so
+# both writers and every reader share one implementation.
 lease_owner_field() { # <owner-file> <key> — the value, verbatim (leading padding kept)
   sed -n "s/^$2=//p" "$1" 2>/dev/null | head -1
 }
 
-# The LEASE: payload for a run dir: "<verdict>\tpid:<n|->\tsince:<iso|->".
-lease_read() { # <run-dir>
-  local lock="$1/.lock" owner host pid pidstart taken cur
-  if [[ ! -e "$lock" ]]; then
-    printf 'none'
-    return
-  fi
-  owner="$lock/owner"
+# The verdict on one owner file: "<verdict>\tpid:<n|->\tsince:<iso|->",
+# verdict live | stale | unknown.
+lease_verdict() { # <owner-file>
+  local owner="$1" host pid pidstart taken cur
   host="$(lease_owner_field "$owner" host)"
   pid="$(lease_owner_field "$owner" pid)"
   pidstart="$(lease_owner_field "$owner" pidstart)"
@@ -480,4 +499,42 @@ lease_read() { # <run-dir>
     fi
   fi
   printf 'stale\tpid:%s\tsince:%s' "$pid" "${taken:--}"
+}
+
+# The LEASE: payload for a run dir: "<verdict>\tpid:<n|->\tsince:<iso|->".
+lease_read() { # <run-dir>
+  if [[ ! -e "$1/.lock" ]]; then
+    printf 'none'
+    return
+  fi
+  lease_verdict "$1/.lock/owner"
+}
+
+# The session's process, found by WALKING, never by a pinned depth: start
+# at $$ and step up past every ancestor whose comm is a shell
+# (sh/bash/zsh/dash — login '-' prefix and path prefix stripped),
+# recording the first non-shell ancestor. The common chain is
+# claude -> tool shell -> orca.sh, but shells exec-optimize their last
+# command in some configurations and the intermediate layer collapses; a
+# pinned grandparent rule would then record the terminal app — a lease
+# that reads live essentially forever, the worst failure direction.
+lease_session_pid() {
+  local pid=$$ parent comm
+  while :; do
+    parent="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d '[:space:]')"
+    case "$parent" in '' | 0 | 1) break ;; esac
+    comm="$(ps -o comm= -p "$parent" 2>/dev/null | tr -d '[:space:]')"
+    comm="${comm##*/}"
+    comm="${comm#-}"
+    case "$comm" in
+      sh | bash | zsh | dash) pid="$parent" ;;
+      *)
+        printf '%s' "$parent"
+        return
+        ;;
+    esac
+  done
+  # Every ancestor to the process-tree root was a shell (or ps failed):
+  # record the topmost shell examined rather than pid 1/0.
+  printf '%s' "$pid"
 }

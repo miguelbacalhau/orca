@@ -1,13 +1,15 @@
-// The run band (hooks/run-band.tsx, hooks/derive.ts): the derivation as plain
-// data, then the hooks module end to end against the engine, with the run
-// directory and the journal served from memory. Run with
+// The run band (hooks/run-band.tsx, hooks/derive.ts, and the layout it shares
+// with the objective band, hooks/layout.ts): the derivation as plain data,
+// then the hooks module end to end against the engine, with the run directory
+// and the journal served from memory. Run with
 // `claude plugin test <orca checkout>`.
 
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { classifyLabel, derive as deriveAt, headerRule, layoutRows, parseJournal, parseTaskNotifications, specState } from '../hooks/derive'
+import { classifyLabel, derive as deriveAt, parseJournal, parseTaskNotifications, specState } from '../hooks/derive'
 import type { JournalRead, RunFiles } from '../hooks/derive'
+import { headerRule, layoutRows } from '../hooks/layout'
 import type { OrcaBand, OrcaItem, OrcaRun } from '../types'
 
 const RUN_DIR = '/repo/.orca/20261006-101500-feat-staged-typecheck-overlay'
@@ -27,7 +29,7 @@ const ITEMS: OrcaItem[] = [
 function run(over: Partial<OrcaRun> = {}): OrcaRun {
   return {
     kind: 'build', runDir: RUN_DIR, slug: 'staged-typecheck-overlay', runId: 'wf_1', taskId: 'task1',
-    journal: JOURNAL, since: 1000, items: ITEMS, amendPath: null, reviewer: null, specEnded: false, idlePrompts: 0,
+    journal: JOURNAL, since: 1000, items: ITEMS, reviewer: null, specEnded: false, idlePrompts: 0,
     ...over,
   }
 }
@@ -79,12 +81,9 @@ describe('spec phase', () => {
     expect(specState(spec(), files(), parseJournal(journal(['started', 'k1', 'spec'])))).toBe('drafting')
   })
 
-  test('an amend round reads its own artifact, and a finished spec workflow is ready', () => {
-    const amend = spec({ amendPath: `${RUN_DIR}/spec.amendment.md` })
-    const f = files({ spec: { mtimeMs: 1500, text: null }, reviews: [{ name: 'spec-codex.json', mtimeMs: 1600 }] })
-    expect(specState(amend, f, null)).toBe('reviewing')
-    f.reviews.push({ name: 'spec-amend-codex.json', mtimeMs: 1700 })
-    expect(specState(amend, f, null)).toBe('ready')
+  test('an old amend-round artifact is not a spec review, and a finished spec workflow is ready', () => {
+    const f = files({ spec: { mtimeMs: 1500, text: null }, reviews: [{ name: 'spec-amend-codex.json', mtimeMs: 1700 }] })
+    expect(specState(spec(), f, null)).toBe('reviewing')
     expect(specState(spec({ specEnded: true }), files(), null)).toBe('ready')
   })
 
@@ -104,9 +103,9 @@ describe('spec phase', () => {
     ])
     expect(rowsOf(derive(spec(), files(), ok(journal(['started', 's', 'spec'])), 7 * MIN)))
       .toEqual({ spec: '● drafting', review: '○ queued', revise: '○ on Critical/High only' })
-    const amend = derive(spec({ amendPath: `${RUN_DIR}/spec.amendment.md`, reviewer: null }), files(), ok(journal()))
-    expect(amend.band?.rows.map(r => r.title)).toEqual(
-      ['author the amendment', 'independent review against brief + codebase', 'fold Critical/High findings in'])
+    const unnamed = derive(spec({ reviewer: null }), files(), ok(journal()))
+    expect(unnamed.band?.rows.map(r => r.title)).toEqual(
+      ['author spec.md from the brief', 'independent review against brief + codebase', 'fold Critical/High findings in'])
   })
 
   test('what the review found decides the revise row', () => {

@@ -21,11 +21,22 @@
 #       ok      -> checked out at <worktree> per `git worktree list --porcelain`
 #       missing -> branch unmerged but no worktree has it; <worktree> is the
 #                  namespace-derived path a re-add would use
+#     OBJECTIVE_DIR:<TAB><objective-dir>          right after its
+#       DELIVERABLE, when a live (not archived) objective's objective.md
+#       names the branch in its `**Branch:**` header — whether or not the
+#       objective has a report yet; the newest such objective.
+#     REPORT:<TAB><report.md><TAB>run|objective     after those, when a
+#       report names the branch in its
+#       `**Deliverable:** `<branch>`` line: an objective's
+#       (.orca/objectives/*/report.md, archived ones skipped) first, else a
+#       run's (.orca/*/report.md) — the newest of either kind, a run's
+#       never for a branch an objective owns. Absent when no report names
+#       it (a branch no run produced, or an objective with no report yet).
 #     A DELIVERABLE with a review-notes file carrying open comments gets the
-#     notes subcommand's NOTES: line appended right after it (NOTES_VERSION:
-#     on a version the script doesn't speak — informational here, exit
-#     unchanged). This is the decoupled pick-up: unconsumed comments are
-#     discoverable state, like queued briefs.
+#     notes subcommand's NOTES: line appended after it and its REPORT:
+#     line (NOTES_VERSION: on a version the script doesn't speak —
+#     informational here, exit unchanged). This is the decoupled pick-up:
+#     unconsumed comments are discoverable state, like queued briefs.
 #     Exit 0 even with zero DELIVERABLE lines — an empty list is an answer,
 #     not an error.
 #
@@ -225,6 +236,44 @@ probe_vscode() {
   fi
 }
 
+# The live objective whose objective.md names <branch> in its
+# `**Branch:**` header — the objective owns its branch from `objective
+# new` on, report or no report; archived ones skipped. The newest wins.
+branch_objective() { # <branch>
+  local want="**Branch:** \`$1\`" f found=""
+  for f in "$repo_root"/.orca/objectives/*/objective.md; do
+    [[ -f "$f" && ! -e "${f%/objective.md}/archived" && ! -e "${f%/objective.md}/archiving" ]] || continue
+    report_names "$f" "$want" && found="${f%/objective.md}"
+  done
+  printf '%s' "$found"
+}
+
+# The report naming <branch> as its deliverable, as "<path>\t<kind>": an
+# objective's first (it owns its branch outright), else a run's — the
+# newest of the kind, timestamped directory names sorting oldest first.
+# A branch an objective owns never takes a run's report.
+deliverable_report() { # <branch> [<objective-dir>]
+  local want="**Deliverable:** \`$1\`" f found=""
+  for f in "$repo_root"/.orca/objectives/*/report.md; do
+    [[ -f "$f" && ! -e "${f%/report.md}/archived" && ! -e "${f%/report.md}/archiving" ]] || continue
+    report_names "$f" "$want" && found="$f"
+  done
+  if [[ -n "$found" ]]; then
+    printf '%s\tobjective' "$found"
+    return
+  fi
+  [[ -z "${2:-}" ]] || return 0
+  for f in "$repo_root"/.orca/*/report.md; do
+    [[ -f "$f" ]] || continue
+    report_names "$f" "$want" && found="$f"
+  done
+  [[ -z "$found" ]] || printf '%s\trun' "$found"
+}
+
+report_names() { # <report.md> <deliverable-line> — a line starting with it
+  LC_ALL=C awk -v want="$2" 'index($0, want) == 1 { found = 1; exit } END { exit !found }' "$1" 2>/dev/null
+}
+
 cmd_discover() {
   review_resolve_repo
   printf 'TRUNK:\t%s\n' "$trunk"
@@ -243,7 +292,7 @@ cmd_discover() {
     /^branch refs\/heads\// { print substr($0, 19) "\t" path }
   ')"
 
-  local branch worktree state notes_file notes_line counts
+  local branch worktree state notes_file notes_line counts report owner
   while IFS= read -r branch; do
     [[ -n "$branch" ]] || continue
     # Per-item branches (feature/<slug>-W<n>, kept by blocked items) are
@@ -263,6 +312,10 @@ cmd_discover() {
       worktree="$repo_root/orca-${branch#feature/}"
     fi
     printf 'DELIVERABLE:\t%s\t%s\t%s\n' "$branch" "$worktree" "$state"
+    owner="$(branch_objective "$branch")"
+    [[ -z "$owner" ]] || printf 'OBJECTIVE_DIR:\t%s\n' "$owner"
+    report="$(deliverable_report "$branch" "$owner")"
+    [[ -z "$report" ]] || printf 'REPORT:\t%s\n' "$report"
     # Unconsumed review comments are discoverable state: surface a notes
     # file with open comments (or an unspeakable version) right after its
     # deliverable. The branch *is* the head the plugin keyed by — reviews

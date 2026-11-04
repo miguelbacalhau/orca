@@ -9,7 +9,7 @@ What a repository looks like mid-run. `/orca:init` creates the top three entries
 ├── .bare/                        # the bare repository (shared object store)
 ├── .git                          # one line: gitdir: ./.bare
 ├── main/                         # your worktree(s) — never touched by runs
-├── orca-<slug>/                  # integration worktree (branch feature/<slug>)
+├── orca-<slug>/                  # a run's integration worktree, or an objective's worktree (branch feature/<slug>)
 ├── orca-<slug>-W1/               # one worktree per in-flight item (branch feature/<slug>-W1)
 └── .orca/
     ├── config                         # optional per-repo overrides (/orca:config)
@@ -19,6 +19,7 @@ What a repository looks like mid-run. `/orca:init` creates the top three entries
     ├── doctor/                        # scratch for /orca:doctor's provisioning pass
     ├── feat-briefs/                   # queued briefs (drafts/ for parked ones)
     ├── review-notes/<key>.json        # review comments per deliverable branch
+    ├── objectives/<YYYYMMDD-HHMMSS>-<slug>/  # one directory per objective (see objectives.md)
     └── YYYYMMDD-HHMMSS-feat-<slug>/   # one directory per run
         ├── brief.md                   # the consumed brief
         ├── spec.md                    # spec, work breakdown, Decisions log, workflow runId

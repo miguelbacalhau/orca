@@ -99,10 +99,13 @@
 # status output contract — TAB-separated, one line per git fact. Only the
 # runs' own footprint is emitted — the feature/* branch namespace and
 # orca-* worktree directory names; the user's branches and worktrees never
-# appear. The last field of each line joins the fact to the newest .orca
-# run directory carrying its slug (run dirs, orca-<slug> worktree names,
+# appear. The last field of each line joins the fact to the directory
+# carrying its slug (run dirs, objective dirs, orca-<slug> worktree names,
 # and feature/<slug>[-<ID>] branch names all carry the slug by
-# construction); no surviving run directory reads `orphan`.
+# construction): an objective's directory, .orca/objectives/<YYYYMMDD-
+# HHMMSS>-<slug>, when one not archived carries it — an objective owns
+# its branch and worktree outright — else the newest .orca run directory;
+# neither reads `orphan`.
 #
 #   TRUNK:<TAB><branch>
 #       The bare repo HEAD's symbolic-ref — the same source preflight's
@@ -143,7 +146,9 @@
 #       review; `-` = user housekeeping) so each caller filters its own.
 #       These are ordered CANDIDATES, not commands — the skills present,
 #       never force. A run whose lease reads live gets NO resume action:
-#       an open session owns it. Evidence is one base64 line.
+#       an open session owns it. A branch or worktree joined to an
+#       objective gets no action at all: the objective owns it, and
+#       `objective list` routes it. Evidence is one base64 line.
 #
 # claim/release output contract:
 #
@@ -190,7 +195,8 @@
 #   Typed failures, exit 1: NO_RUN_DIR, NO_REPORT, NOT_CLEAN, LEASE_LIVE,
 #   NO_TRUNK, NOT_LANDED, WORKTREE_IN_USE, PRUNE_FAILED (git refused a
 #   removal after the gate passed — no marker written; re-run to finish),
-#   BAD_ARGS.
+#   BAD_ARGS (an objective directory among them: objectives archive
+#   through `orca.sh objective archive|unarchive`).
 #
 # The ARGS payloads are the point: a resume must replay the launch args
 # byte-identical (any drift changes agent prompts and re-runs completed
@@ -231,38 +237,9 @@ triage_resolve_repo() {
 # Atomic mkdir <run-dir>/.lock is the lock; the owner file inside is
 # machine-readable identity (runid=, host=, pid=, pidstart=, note=,
 # taken=). This verb is the lease's single home: the workflows and the
-# run skills all take and release it through orca.sh, so the pid-capture
-# rule below lives in exactly one place and nothing else may write an
-# owner file.
-
-# The session's process, found by WALKING, never by a pinned depth: start
-# at $$ and step up past every ancestor whose comm is a shell
-# (sh/bash/zsh/dash — login '-' prefix and path prefix stripped),
-# recording the first non-shell ancestor. The common chain is
-# claude -> tool shell -> orca.sh, but shells exec-optimize their last
-# command in some configurations and the intermediate layer collapses; a
-# pinned grandparent rule would then record the terminal app — a lease
-# that reads live essentially forever, the worst failure direction.
-lease_session_pid() {
-  local pid=$$ parent comm
-  while :; do
-    parent="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d '[:space:]')"
-    case "$parent" in '' | 0 | 1) break ;; esac
-    comm="$(ps -o comm= -p "$parent" 2>/dev/null | tr -d '[:space:]')"
-    comm="${comm##*/}"
-    comm="${comm#-}"
-    case "$comm" in
-      sh | bash | zsh | dash) pid="$parent" ;;
-      *)
-        printf '%s' "$parent"
-        return
-        ;;
-    esac
-  done
-  # Every ancestor to the process-tree root was a shell (or ps failed):
-  # record the topmost shell examined rather than pid 1/0.
-  printf '%s' "$pid"
-}
+# run skills all take and release it through orca.sh, and nothing else
+# may write a lock's owner file. The pid-capture rule (lease_session_pid)
+# and the verdict live in lib.sh, shared with the objective claim.
 
 emit_lease() { # <run-dir>
   printf 'LEASE:\t%s\n' "$(lease_read "$1")"
@@ -521,6 +498,11 @@ g() { git --git-dir="$common_dir" "$@"; }
 # slug's run.
 run_join() { # <slug>
   local d name prefix match=""
+  match="$(objective_join "$1")"
+  if [[ -n "$match" ]]; then
+    printf '%s' "$match"
+    return
+  fi
   # Anchored: the glob alone would let slug "alpha" claim slug "x-alpha"'s
   # run dir (*-feat-alpha matches ...-feat-x-alpha). The prefix before
   # -feat-<slug> must be the timestamp — digits and dashes only —
@@ -540,6 +522,35 @@ run_join() { # <slug>
     done
   fi
   printf '%s' "${match:-orphan}"
+}
+
+# The objective directory carrying <slug> — .orca/objectives/<YYYYMMDD-
+# HHMMSS>-<slug> with its objective.md, not archived — or nothing. The
+# prefix is checked literally, as run_join does, so slug alpha never
+# claims x-alpha's objective.
+objective_join() { # <slug>
+  local d name prefix match=""
+  for d in "$repo_root/.orca/objectives/"*"-$1"; do
+    [[ -d "$d" && -f "$d/objective.md" && ! -e "$d/archived" ]] || continue
+    name="${d##*/}"
+    prefix="${name%-"$1"}"
+    [[ "$prefix" != "$name" && "$prefix" =~ ^[0-9]{8}-[0-9]{6}$ ]] && match="$d"
+  done
+  printf '%s' "$match"
+}
+
+is_objective_join() { # <join-field>
+  [[ "$1" == */.orca/objectives/* ]]
+}
+
+# The write forms take run directories only: an objective's archive is
+# its own verb, with its own marker format.
+refuse_objective_dir() { # <dir>
+  local real
+  real="$(cd "$1" 2>/dev/null && pwd -P)" || return 0
+  [[ "$real" == */.orca/objectives/* ]] \
+    && triage_fail BAD_ARGS "$1 is an objective — archive it with 'orca.sh objective archive|unarchive'"
+  return 0
 }
 
 # merged|unmerged|unknown — an empty target means there is nothing to test
@@ -768,7 +779,7 @@ EOF
         continue
         ;;
     esac
-    if ! state="$(git -C "$p" status --porcelain 2>/dev/null)"; then
+    if ! state="$(git -C "$p" status --porcelain --untracked-files=all 2>/dev/null)"; then
       inuse="$inuse$name(unreadable status) "
     elif [[ -n "$state" ]]; then
       inuse="$inuse$name(uncommitted changes) "
@@ -851,6 +862,7 @@ EOF
   dir="${1:-}"
   [[ -n "$dir" ]] || triage_fail BAD_ARGS "usage: triage.sh archive --scan | triage.sh archive <run-dir>"
   [[ -d "$dir" ]] || triage_fail NO_RUN_DIR "not a directory: $dir"
+  refuse_objective_dir "$dir"
   if is_archived "$dir"; then
     # Idempotent: re-archiving an archived run is a no-op, not a failure.
     printf 'ARCHIVED:\t%s\n' "$dir"
@@ -901,12 +913,13 @@ EOF
 # Ungated: removing the marker returns the run to the routing surface,
 # and every branch it recorded is recreated at its recorded tip — unless
 # a branch of that name exists again or the commit is gone, which is
-# reported and left alone. Worktrees are not re-added: /orca:review and
-# /orca:iterate re-add their own on demand.
+# reported and left alone. Worktrees are not re-added: /orca:review
+# re-adds its own on demand.
 cmd_unarchive() {
   local dir="${1:-}" line name sha
   [[ -n "$dir" ]] || triage_fail BAD_ARGS "usage: triage.sh unarchive <run-dir>"
   [[ -d "$dir" ]] || triage_fail NO_RUN_DIR "not a directory: $dir"
+  refuse_objective_dir "$dir"
   if [[ -f "$dir/archived" ]] && grep -q '^branch=' "$dir/archived"; then
     triage_resolve_repo
     while IFS= read -r line; do
@@ -1017,6 +1030,11 @@ $disc
 EOF
 
   while IFS=$'\t' read -r tag f2 f3 f4 f5; do
+    # An objective owns its branch and worktree: no housekeeping on them.
+    case "$tag" in
+      BRANCH:) is_objective_join "$f5" && continue ;;
+      ITEMBR: | WORKTREE:) is_objective_join "$f4" && continue ;;
+    esac
     case "$tag" in
       BRANCH:)
         branch_recs+="$f2"$'\t'"$f3"$'\t'"$f4"$'\t'"$f5"$'\n'

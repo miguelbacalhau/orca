@@ -122,3 +122,46 @@ make_deliverable() { # <dir>
   [ "$status" -eq 0 ]
   has_line $'NOTES:\t'"$BATS_TEST_TMPDIR/r/.orca/review-notes/feature-foo.json"$'\t0,0,1'
 }
+
+# report_for <dir> <branch> — a report.md in <dir> naming <branch> its deliverable.
+report_for() {
+  mkdir -p "$1"
+  printf '# Report: x\n\n**Deliverable:** `%s`\n**Deliverable state:** verified\n' "$2" >"$1/report.md"
+}
+
+@test "discover names the report behind a deliverable: a run's, or an objective's first" {
+  make_deliverable "$BATS_TEST_TMPDIR/r"
+  local orca="$BATS_TEST_TMPDIR/r/.orca"
+  cd "$BATS_TEST_TMPDIR/r/main"
+  run bash "$SCRIPTS/orca.sh" review discover
+  [ "$status" -eq 0 ]
+  refute_line 'REPORT:'
+  report_for "$orca/20250101-1200-feat-foo" feature/foo
+  report_for "$orca/20250101-1200-feat-bar" feature/bar
+  run bash "$SCRIPTS/orca.sh" review discover
+  [ "$status" -eq 0 ]
+  has_line $'REPORT:\t'"$orca/20250101-1200-feat-foo/report.md"$'\trun'
+  report_for "$orca/objectives/20261103-120000-foo" feature/foo
+  run bash "$SCRIPTS/orca.sh" review discover
+  [ "$status" -eq 0 ]
+  has_line $'REPORT:\t'"$orca/objectives/20261103-120000-foo/report.md"$'\tobjective'
+  [ "$(printf '%s\n' "$output" | grep -c '^REPORT:')" -eq 1 ]
+  # REPORT: follows its DELIVERABLE: line
+  [ "$(printf '%s\n' "$output" | grep -A1 '^DELIVERABLE:' | sed -n 2p | cut -f1)" = REPORT: ]
+  # an archived objective's report no longer speaks for the branch
+  printf 'state=abandoned\n' >"$orca/objectives/20261103-120000-foo/archived"
+  run bash "$SCRIPTS/orca.sh" review discover
+  has_line $'REPORT:\t'"$orca/20250101-1200-feat-foo/report.md"$'\trun'
+}
+
+@test "discover: a report naming another branch, or the slug only in prose, is not the deliverable's" {
+  make_deliverable "$BATS_TEST_TMPDIR/r"
+  local orca="$BATS_TEST_TMPDIR/r/.orca"
+  cd "$BATS_TEST_TMPDIR/r/main"
+  report_for "$orca/objectives/20261103-120000-foobar" feature/foobar
+  mkdir -p "$orca/objectives/20261103-130000-other"
+  printf '# Report\n\nworks on `feature/foo` too\n' >"$orca/objectives/20261103-130000-other/report.md"
+  run bash "$SCRIPTS/orca.sh" review discover
+  [ "$status" -eq 0 ]
+  refute_line 'REPORT:'
+}

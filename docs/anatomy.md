@@ -104,6 +104,7 @@ The session that launched a run shows it live above the prompt:
 - It follows only the run this session launched, and disappears when the work loop ends or `report.md` is written. A finished spec followed by three of your prompts without a launch is treated as abandoned.
 - Without a readable workflow journal it falls back to the artifacts on disk and shows `no journal` in the header.
 - Collapse it with `[-]` or ctrl+x ctrl+a. Where a band can't be drawn (VS Code, `claude -p`) it does nothing.
+- It shares its slot with the [objective band](objectives.md#the-objective-band); while a run is live, the run band is the one drawn.
 
 It is read-only (`hooks/run-band.tsx`, logic in `hooks/derive.ts`): it watches this session's launches of `spec.workflow.js` and `work-loop.workflow.js` and reads the run directory and the workflow journal every 1.5 s.
 
@@ -117,7 +118,7 @@ Rule-shaped knowledge ("never install X via npm") goes in the report under **Kno
 
 ## Stage agents
 
-Twenty agents ship in `agents/<stage>.md`, loaded as `orca:<stage>`. Each runs in its own context; stages pass context through artifact files.
+Twenty-four agents ship in `agents/<stage>.md`, loaded as `orca:<stage>`. Each runs in its own context; stages pass context through artifact files. The last seven rows serve [objectives](objectives.md), not runs.
 
 | Stage | Role | Model | Effort | Configurable |
 |---|---|---|---|---|
@@ -132,14 +133,18 @@ Twenty agents ship in `agents/<stage>.md`, loaded as `orca:<stage>`. Each runs i
 | `commit` | One Conventional Commit per item, carrying its decisions | sonnet | low | ✓ |
 | `merge` | Serialized squash onto the integration branch; resolves conflicts | opus | high | ✓ |
 | `integrate` | Verifies the assembled feature against the spec | opus | high | ✓ |
-| `research` | Explores what an idea touches, for the interview, `/orca:iterate`, and `/orca:followup` | fable | high | ✓ (at next spawn) |
+| `research` | Explores what an idea touches, for the interview, `/orca:followup`, and `/orca:new` | fable | high | ✓ (at next spawn) |
 | `address` | Turns `/orca:review` comments into fixes and answers | opus | high | |
 | `audit` | Reconciles a finished run against git, for `/orca:retry` and `/orca:followup` | opus | high | |
 | `doctor` | Derives and proves `.orca/setup`, for `/orca:doctor` and `/orca:init` | opus | high | |
 | `council` | One Claude seat of `/orca:council`; the model is the seat's | per seat | high | ✓ (`council` roster) |
 | `council-codex` | Courier driving `/orca:council`'s Codex seat via `orca.sh codex` | sonnet | medium | |
-| `loop-implement` | Implements, fixes, and commits `/orca:loop`'s change, kept alive across rounds | opus | high | |
-| `loop-review-codex` | Courier driving one `/orca:loop` round's Codex review via `orca.sh codex` | sonnet | medium | |
-| `loop-review-claude` | Performs one `/orca:loop` round's review itself | opus | high | |
+| `worktree` | Runs an objective's claim, worktree arrival, provisioning, and reviewer checks, or a phase start | sonnet | low | |
+| `phases` | Read-only planner: proposes an objective's sequential phases | fable | high | |
+| `phases-review-codex` | Courier driving the Codex review of a proposed phase plan via `orca.sh codex` | sonnet | medium | |
+| `phases-review-claude` | Performs the phase-plan review itself | opus | high | |
+| `loop-implement` | Implements, fixes, and commits one objective phase, kept alive across its rounds | opus | high | |
+| `loop-review-codex` | Courier driving one phase round's Codex review via `orca.sh codex` | sonnet | medium | |
+| `loop-review-claude` | Performs one phase round's review itself | opus | high | |
 
-The resolved reviewer picks both the item reviewer and the spec reviewer. The workflow's internal helper agents (reconciliation, escalation) are not configurable.
+The resolved reviewer picks the item reviewer and the spec reviewer, and for objectives the plan reviewer and the phase reviewer. The workflow's internal helper agents (reconciliation, escalation) are not configurable.

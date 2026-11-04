@@ -2,15 +2,18 @@
 
 Every user-facing skill in detail. The [README](../README.md#commands) has the one-paragraph versions.
 
+**Run, objective, or loop.** A run (`/orca:run`) takes one confirmed brief to a finished deliverable autonomously: a spec, parallel work items, one report, and `/orca:retry` and `/orca:followup` for what comes after. An objective (`/orca:new`, then `/orca:open` in any later session) is for work you expect to come back to, with you deciding along the way: a recorded discussion, a reviewed plan of sequential phases on one branch, each phase reviewed round by round, and more decisions and phases whenever there is more to do. `/orca:loop` adds one small phase to the objective your session has open; outside an objective it refuses. A small fix on a run's deliverable is done by hand, or through `/orca:review`'s address flow.
+
 - [`/orca:run`](#orcafeature-idea)
+- [`/orca:new`](#orcanew-idea)
+- [`/orca:open`](#orcaopen-objective)
 - [`/orca:review`](#orcareview-branch)
 - [`/orca:pr`](#orcapr-run)
 - [`/orca:retry`](#orcaretry-run)
 - [`/orca:followup`](#orcafollowup-run)
-- [`/orca:iterate`](#orcaiterate-instructions)
 - [`/orca:loop`](#orcaloop-instructions)
 - [`/orca:status`](#orcastatus-run)
-- [`/orca:archive`](#orcaarchive-run)
+- [`/orca:archive`](#orcaarchive-run-or-objective)
 - [`/orca:council`](#orcacouncil-question-or-instruction)
 - [`/orca:init`](#orcainit-path-or-clone-url)
 - [`/orca:doctor`](#orcadoctor)
@@ -44,9 +47,30 @@ You are asked exactly:
 
 After that nothing asks you anything. Ambiguities resolve against the spec and the doubt rule; what cannot be resolved becomes a `blocked` item in `report.md`, with the options you must choose between. See [Anatomy of a run](anatomy.md).
 
+## `/orca:new <idea>`
+
+Starts an objective under `.orca/objectives/<YYYYMMDD-HHMMSS>-<slug>/` — see [Objectives](objectives.md) for its files and states. Requires the bare layout; bypass mode is not needed.
+
+1. **Create, first.** Before any question or research, the session names a slug from the idea (a provisional `objective-<h4>` when it is too vague to name) and runs `objective new` against the trunk, or the branch you name. That writes the objective's files and creates `feature/<slug>` at the base commit — nothing else. A slug a branch or worktree already holds gets a `-<h4>` suffix; an objective with the same slug is offered for `/orca:open` instead.
+2. **Set up and research.** In the background, `orca:worktree` claims the objective for this session and creates and provisions `<repo-root>/orca-<slug>` on `feature/<slug>` (secrets, then `.orca/setup`), then checks the config and the reviewer; `orca:research` explores the code the idea touches, at the objective's base — the current checkout when it is clean at the base commit, else the objective's worktree once it exists. A setup or reviewer problem is reported in a line when it lands, with an offer of `/orca:doctor`, and never holds up the discussion.
+3. **Discuss.** Once research returns, the session reflects the idea against the system as it is and asks two or three questions at a time, pushing back on scope. It writes the outcome, non-goals, and constraints into `objective.md`, and every question into `decisions.md` as it is raised (`open`) or settled (`decided`); a question you want to leave out of this pass is `deferred`.
+4. **Plan.** When you say go and no decision is open, `orca:phases` writes a proposed phase plan, `objective plan-accept --check` validates it, and the reviewer (`orca:phases-review-codex` or `-claude`) attacks it; Critical/High findings get one revise round, without a re-review. You see the phases and the remaining findings and confirm once.
+5. **Loop.** Each phase runs in order in the objective's worktree: one `orca:loop-implement` agent kept alive for the phase implements, fixes every round, and commits; a fresh reviewer attacks each round; `orca.sh rounds next` decides every next step until a round has no Critical/High. Disputes, stalls, and the implementer's questions come to you and are recorded as decisions; one you want to decide later blocks the phase and stops the pass. Each finished phase adds its entry and follow-ups to the objective's `report.md`.
+
+Stopping anywhere is safe: the files say where the objective is, and `/orca:open` continues it.
+
+## `/orca:open [objective]`
+
+Re-opens an objective in this session and continues it from where its files say it stands.
+
+1. **Pick.** `objective list` — the newest is offered, or one this session already owns; a slug or fragment argument picks one. An objective another live session owns is never taken; one whose owner is provably gone is taken over only on your yes. An archived or abandoned one is restored with `/orca:archive --undo` first.
+2. **Open.** `orca:worktree` claims it, arrives in its worktree (re-adding it when it is gone), provisions it, and checks the reviewer.
+3. **Digest.** `objective digest` prints at most 40 lines — title and outcome, state, worktree and branch, decisions with the open ones listed, one line per phase, the active phase's last action, open follow-ups, the last report entry. That is the session's whole starting context; entries are read one at a time when the conversation reaches them.
+4. **Route.** `discussing` or `blocked` → the discussion, open decisions first; `planning` → the planning gate, where it stopped; `ready` → one confirmation, then the loop; `active` → the loop, with a fresh implementer resuming the interrupted phase from its notes, its diff, and its latest round; `idle` → what's next (open follow-ups, new decisions, `/orca:review`, `/orca:pr`, `/orca:archive`); `landed` → `/orca:archive`, or more work. Once a decision that blocked a phase is settled, the pending and blocked phases are replanned and confirmed before the loop runs again.
+
 ## `/orca:review [branch]`
 
-Opens a finished deliverable in *your* editor before you land it. It discovers unmerged `feature/<slug>` branches (one → opens it; several → asks; a missing integration worktree → offers to re-add it) and starts a review session on the integration worktree: file list, side-by-side merge-base diffs, your LSP and colors.
+Opens a finished deliverable — a run's, or an objective's done phases — in *your* editor before you land it. It discovers unmerged `feature/<slug>` branches (one → opens it; several → asks; a missing integration worktree → offers to re-add it) and starts a review session on the integration worktree: file list, side-by-side merge-base diffs, your LSP and colors.
 
 - **nvim** — a new tmux window in your current session running [orca.nvim](https://github.com/miguelbacalhau/orca.nvim)'s `:OrcaReview`. Quit nvim (`:qa`) and the window closes, returning you to where you invoked it.
 - **vscode** — [orca.vscode](https://github.com/miguelbacalhau/orca.vscode)'s review session, opened via `code --open-url`. Close the review window when done.
@@ -57,19 +81,19 @@ The `editor` (`nvim`|`vscode`|`none`) and `terminal` (`tmux`|`none`) config keys
 
 ### Review comments round-trip
 
-Comments you leave in the review persist to `.orca/review-notes/<key>.json` (`<key>` is the sanitized branch name).
+Comments you leave in the review persist to `.orca/review-notes/<key>.json` (`<key>` is the sanitized branch name). On an objective's deliverable, addressing them needs this session to own the objective with no phase mid-loop (`objective idle`); otherwise the skill points at `/orca:open` first.
 
 On the nvim path the skill waits on the tmux window. When you quit nvim it reads the file and lays out each open comment with what it intends to do — fix (with a one-line approach), answer, decline with reasoning, or defer — and **asks** before acting. You can correct the plan, address now, resume the review, or leave the comments for later.
 
-On consent, the `orca:address` agent works in the integration worktree: change requests are fixed with tests and committed (under the same no-attribution rules as run commits), questions are answered from the code. It writes `status`/`resolution` back into the notes file, and the next `:OrcaReview` shows them inline. Each round is appended to `report.md` under `## Review rounds`; a round whose verification fails marks the deliverable `unverified`. Editing a resolved comment re-opens it for the next round.
+On consent, the `orca:address` agent works in the integration worktree: change requests are fixed with tests and committed (under the same no-attribution rules as run commits), questions are answered from the code. It writes `status`/`resolution` back into the notes file, and the next `:OrcaReview` shows them inline. Each round is appended to the run's or objective's `report.md` under `## Review rounds`; a round whose verification fails marks the deliverable `unverified`. Editing a resolved comment re-opens it for the next round.
 
 Comments left from vscode, a print-only session, or a dead session are picked up by the next `/orca:review`, which reports "N unaddressed comments". Both sides fail loudly on a notes schema version they don't support (`/orca:doctor`'s nvim check diagnoses the mismatch).
 
 ## `/orca:pr [run]`
 
-Publishes a **delivered-but-unlanded run** (newest by default, or the one the argument names) as a GitHub pull request via `gh`. Every fact in the PR body comes from the run's `report.md`; for a branch no run produced, use plain `gh pr create`.
+Publishes a **delivered-but-unlanded run or objective** (newest by default, or the one the argument names) as a GitHub pull request via `gh`. Every fact in the PR body comes from the run's `report.md` and `brief.md`, or the objective's `report.md`, `objective.md`, and decided `decisions.md` entries; for a branch neither produced, use plain `gh pr create`.
 
-Guards: the report must say `**Deliverable state:** verified` and `## Blocked` must be `None`. Anything else is refused with a pointer to `/orca:run`'s resume or `/orca:retry`.
+Guards: the report must say `**Deliverable state:** verified` and `## Blocked` must be `None`; an objective must also have no phase pending, blocked, or active. Anything else is refused with a pointer to `/orca:run`'s resume, `/orca:retry`, or `/orca:open`.
 
 - **New PRs are always drafts.** Mark it ready on GitHub after your own pass. Refreshing an existing PR never changes its draft status.
 - **Body shape:** the repo's `pull_request_template.md` if it has one; otherwise a plain-language summary of the problem and the change, **What changed**, **Testing**, and **How it works** / **Notes** only when needed — 200–350 words, grouped by outcome rather than by work item, with no orca vocabulary (item IDs, hashes, run paths, `/orca:*` pointers).
@@ -97,41 +121,25 @@ It audits the run with `orca:audit` (which items verifiably merged, whether the 
 
 A run with unmet items is pointed at `/orca:retry` first; a run whose follow-up brief already exists is surfaced, not duplicated.
 
-## `/orca:iterate [instructions]`
-
-New work on a delivered, **still-unlanded** `feature/<slug>` branch, of any size, with the full spec → plan → implement → review → fix → commit → merge treatment — no new run, no full interview.
-
-1. Picks a delivered-but-unlanded run.
-2. One research agent validates the instructions against the system; a micro-interview confirms the restated change (at most 2–3 questions, often none).
-3. `orca:spec` writes an **amendment** (`spec.amendment.md`) against a worktree at the branch tip. The delivered spec's Interfaces and Decisions bind it — it may extend them, or explicitly supersede them where the change calls for it. The amendment goes through the same spec review and revise round as a fresh run.
-4. The new items are appended to `spec.md` under a dated iteration heading (continuing the W-id sequence), the old report is archived to `report.round<N>.md`, and the work loop runs over the new items on the same integration branch.
-
-Routing: unmet items → `/orca:retry`; a landed or deleted branch → `/orca:followup`; an interrupted run or iteration → `/orca:run`'s resume; genuinely unrelated scope → `/orca:run`; a change small enough to describe in a few lines → `/orca:loop`.
-
 ## `/orca:loop [instructions]`
 
-A small change in a checkout you already have, independently reviewed and committed — no interview, spec, plan, workflow, or new worktree. Your session orchestrates and stays your point of contact; the work happens in subagents.
+Adds one small phase to the objective this session has open and runs it now — no planner, no plan review, no confirmation. It works only inside an objective: in a session that has not run `/orca:new` or `/orca:open` (or has since been cleared) it refuses and points at them. Bypass mode is not needed.
 
-Routing between the four ways to change code: a new outcome → `/orca:run`; a run's unmet items → `/orca:retry`; new work on an unlanded deliverable that deserves a spec → `/orca:iterate`; anything you can state in a few lines → `/orca:loop`, on any branch.
+1. **Gate.** `objective current` names the objective this session owns. It refuses with none, while one of its phases is active (`/orca:open` continues it) or blocked, or while a decision is open (settle it in the discussion first).
+2. **Phase.** The session writes a phase entry from the conversation and the argument — title, goal, one to three acceptance lines, `**Source:** loop` — without asking you to confirm it, and adds it with `objective phase-add`. It is the reviewer's yardstick and the implementer's test contract. Work it cannot state in a few lines without asking is offered to the objective's discussion instead.
+3. **Run.** That one phase goes through the objective's phase loop, exactly as a planned phase does: `orca:worktree` starts it, one `orca:loop-implement` agent implements it, runs the repository's checks, fixes every round, and commits; each round a fresh `orca:loop-review-codex` or `orca:loop-review-claude` reviews the uncommitted change with secrets stripped; `orca.sh rounds next` decides every next step until a round has no Critical/High. Findings outside the change become follow-ups and never block it; Medium/Low findings left in the clean round are fixed without a re-review. A disputed Critical/High, a stall (from round 2, a Critical/High count that didn't shrink or a fixed finding back), a persistent checks failure, and the implementer's questions come to you, and your ruling is recorded as a decision — or, if you decide later, the phase blocks on an open one.
+4. **Commit.** The implementer writes one Conventional Commit; `orca.sh loop check` judges it against a snapshot taken just before. A commit holding anything else (a commit hook that rewrote code) is undone with its changes staged and goes through checks and review again; a message naming Claude, AI, agents, or orca, or carrying an attribution trailer, is undone and rewritten; a commit that missed files is sent back.
+5. **Report.** `objective phase-done` adds the phase's entry and follow-ups to the objective's `report.md`. Committing with red checks or a stall's commit anyway marks the deliverable `unverified`.
 
-1. **Target.** The checkout comes from the conversation or the argument, or the session asks. It must be on a branch and **clean**: with uncommitted changes of your own, the loop asks you to commit or stash them first — it never touches them itself.
-2. **Reviewer.** The configured `reviewer`, else the detected one — the same resolution as a run. A codex reviewer whose `CODEX:` gate fails stops the loop with the remediation; it never switches reviewer for you. The bare layout and bypass mode are *not* required.
-3. **Brief.** The session writes a short brief — intent, one to three acceptance lines, scope — from the conversation, without asking you to confirm it. It is the reviewer's yardstick. If it can't be written without asking, the session points you at `/orca:run` instead.
-4. **Implement.** One `orca:loop-implement` agent builds the change and runs the repository's checks (tests, lint, typecheck, found from its conventions). It is kept alive for the whole loop. When it needs a decision, the session asks you and passes the answer back.
-5. **Review and fix, until clean.** Each round, secrets are stripped, a fresh `orca:loop-review-codex` or `orca:loop-review-claude` reviews the uncommitted change against the brief, and secrets are put back. Findings in the change with Critical/High severity go back to the implementer, which fixes each one or **disputes** it — every dispute comes to you, and one you accept is recorded as settled so later rounds don't re-raise it. Medium/Low findings are fixed alongside but never trigger a round of their own; any left in the clean round are fixed without a re-review and listed as such. Findings outside the change (pre-existing defects, work the brief doesn't ask for) are reported to you and never block the loop. Red checks block it like a Critical finding, unless you choose to carry on with a failure the implementer can't fix (one that predates the change, say) — that failure then stops gating.
-6. **Stall.** There is no round cap. From the second round, a round whose Critical/High count didn't shrink, or a fixed finding that comes back, is a stall: you choose to continue, commit anyway, or stop.
-7. **Commit.** The implementer writes one Conventional Commit of everything in the tree. `orca.sh loop check` judges it against a snapshot taken just before: a commit holding anything else — a commit hook that rewrote code, say — is undone, its changes kept staged, and goes through checks and review before the next commit; the implementer is told never to mention Claude, AI, agents, or orca, and a message the attribution check catches — naming Claude or Anthropic, or carrying a Co-Authored-By or Generated-with line — is undone (changes kept staged) and rewritten; a commit that missed files is sent back.
-8. **Report entry.** When the branch is a run's deliverable, a `## Loop rounds` entry is added to its `report.md` (before `## Review rounds`, else before `## Landing`): the change, reviewer and rounds, Medium/Low fixed after the last review, settled declines, Medium/Low findings left unfixed with their reasons, and checks. `/orca:pr` folds it into the PR body. Committing anyway with failing checks or unfixed findings marks the deliverable `unverified`.
-
-The loop's scratch — the brief, each round's findings, the settled declines — lives in `.orca/loops/<branch-key>/` and is removed when the loop ends, however it ends. There is no resume: a session that dies mid-loop leaves the changes in the tree. The closing summary lists the commit, rounds, fixes, declines, out-of-scope findings, and checks.
+The phase's files live in the objective's `phases/P<n>/` and stay; an interrupted phase is resumed by `/orca:open`.
 
 ## `/orca:status [run]`
 
-A strictly read-only dashboard answering "where was I?". It joins `.orca/` state (interrupted and unlaunched runs, finished runs and their leftovers, queued briefs) with git (unmerged deliverables, kept item branches, leftover `orca-*` worktrees, orphans from abandoned runs) into one screen grouped by next action, each state naming the skill that owns it. It prescribes cleanup commands where deletion is provably safe but never runs them. With an argument, only the matching run is shown.
+A strictly read-only dashboard answering "where was I?". It joins `.orca/` state (interrupted and unlaunched runs, finished runs and their leftovers, queued briefs, objectives by derived state) with git (unmerged deliverables, kept item branches, leftover `orca-*` worktrees, orphans from abandoned runs) into one screen grouped by next action, each state naming the skill that owns it. It prescribes cleanup commands where deletion is provably safe but never runs them. Objectives get their own group, each with the command that continues it; an objective's branch and worktree are never listed as cleanup, and archived or abandoned objectives are counted, not listed. With an argument, only the matching run or objective is shown.
 
 Readiness questions — tooling, config, secrets, setup — belong to `/orca:doctor`, not here.
 
-## `/orca:archive [run]`
+## `/orca:archive [run or objective]`
 
 Retires finished runs from triage and removes their git footprint. The run directory and report always stay.
 
@@ -140,6 +148,12 @@ A run is archivable only when its report exists, `## Blocked` is `None`, no live
 `triage archive --scan` reports each finished run as `ARCHIVABLE:` (with one `PRUNE:` line per worktree and branch it would remove) or `KEPT:` with a reason: `NOT_LANDED`, `WORKTREE_IN_USE`, `NOT_CLEAN`, `LEASE_LIVE`, `NO_TRUNK`. The skill shows both and asks before removing anything.
 
 Archiving re-checks the gate, removes the worktrees and then the branches (never `--force`), and writes an `archived` marker beside `report.md` recording each removal and branch tip. An archived run shows as one `ARCHIVED:` line in triage, stays addressable by fragment, and `/orca:followup` can still pick it. `--undo` removes the marker and recreates the branches at their recorded tips.
+
+**Objectives** retire through `objective archive`, never the run gate, and may be retired landed or not; their directory always stays. Each gets its own confirmation:
+
+- **Landed** (every phase done, the branch merged into the trunk) — its worktree and branch are removed.
+- **Abandoned** (anything else, only when you name it) — the confirmation names what is set aside: commits ahead of the trunk, a dirty tree, open follow-ups, pending or blocked phases. On yes, uncommitted work becomes one `wip:` commit, the branch tip is kept at `refs/orca/archive/<slug>` (safe from `git gc`), the worktree and branch are removed, the owner claim is cleared, and an `archived` file records the state, tip, and your optional one-line reason.
+- An objective another live session owns is refused. `--undo <objective>` recreates the branch from the kept tip and removes the `archived` file; the next `/orca:open` re-adds the worktree.
 
 ## `/orca:council <question or instruction>`
 

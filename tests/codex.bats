@@ -403,3 +403,44 @@ STUB
   [ "$status" -eq 0 ]
   [ "$output" = SAME ]
 }
+
+# ---- the plan-review seat (orca:phases-review-*) -------------------------
+
+@test "a plan review lands at plan/review-<n>.json and rounds summary reads it" {
+  make_codex_exec_stub "$BATS_TEST_TMPDIR/stub" fixture
+  mkdir -p "$BATS_TEST_TMPDIR/wt"
+  OBJ="$BATS_TEST_TMPDIR/objectives/20261103-120000-demo"
+  printf '%s' '{"findings":[{"severity":"High","file":null,"line":null,"title":"P2 needs the parser P3 builds","body":"b","fix_location":"breakdown"},{"severity":"Low","file":"src/a.sh","line":4,"title":"vague acceptance","body":"b","fix_location":"acceptance"}]}' \
+    >"$BATS_TEST_TMPDIR/payload.json"
+  printf 'review the plan\n' >"$BATS_TEST_TMPDIR/review-1.prompt.md"
+  PAYLOAD_FIXTURE="$BATS_TEST_TMPDIR/payload.json" PATH="$BATS_TEST_TMPDIR/stub:$PATH" \
+    run bash "$SCRIPTS/orca.sh" codex "$BATS_TEST_TMPDIR/review-1.prompt.md" \
+    --cwd "$BATS_TEST_TMPDIR/wt" --out "$OBJ/plan/review-1.json"
+  [ "$status" -eq 0 ]
+  has_line 'status=ok'
+  has_line 'archive=-'
+  # The default review schema carries the spec-review fix_location values.
+  [ "$(cat "$BATS_TEST_TMPDIR/stub/seen-schema")" = codex-findings.schema.json ]
+  cmp -s "$BATS_TEST_TMPDIR/payload.json" "$OBJ/plan/review-1.json"
+  # The planning gate's confirmation reads titles through the verb.
+  run bash "$SCRIPTS/orca.sh" rounds summary "$OBJ/plan/review-1.json"
+  [ "$status" -eq 0 ]
+  has_line 'total=2'
+  has_line 'finding.1.severity=high'
+  has_line "finding.1.title.b64=$(printf 'P2 needs the parser P3 builds' | base64 | tr -d '\n')"
+}
+
+# The plan-review pair writes the spec-review pair's findings shape, so
+# the gate and every later reader handle either seat alike; the courier
+# rides the default review schema with no archive.
+@test "the plan-review seats keep the spec-review findings shape and transport" {
+  shape='"body": "…", "fix_location": "brief|outcome|interfaces|breakdown|acceptance"}]}'
+  for seat in spec-review-claude spec-review-codex phases-review-claude phases-review-codex; do
+    grep -qF "$shape" "$ORCA_ROOT/agents/$seat.md" || { echo "$seat: findings shape drifted"; return 1; }
+  done
+  verb='bash "<plugin-root>/scripts/orca.sh" codex "<prompt-path>" --cwd "<worktree>" --out "<artifact-path>"'
+  [ "$(grep -cF "$verb" "$ORCA_ROOT/agents/phases-review-codex.md")" -eq 1 ]
+  if grep -q -- '--schema\|--archive "' "$ORCA_ROOT/agents/phases-review-codex.md"; then return 1; fi
+  grep -qF 'plan/review-<n>.json' "$ORCA_ROOT/agents/phases-review-claude.md"
+  grep -qF 'plan/review-<n>.json' "$ORCA_ROOT/agents/phases-review-codex.md"
+}

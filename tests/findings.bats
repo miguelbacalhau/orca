@@ -224,3 +224,114 @@ prose, not JSON
 {"findings":[{"title":"t"},3]}
 PAYLOADS
 }
+
+# ---- opt-in variables (orca.sh rounds) ----------------------------------
+
+# findings_with <vars> <json> — the parser with -v assignments.
+findings_with() {
+  local vars="$1"
+  printf '%s' "$2" >"$BATS_TEST_TMPDIR/doc.json"
+  # shellcheck disable=SC2086  # vars is a list of -v assignments
+  LC_ALL=C awk $vars -f "$SCRIPTS/json-tokens.awk" -f "$SCRIPTS/findings.awk" "$BATS_TEST_TMPDIR/doc.json"
+}
+
+@test "response=1: checks.pass, the base64 failure, and the status print first, ahead of the rows" {
+  run findings_with "-v response=1" '{"checks":{"commands":[],"pass":false,"failure":"x\ny"},"findings":[{"title":"t","file":null,"outcome":"fixed","reason":"r"}],"followups":[],"status":"done","questions":[]}'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'pass\tfalse\t%s\tdone\t\ngating\t\t\tfixed\t%s' "$(printf 'x\ny' | base64)" "$(printf t | base64)")" ]
+  run findings_with "-v response=1" '{"questions":["q"],"status":"needs_input","followups":[{"title":"later","file":null,"why":"w","extra":[1]},{"why":"w2","file":"a.sh","title":"t2"}],"findings":[],"extra":1,"checks":{"failure":"","pass":true,"commands":["bats"]}}'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'pass\ttrue\t\tneeds_input\t')" ]
+  run findings_with "-v response=1" '{"checks":{"commands":[],"pass":true,"failure":""},"findings":[],"followups":[],"status":"infeasible","questions":[]}'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'pass\ttrue\t\tinfeasible\t')" ]
+  # the tree the response checked, a 40- or 64-digit id, rides as the fifth column
+  run findings_with "-v response=1" '{"checks":{"commands":[],"pass":true,"failure":""},"findings":[],"followups":[],"status":"done","questions":[],"tree":"4b825dc642cb6eb9a060e54bf8d69288e0bc4ff1"}'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'pass\ttrue\t\tdone\t4b825dc642cb6eb9a060e54bf8d69288e0bc4ff1')" ]
+}
+
+@test "response=1: an incomplete, repeated, or mistyped response — element types included — fails with no output" {
+  local ok_checks='"checks":{"commands":[],"pass":true,"failure":""}' rest='"followups":[],"status":"done","questions":[]'
+  local ok_entry='"title":"t","file":"a","outcome":"fixed","reason":"r"' payload
+  for payload in \
+    "{\"findings\":[],$rest}" \
+    "{\"checks\":{\"pass\":true},\"findings\":[],$rest}" \
+    "{\"checks\":{\"commands\":[],\"failure\":\"\"},\"findings\":[],$rest}" \
+    "{\"checks\":{\"commands\":[],\"pass\":true},\"findings\":[],$rest}" \
+    "{\"checks\":{\"commands\":\"bats\",\"pass\":true,\"failure\":\"\"},\"findings\":[],$rest}" \
+    "{\"checks\":{\"commands\":[],\"pass\":\"true\",\"failure\":\"\"},\"findings\":[],$rest}" \
+    "{\"checks\":{\"commands\":[],\"pass\":null,\"failure\":\"\"},\"findings\":[],$rest}" \
+    "{\"checks\":{\"commands\":[],\"pass\":true,\"failure\":null},\"findings\":[],$rest}" \
+    "{\"checks\":{\"commands\":[],\"pass\":true,\"pass\":true,\"failure\":\"\"},\"findings\":[],$rest}" \
+    "{\"checks\":[],\"findings\":[],$rest}" \
+    "{$ok_checks,$ok_checks,\"findings\":[],$rest}" \
+    "{$ok_checks,$rest}" \
+    "{$ok_checks,\"findings\":[],\"status\":\"done\",\"questions\":[]}" \
+    "{$ok_checks,\"findings\":[],\"followups\":[],\"questions\":[]}" \
+    "{$ok_checks,\"findings\":[],\"followups\":[],\"status\":\"done\"}" \
+    "{$ok_checks,\"findings\":[],\"followups\":{},\"status\":\"done\",\"questions\":[]}" \
+    "{$ok_checks,\"findings\":[],\"followups\":[],\"status\":1,\"questions\":[]}" \
+    "{$ok_checks,\"findings\":[],\"followups\":[],\"status\":\"Done\",\"questions\":[]}" \
+    "{$ok_checks,\"findings\":[],\"followups\":[],\"status\":\"pending\",\"questions\":[]}" \
+    "{$ok_checks,\"findings\":[],\"followups\":[],\"status\":\"done\",\"questions\":\"none\"}" \
+    "{$ok_checks,\"findings\":[],$rest,\"status\":\"done\"}" \
+    "{$ok_checks,\"findings\":[{}],$rest}" \
+    "{$ok_checks,\"findings\":[{\"title\":\"t\",\"file\":\"a\",\"outcome\":\"fixed\"}],$rest}" \
+    "{$ok_checks,\"findings\":[{\"title\":\"t\",\"outcome\":\"fixed\",\"reason\":\"r\"}],$rest}" \
+    "{$ok_checks,\"findings\":[{\"file\":\"a\",\"outcome\":\"fixed\",\"reason\":\"r\"}],$rest}" \
+    "{$ok_checks,\"findings\":[{\"title\":\"t\",\"file\":\"a\",\"reason\":\"r\"}],$rest}" \
+    "{$ok_checks,\"findings\":[{\"title\":\"t\",\"file\":\"a\",\"outcome\":\"Fixed\",\"reason\":\"r\"}],$rest}" \
+    "{$ok_checks,\"findings\":[{\"title\":\"t\",\"file\":\"a\",\"outcome\":\"done\",\"reason\":\"r\"}],$rest}" \
+    "{$ok_checks,\"findings\":[{\"title\":null,\"file\":\"a\",\"outcome\":\"fixed\",\"reason\":\"r\"}],$rest}" \
+    "{$ok_checks,\"findings\":[{\"title\":\"t\",\"file\":1,\"outcome\":\"fixed\",\"reason\":\"r\"}],$rest}" \
+    "{$ok_checks,\"findings\":[{$ok_entry,\"outcome\":\"disputed\"}],$rest}" \
+    "{\"checks\":{\"commands\":[42],\"pass\":true,\"failure\":\"\"},\"findings\":[],$rest}" \
+    "{\"checks\":{\"commands\":[\"ok\",null],\"pass\":true,\"failure\":\"\"},\"findings\":[],$rest}" \
+    "{\"checks\":{\"commands\":[[\"nested\"]],\"pass\":true,\"failure\":\"\"},\"findings\":[],$rest}" \
+    "{$ok_checks,\"findings\":[],\"followups\":[],\"status\":\"done\",\"questions\":[42]}" \
+    "{$ok_checks,\"findings\":[],\"followups\":[],\"status\":\"done\",\"questions\":[\"q\",{}]}" \
+    "{$ok_checks,\"findings\":[],\"followups\":[null],\"status\":\"done\",\"questions\":[]}" \
+    "{$ok_checks,\"findings\":[],\"followups\":[\"gap\"],\"status\":\"done\",\"questions\":[]}" \
+    "{$ok_checks,\"findings\":[],\"followups\":[{\"title\":\"t\",\"file\":null}],\"status\":\"done\",\"questions\":[]}" \
+    "{$ok_checks,\"findings\":[],\"followups\":[{\"title\":\"t\",\"why\":\"w\"}],\"status\":\"done\",\"questions\":[]}" \
+    "{$ok_checks,\"findings\":[],\"followups\":[{\"title\":1,\"file\":null,\"why\":\"w\"}],\"status\":\"done\",\"questions\":[]}" \
+    "{$ok_checks,\"findings\":[],\"followups\":[{\"title\":\"t\",\"file\":false,\"why\":\"w\"}],\"status\":\"done\",\"questions\":[]}" \
+    "{$ok_checks,\"findings\":[],\"followups\":[{\"title\":\"t\",\"file\":null,\"why\":\"w\",\"why\":\"x\"}],\"status\":\"done\",\"questions\":[]}" \
+    "{$ok_checks,\"findings\":[],$rest,\"tree\":null}" \
+    "{$ok_checks,\"findings\":[],$rest,\"tree\":\"abc\"}" \
+    "{$ok_checks,\"findings\":[],$rest,\"tree\":\"4B825DC642CB6EB9A060E54BF8D69288E0BC4FF1\"}" \
+    "{$ok_checks,\"findings\":[],$rest,\"tree\":\"4b825dc642cb6eb9a060e54bf8d69288e0bc4ff1\",\"tree\":\"4b825dc642cb6eb9a060e54bf8d69288e0bc4ff1\"}"; do
+    run findings_with "-v response=1" "$payload"
+    if [ "$status" -eq 0 ] || [ -n "$output" ]; then
+      echo "accepted: $payload -> status=$status output=$output"
+      return 1
+    fi
+  done
+  run findings_with "-v response=1" "{$ok_checks,\"findings\":[{$ok_entry}],$rest}"
+  [ "$status" -eq 0 ]
+}
+
+
+@test "without response=1 a checks key is skipped like any other" {
+  run findings '{"checks":"anything","findings":[]}'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "plain_title=1: the title column is plain text, control bytes as spaces" {
+  run findings_with "-v plain_title=1" '{"findings":[{"severity":"low","title":"tab\there\nend é"}]}'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'low\t\t\t\ttab here end \303\251')" ]
+}
+
+@test "severity_name=1: a sixth column names the severity, anything else unknown" {
+  run findings_with "-v severity_name=1" '{"findings":[
+    {"severity":"Critical"},{"severity":" HIGH\n"},{"severity":"Medium"},{"severity":"low"},
+    {"severity":"Blocker"},{"severity":"hi\u0000gh"},{"severity":null},{}]}'
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | cut -f6 | tr '\n' ' ')" = \
+    "critical high medium low unknown unknown unknown unknown " ]
+  [ "$(printf '%s\n' "$output" | cut -f1 | tr '\n' ' ')" = \
+    "gating gating medium low gating gating gating gating " ]
+}

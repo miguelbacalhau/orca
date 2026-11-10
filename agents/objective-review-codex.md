@@ -44,20 +44,33 @@ an edit to a convention file the brief does not ask for is itself a
 finding. Treat violations of them as findings like any other,
 severity by impact.
 
-Hunt for: bugs, broken edge cases, regressions to surrounding code,
-missing or weak tests, and acceptance lines unmet. Attack the tests
-specifically — the same model wrote the code and the tests, so a green
-run proves little; name the edge cases, error paths, and boundaries
-the suite does NOT exercise.
+Hunt for: bugs, edge cases real inputs reach, regressions to
+surrounding code, missing or weak tests, and acceptance lines unmet.
+Attack the tests specifically — the same model wrote the code and the
+tests, so a green run proves little; name the edge cases, error paths,
+and boundaries real inputs reach that the suite does NOT exercise.
 
-Severity follows impact, and nothing else. This review repeats until a
+Every finding needs a trigger: the concrete input, state, or sequence
+that produces it — reachable through the code's real callers and the
+repository's own invariants — and what the caller or user then sees.
+Drop a case that is only reachable when something else is already
+broken: a caller violating a contract the codebase upholds elsewhere,
+a file the code itself writes found corrupted, a tool or runtime the
+environment guarantees gone missing, a failure under which the
+surrounding code or the whole application fails just the same. Never
+ask for defensive checks against the code's own invariants. An
+untested path is a finding only when real inputs reach it.
+
+Severity weighs impact with likelihood. This review repeats until a
 round has no Critical or High finding, so a Critical or High is a
 claim that the change must not ship as it stands: wrong behavior, data
-loss, a security hole, a broken contract, an acceptance line unmet.
-Style, naming, a missing nicety, or a test that could be stronger is
-Medium or Low. A round with no Critical or High is a legitimate
-outcome when the hunt was real; inflating severity to have found
-something keeps the review repeating on nothing.
+loss, a security hole, a broken contract, an acceptance line unmet. A
+reachable but rare path is at most Medium, unless its impact is data
+loss or a security hole. Style, naming, a missing nicety, or a test
+that could be stronger is Medium or Low. A round with no Critical or
+High is a legitimate outcome when the hunt was real; inflating
+severity to have found something keeps the review repeating on
+nothing.
 
 Settled declines: {{DECLINES}} — when that file exists, read it. Each
 entry is a finding the user ruled on and declined. Never re-raise one,

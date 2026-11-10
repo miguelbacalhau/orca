@@ -17,10 +17,9 @@ Your task message gives you: the worktree path, the run directory, the item's ID
 Send exactly this prompt, with the placeholders filled from your task message — nothing added, nothing dropped:
 
 ```text
-You are reviewing {{SUBJECT}}, adversarially: assume at least one real
-defect and that the tests are weaker than they look. An approval that
-finds nothing is the failure mode. Distrust exactly the parts that look
-obviously fine.
+You are reviewing {{SUBJECT}}, adversarially: hunt for real defects,
+and assume the tests are weaker than they look. Distrust exactly the
+parts that look obviously fine.
 
 Hard contract: the Interfaces section of {{RUN_DIR}}/spec.md — read it
 from the file now, not from any earlier copy; mid-run amendments land
@@ -38,18 +37,43 @@ an uncommitted edit to a convention file the plan does not justify is
 itself a finding. Treat violations of them as findings like any other,
 severity by impact.
 
-Hunt for: bugs, broken edge cases, violations of the spec interfaces,
-regressions to surrounding code, missing or weak tests, and the item's
-acceptance line — in the spec's Work Breakdown — unmet by the change
-under review (a spec without acceptance lines predates them: skip
-that hunt){{EXTRA_HUNTS}}.
+Hunt for: bugs, edge cases real inputs reach, violations of the spec
+interfaces, regressions to surrounding code, missing or weak tests, and
+the item's acceptance line — in the spec's Work Breakdown — unmet by
+the change under review (a spec without acceptance lines predates
+them: skip that hunt){{EXTRA_HUNTS}}.
 A removal the spec or plan calls for is not a regression — when they
 restructure existing behavior, hunt instead for remnants of the old
 implementation that should have been deleted: dead code paths, stale
 exports, both old and new mechanisms registered.
 Attack the tests specifically — the same model wrote the code and the
 tests, so a green run proves little; name the edge cases, error paths,
-and interface boundaries the suite does NOT exercise.
+and interface boundaries real inputs reach that the suite does NOT
+exercise.
+
+Every finding needs a trigger: the concrete input, state, or sequence
+that produces it — reachable through the code's real callers and the
+repository's own invariants — and what the caller or user then sees.
+Drop a case that is only reachable when something else is already
+broken: a caller violating a contract the codebase upholds elsewhere,
+a file the code itself writes found corrupted, a tool or runtime the
+environment guarantees gone missing, a failure under which the
+surrounding code or the whole application fails just the same. Never
+ask for defensive checks against the code's own invariants. An
+untested path is a finding only when real inputs reach it.
+
+Severity weighs impact with likelihood. Only a Critical or High
+finding opens a fix round, and an item gets at most two, so a Critical
+or High is a claim that the change must not ship as it stands: wrong
+behavior, data loss, a security hole, a broken interface contract, an
+acceptance line unmet. A reachable but rare path is at most Medium,
+unless its impact is data loss or a security hole. Style, naming, a
+missing nicety, or a test that could be stronger is Medium or Low;
+Medium and Low findings stay on record for the commit and the report
+and never gate. A review with no Critical or High, or with no findings
+at all, is a legitimate outcome when the hunt was real; inflating
+severity to have found something buys a fix round and a re-review for
+nothing.
 
 For each finding report: severity (Critical/High/Medium/Low), the file
 and line when the finding has one location — set them to null for

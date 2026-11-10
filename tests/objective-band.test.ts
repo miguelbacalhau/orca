@@ -247,7 +247,7 @@ function session(on: On, where: { id: string; cwd: string }) {
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
   on('prompt.submit', ($, e) => ({ text: e.text }))
-  on('classic.SubagentStop', () => ({}))
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false } }))
   on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
     const { Text } = $.ui.resolve(e)
     return Text({ children: 'engine band' })
@@ -276,9 +276,7 @@ function objectiveDisk(over: Record<string, string> = {}): Map<string, Node> {
 
 const start = ($: Engine, cwd: string) => $.session.start({ cwd, surface: 'terminal', isInteractive: true })
 const say = ($: Engine, text: string) => $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
-const worktreeStopped = ($: Engine, agentType = 'orca:worktree') => $.classic.SubagentStop({
-  stop_hook_active: false, agent_id: 'a1', agent_transcript_path: '/t/a1.jsonl', agent_type: agentType,
-})
+const ranBash = ($: Engine, command: string) => $.tool.call({ tool: 'Bash', command })
 
 async function shows($: Engine, text: string | RegExp) {
   const ui = await $.ui.mount({ plugin: 'orca', surface: 'terminal', ...BAND })
@@ -319,7 +317,7 @@ describe('the band in a session', () => {
     expect(await shows($, 'engine band')).toBe(true)
   })
 
-  test('the claim orca:worktree writes is picked up when it stops; a --steal elsewhere drops it', async ($, on) => {
+  test('the claim the session\'s own objective open writes is picked up after it; a --steal elsewhere drops it', async ($, on) => {
     const clock = mock.clock(on, { now: 10_000 })
     const disk = objectiveDisk()
     disk.delete(`${DIR}/owner`)
@@ -329,10 +327,10 @@ describe('the band in a session', () => {
     expect(await shows($, 'engine band')).toBe(true)
 
     disk.set(`${DIR}/owner`, { text: OWNER, mtimeMs: 11_000 })
-    // Another agent stopping does not rescan.
-    await worktreeStopped($, 'orca:research')
+    // Another command does not rescan.
+    await ranBash($, `bash /plugins/orca/scripts/orca.sh objective digest "${DIR}"`)
     expect(await shows($, 'engine band')).toBe(true)
-    await worktreeStopped($)
+    await ranBash($, `bash /plugins/orca/scripts/orca.sh objective open "${DIR}"`)
     expect(await shows($, 'rate-limit-public-api')).toBe(true)
 
     // The files move on; the next tick redraws.

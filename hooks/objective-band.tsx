@@ -1,12 +1,13 @@
 // The objective band: a live view of the objective this session owns, drawn
 // above the prompt where the run band draws. A read-only observer — it finds
 // the objective whose `owner` file names this session (the claim `objective
-// open` writes, from inside orca:worktree), then reads that objective's files
+// open` writes, run by the session itself), then reads that objective's files
 // on a short tick. It writes nothing anywhere but its own $.state.
 //
-// Ownership is looked up on session.start, on every prompt.submit, and when
-// an orca:worktree agent stops — never on the tick — and the match is kept in
-// $.state. A run the session launches takes the band over while it is live.
+// Ownership is looked up on session.start, on every prompt.submit, and after
+// the session's own Bash call runs `objective open` — never on the tick — and
+// the match is kept in $.state. A run the session launches takes the band
+// over while it is live.
 // The band goes on session end, when the objective's directory or this
 // session's claim on it disappears, when it is archived, and when it sat idle
 // through three of the person's prompts or landed (which needs git, so it is
@@ -36,7 +37,8 @@ const TICK_MS = 1500
 const IDLE_PROMPTS = 3
 // How many directories up from the session's cwd .orca/objectives is looked for.
 const WALK_DEPTH = 8
-const WORKTREE_AGENT = 'orca:worktree'
+// The claim's one writer, as the main conversation's Bash command names it.
+const OPEN_VERB = /\bobjective\s+open\b/
 const LANDED_TIMEOUT_MS = 20_000
 const OBJECTIVE_NAME = /^\d{8}-\d{6}-[a-z0-9]+(-[a-z0-9]+)*$/
 
@@ -247,9 +249,11 @@ export async function objectiveBand($: EngineInterface): Promise<OrcaBand | null
 }
 
 export const register: Register = on => {
-  // orca:worktree runs `objective open`, which writes the claim.
-  on('classic.SubagentStop', { agent_type: WORKTREE_AGENT }, async ($, e, next) => {
+  // The session runs `objective open` itself, which writes the claim.
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    if (e.tool !== 'Bash' || e.agentId !== undefined || !OPEN_VERB.test(e.command)) return next(e)
+    const ran = await next(e)
     try { await rescan($) } catch { /* observe only */ }
-    return next(e)
+    return ran
   }).catch(($, e, next) => next(e)) // an observer never stands in a call's way
 }

@@ -6,7 +6,7 @@
 # about one is read from them here, so no skill parses them itself.
 #
 # Usage:
-#   orca.sh objective new <repo> <slug> <base-ref>
+#   orca.sh objective new <repo> <slug> <base-ref> [--idea <file>|-]
 #   orca.sh objective open <dir> [--steal]
 #   orca.sh objective current <repo>
 #   orca.sh objective idle <dir>
@@ -69,7 +69,10 @@
 #   existing objective with the slug (OBJECTIVE_EXISTS), or an existing
 #   <repo-root>/orca-<slug> (WORKTREE_EXISTS); the slug is lowercase
 #   kebab-case (BAD_SLUG) and the base must name a commit (BAD_REF),
-#   recorded as both the ref and its commit. Writes objective.md,
+#   recorded as both the ref and its commit. --idea names a file (`-`:
+#   stdin) whose text, trailing newlines dropped, is written verbatim
+#   under objective.md's `## Idea`; an unreadable one is BAD_ARGS,
+#   before anything is written. Writes objective.md,
 #   decisions.md (`# Decisions`), and phases.md (`# Phases`), then
 #   creates feature/<slug> at the base commit — the one collision point:
 #   a branch that appeared since the checks is BRANCH_EXISTS, and the
@@ -77,9 +80,11 @@
 #   (the base commit).
 #
 # open — claims the objective for this session, then arrives in its
-#   worktree through `worktree-item` (created off the base commit the
-#   first time, then reused or branch_resumed) with its provisioning,
-#   then reads `setup status`. The claim, by the owner's verdict
+#   worktree through `worktree-item --no-provision` (created off the base
+#   commit the first time, then reused or branch_resumed). Nothing is
+#   provisioned here: secrets and `.orca/setup` are the caller's
+#   `orca.sh provision <worktree> <arrival>` afterwards (orca:provision),
+#   so the verb stays fast and quiet. The claim, by the owner's verdict
 #   (lib.sh lease_verdict over the owner file):
 #     no owner                      claimed
 #     this session, live            kept (nothing written)
@@ -95,12 +100,11 @@
 #   waited behind an archive is ARCHIVED; a lock held past the wait is
 #   CLAIM_BUSY. A
 #   claim releases every other objective this session owned, so a
-#   session owns one objective at a time. Output: provisioning's typed
-#   lines, the objective's OBJECTIVE: line (as `list`), then one frame:
+#   session owns one objective at a time. Output: the objective's
+#   OBJECTIVE: line (as `list`), then one frame:
 #     rc, dir, claim (claimed | kept | stolen), worktree, branch,
-#     base (the base commit), arrival, head, setup, setup_stamped,
-#     setup_rc, setup_seconds, setup_tail.b64 (failed/timeout only),
-#     setup_status (absent | unstamped | current | drifted)
+#     base (the base commit), arrival (created | reused |
+#     branch_resumed — provision's <arrival>), head
 #   A branch of the objective's name that does not descend from its base
 #   commit is BRANCH_FOREIGN, and a saved worktree path that exists but
 #   is not a worktree root of this
@@ -225,17 +229,17 @@
 #   one with no recorded base while another pending phase has one
 #   (RESTART_PENDING: a restarted phase keeps its earlier base, so it
 #   runs before anything else commits). Arrives in the worktree through
-#   `worktree-item` with its provisioning (as open), writes
+#   `worktree-item --no-provision` (as open: provisioning is the caller's,
+#   after this verb, and never fatal), writes
 #   phases/P<n>/base — the worktree's HEAD — only when it holds no
 #   commit yet, so a re-start resumes against the same base, renders
 #   phases/P<n>/brief.md (the block without its State, Source, Commit,
 #   and Blocked on lines, then every referenced decision's entry) and
 #   phases/P<n>/worktree (the work tree the round engine guards), and
-#   only then marks the phase active. Output: provisioning's typed
-#   lines, then one frame: rc, dir (the phase directory), phase,
-#   started (yes when it was pending, no when already active), base,
-#   base_kept (yes|no), brief, worktree, branch, arrival, head, and
-#   open's provisioning and setup_status keys.
+#   only then marks the phase active. Frame: rc, dir (the phase
+#   directory), phase, started (yes when it was pending, no when already
+#   active), base, base_kept (yes|no), brief, worktree, branch, arrival,
+#   head.
 #
 # phase-done — active -> done with `**Commit:** <sha>` (any name of a
 #   commit, recorded in full; else BAD_REF; not active is PHASE_STATE).
@@ -325,7 +329,8 @@
 #   does), removes `archived`, then drops the ref. A branch of that name
 #   at another commit is BRANCH_EXISTS; at the same commit it is kept.
 #   The worktree is not re-added — the next `open` arrives through
-#   worktree-item (branch_resumed). Nothing archived is a no-op. Frame:
+#   worktree-item (branch_resumed), and its caller provisions it. Nothing
+#   archived is a no-op. Frame:
 #   rc, dir, restored (yes | no), branch (restored | exists | none — no
 #   tip was ever kept), tip.
 #
@@ -346,7 +351,7 @@
 # Sourced by orca.sh with the verb arguments in place; lib.sh is already
 # loaded.
 
-objective_usage="usage: orca.sh objective new <repo> <slug> <base-ref> | open <dir> [--steal] | current <repo> | idle <dir> | list <repo> [--all] | digest <dir> | plan-accept <dir> [--check] | phase-add <dir> <block-file> | phase-start <dir> <P> | phase-done <dir> <P> <sha> | phase-block <dir> <P> <D> | archive <dir> [--abandon] [--note <text>] | unarchive <dir>"
+objective_usage="usage: orca.sh objective new <repo> <slug> <base-ref> [--idea <file>|-] | open <dir> [--steal] | current <repo> | idle <dir> | list <repo> [--all] | digest <dir> | plan-accept <dir> [--check] | phase-add <dir> <block-file> | phase-start <dir> <P> | phase-done <dir> <P> <sha> | phase-block <dir> <P> <D> | archive <dir> [--abandon] [--note <text>] | unarchive <dir>"
 obj_tab='	'
 
 # ---- repository and directory resolution ----------------------------------
@@ -735,8 +740,17 @@ obj_claim() {
 
 # ---- subcommands ----------------------------------------------------------
 
-obj_new() { # <repo> <slug> <base-ref>
-  local slug="$2" base="$3" base_commit stamp dir wt branch d
+obj_new() { # <repo> <slug> <base-ref> [--idea <file>|-]
+  local slug="$2" base="$3" base_commit stamp dir wt branch d idea=""
+  if [ $# -eq 5 ]; then
+    [ "$4" = --idea ] || fail BAD_ARGS "$objective_usage"
+    if [ "$5" = - ]; then
+      idea="$(cat)" || fail BAD_ARGS "could not read the idea from stdin"
+    else
+      [ -f "$5" ] && [ -r "$5" ] || fail BAD_ARGS "idea file '$5' is not a readable file"
+      idea="$(cat -- "$5")" || fail BAD_ARGS "could not read idea file '$5'"
+    fi
+  fi
   [[ $slug =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] && [ "${#slug}" -le 60 ] \
     || fail BAD_SLUG "'$slug' is not a lowercase kebab-case slug of at most 60 characters"
   obj_resolve_repo "$1"
@@ -764,9 +778,10 @@ EOF
   stamp="$(date '+%Y%m%d-%H%M%S')"
   dir="$repo_root/.orca/objectives/$stamp-$slug"
   mkdir "$dir" 2>/dev/null || fail WRITE_ERROR "could not create $dir"
+  [ -z "$idea" ] || idea="$idea"$'\n\n'
   # shellcheck disable=SC2016  # the backticks are markdown, not expansions
-  printf '# %s\n\n**Base:** `%s`\n**Base commit:** `%s`\n**Branch:** `%s`\n**Worktree:** `%s`\n\n## Idea\n\n## Outcome\n\n## Non-goals\n\n## Constraints\n' \
-    "$slug" "$base" "$base_commit" "$branch" "$wt" | obj_write "$dir/objective.md" || exit 1
+  printf '# %s\n\n**Base:** `%s`\n**Base commit:** `%s`\n**Branch:** `%s`\n**Worktree:** `%s`\n\n## Idea\n\n%s## Outcome\n\n## Non-goals\n\n## Constraints\n' \
+    "$slug" "$base" "$base_commit" "$branch" "$wt" "$idea" | obj_write "$dir/objective.md" || exit 1
   printf '# Decisions\n' | obj_write "$dir/decisions.md" || exit 1
   printf '# Phases\n' | obj_write "$dir/phases.md" || exit 1
   # The branch is born here, at the base, owned by this objective: git
@@ -793,10 +808,10 @@ obj_require_header() { # obj_load must have run
   fi
 }
 
-# obj_arrive — worktree arrival through worktree-item (created off the
-# base commit, reused, or branch_resumed) with its provisioning; its
-# typed lines pass through, its failure exits. Sets obj_arrival_keys,
-# the frame keys open and phase-start print after their own.
+# obj_arrive — worktree arrival through worktree-item --no-provision
+# (created off the base commit, reused, or branch_resumed); its failure
+# exits. Sets obj_arrival_keys, the frame keys open and phase-start print
+# after their own.
 # obj_check_worktree — the objective's branch, when it exists, must
 # descend from the base commit (BRANCH_FOREIGN otherwise: a branch of
 # that name that is not this objective's), and the saved worktree, when
@@ -821,10 +836,9 @@ obj_check_worktree() {
 }
 
 obj_arrive() {
-  local out line in_frame=0 key value status_line
-  local arrival="" head="" setup="" stamped="" setup_rc="" seconds="" tail="" setup_status
+  local out line in_frame=0 key value arrival="" head=""
   obj_check_worktree
-  if ! out="$(bash "$orca_scripts_dir/orca.sh" worktree-item "$repo_root" "$obj_worktree" "$obj_branch" "$obj_base_commit" 2>&1)"; then
+  if ! out="$(bash "$orca_scripts_dir/orca.sh" worktree-item "$repo_root" "$obj_worktree" "$obj_branch" "$obj_base_commit" --no-provision 2>&1)"; then
     printf '%s\n' "$out"
     exit 1
   fi
@@ -833,33 +847,16 @@ obj_arrive() {
       @@ORCA@@) in_frame=1; continue ;;
       @@ORCA_END@@) in_frame=0; continue ;;
     esac
-    if [ "$in_frame" -eq 0 ]; then
-      printf '%s\n' "$line"
-      continue
-    fi
+    [ "$in_frame" -eq 1 ] || continue
     key="${line%%=*}" value="${line#*=}"
     case "$key" in
       arrival) arrival="$value" ;;
       head) head="$value" ;;
-      setup) setup="$value" ;;
-      setup_stamped) stamped="$value" ;;
-      setup_rc) setup_rc="$value" ;;
-      setup_seconds) seconds="$value" ;;
-      setup_tail.b64) tail="$value" ;;
     esac
   done <<EOF
 $out
 EOF
-
-  status_line="$(cd "$obj_worktree" 2>/dev/null && bash "$orca_scripts_dir/orca.sh" setup status 2>/dev/null | head -1)"
-  setup_status="$(printf '%s' "$status_line" | cut -f2)"
-  case "$setup_status" in
-    absent | unstamped | current | drifted) ;;
-    *) setup_status=unknown ;;
-  esac
-  obj_arrival_keys=("arrival=$arrival" "head=$head" "setup=$setup" \
-    "setup_stamped=$stamped" "setup_rc=$setup_rc" "setup_seconds=$seconds" \
-    ${tail:+"setup_tail.b64=$tail"} "setup_status=$setup_status")
+  obj_arrival_keys=("arrival=$arrival" "head=$head")
 }
 
 obj_open() { # <dir> [--steal]
@@ -2075,7 +2072,7 @@ objective_cmd="${1:-}"
 [ $# -gt 0 ] && shift
 case "$objective_cmd" in
   new)
-    [ $# -eq 3 ] || fail BAD_ARGS "$objective_usage"
+    [ $# -eq 3 ] || [ $# -eq 5 ] || fail BAD_ARGS "$objective_usage"
     obj_new "$@" ;;
   open)
     [ $# -ge 1 ] || fail BAD_ARGS "$objective_usage"

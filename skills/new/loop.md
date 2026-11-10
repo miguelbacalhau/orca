@@ -4,7 +4,7 @@ This file is read by `/orca:new` and `/orca:open` once a plan is installed, and 
 
 You sequence it; you never edit code, and you never apply the gate yourself. After every implementer turn and every review, **`rounds next` reads the phase directory and prints the one next action** — you execute it. Counts come from its frame and finding titles from `rounds summary`, so you never read a review or response file whole. The one exception is a dispute: the disputed entries of that round's response, and each disputed finding's own entry in the review, read by its title.
 
-You hold, from the skill that loaded this file: the objective directory `<dir>`, and from this session's `orca:worktree` `open` result its `worktree` and `reviewer`. When you no longer hold them (the open happened before a compaction, say), spawn `orca:worktree` in `open` mode again — it keeps this session's claim and returns them. Every spawn runs in the background: wait for its notification, and never fabricate a result. Shell calls go through `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh` with your own Bash tool. Later turns go to the implementer by `SendMessage` (a deferred tool: load it through ToolSearch when it appears only by name).
+You hold, from the skill that loaded this file: the objective directory `<dir>`, the `worktree` from this session's `objective open` frame, and the `reviewer` (with `codex`, `codex_fix`) from its reviewer check (`${CLAUDE_PLUGIN_ROOT}/skills/new/provision.md`). When you no longer hold them (the open happened before a compaction, say), run that check again as it says — with `objective open <dir>` first when the worktree is lost too. **One provisioning at a time in a worktree:** when an earlier `orca:provision` spawn — the open's warm-up — is still in flight, wait for its result before Step 2; when none was spawned, or it has landed, go on. Either way the phase start provisions again, cheap on a warm tree and needed, since phases change dependencies. Every spawn runs in the background: wait for its notification, and never fabricate a result. Shell calls go through `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh` with your own Bash tool. Later turns go to the implementer by `SendMessage` (a deferred tool: load it through ToolSearch when it appears only by name).
 
 **The reviewer** is the held `reviewer`. When it is `fail`, or `codex` with the result's `codex: fail`, no phase can be reviewed: relay `codex_fix` (`/orca:doctor` walks every remediation; `/orca:config` picks another reviewer) and stop before any phase starts. Never switch reviewers on the user's behalf.
 
@@ -22,13 +22,21 @@ Below, `<P>` is the phase id and `<phase-dir>` is `<dir>/phases/<P>`.
 
 ## Step 2: Start the phase
 
-Spawn `orca:worktree` in `phase-start` mode. Its task message: `phase-start <dir> <P>`, and the plugin root — `${CLAUDE_PLUGIN_ROOT}`, substituted. It marks the phase active, keeps or records its base, renders `<phase-dir>/brief.md` from the phase and the decisions it realizes, and provisions the worktree.
+Run it yourself — it is fast and quiet, and provisions nothing:
 
-It returns `{status, worktree, branch, arrival, setup, base, cause, log, …}`. Hold `base` — the commit check's base for the whole phase (a resumed phase keeps its original one).
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh objective phase-start <dir> <P>
+```
+
+It arrives in the worktree, keeps or records the phase's base, renders `<phase-dir>/brief.md` from the phase and the decisions it realizes, and marks the phase active. From its frame hold `base` — the commit check's base for the whole phase (a resumed phase keeps its original one) — and take `worktree` and `arrival`.
+
+A typed `FAIL:` → relay its reason and detail in one line and stop the pass. `PHASE_ACTIVE` means another phase is mid-loop; `RESTART_PENDING` names a restarted phase that must run first — take that one instead; `PHASE_BLOCKED` / `DECISION_OPEN` mean the pass is stopped behind a decision — back to the discussion; `PHASE_STATE` / `NO_PHASE` mean the phase is not startable — the files changed under the pass. Anything else (`WORKTREE_FAILED`, `WORKTREE_MISMATCH`, …) is the worktree's.
+
+Then provision the worktree: spawn `orca:provision` in the background with the task message of `${CLAUDE_PLUGIN_ROOT}/skills/new/provision.md`, on this frame's `worktree` and `arrival`. **Wait for its result before the implementer spawns** — the implementer needs the tree provisioned, or to know it is not:
 
 - `status: ok` → on.
-- `status: setup_failed` / `setup_timeout` → relay `cause` in one line with the `log` path, and offer `/orca:doctor`. Provisioning is advisory: the phase runs, and the implementer's task message carries one more line, `Provisioning failed: <cause>`, so it knows dependencies may be missing.
-- `status: failed` → relay `cause` in one line and stop the pass. `PHASE_ACTIVE` means another phase is mid-loop; `RESTART_PENDING` names a restarted phase that must run first — take that one instead; `PHASE_BLOCKED` / `DECISION_OPEN` mean the pass is stopped behind a decision — back to the discussion; `PHASE_STATE` / `NO_PHASE` mean the phase is not startable — the files changed under the pass.
+- `status: setup_failed` / `setup_timeout` / `failed` → relay `cause` in one line with the `log` path when there is one, and offer `/orca:doctor`. Provisioning is advisory: the phase runs, and the implementer's task message carries one more line, `Provisioning failed: <cause>`, so it knows dependencies may be missing.
+- `setup: absent` or `drifted` → one line, as the open's result had it; the phase runs.
 
 ## Step 3: The implementer
 

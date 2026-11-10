@@ -139,7 +139,7 @@ Twenty-four agents ship in `agents/<stage>.md`, loaded as `orca:<stage>`. Each r
 | `doctor` | Derives and proves `.orca/setup`, for `/orca:doctor` and `/orca:init` | opus | high | |
 | `council` | One Claude seat of `/orca:council`; the model is the seat's | per seat | high | ✓ (`council` roster) |
 | `council-codex` | Courier driving `/orca:council`'s Codex seat via `orca.sh codex` | sonnet | medium | |
-| `worktree` | Runs an objective's claim, worktree arrival, provisioning, and reviewer checks, or a phase start | sonnet | low | |
+| `provision` | Provisions an objective's worktree after the session opens it (a warm-up) or starts a phase | sonnet | low | |
 | `phases` | Read-only planner: proposes an objective's sequential phases | fable | high | |
 | `phases-review-codex` | Courier driving the Codex review of a proposed phase plan via `orca.sh codex` | sonnet | medium | |
 | `phases-review-claude` | Performs the phase-plan review itself | opus | high | |

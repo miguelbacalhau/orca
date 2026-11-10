@@ -64,7 +64,7 @@ bash <plugin-root>/scripts/orca.sh secrets place <repo-root>/main
 
 The other half of what `git worktree add` leaves out is everything a repository builds rather than tracks: `node_modules`, generated code, compiled artifacts. One optional script covers it: **`<repo-root>/.orca/setup`**, machine-local and never committed.
 
-It runs on **every worktree arrival**, right after secrets are placed, and again on the integration worktree before integration verification. Reviews don't run it.
+It runs on **every worktree arrival**, right after secrets are placed, and again on the integration worktree before integration verification. An objective's worktree is provisioned the same way, by the `orca:provision` agent after the session's `objective phase-start` — and, as a warm-up, after `objective open` when the session is not heading straight into the phase loop; both verbs arrive without it. Reviews don't run it.
 
 ### The contract
 

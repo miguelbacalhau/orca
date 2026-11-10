@@ -3,7 +3,7 @@
 An objective is a long-lived unit of work: discussed into decisions, planned into sequential phases, built phase by phase on one branch in one worktree, and re-opened for more whenever there is more to do. Every piece of its state is a file under `.orca/objectives/`, so any session can carry it forward. It is the second way to drive work with orca, beside [a run](anatomy.md).
 
 ```text
-/orca:new <idea>     → files + worktree ∥ research → discussion → decisions
+/orca:new <idea>     → files → worktree → provisioning ∥ research → discussion → decisions
                      → phase plan → plan review → confirm → phase loop → report
 /orca:open [obj]     → digest → discussion · planning · phase loop, by state
 /orca:loop [change]  → one small phase added to this session's objective, run now
@@ -77,7 +77,7 @@ Every file is line-oriented: the verbs read only `## ` headings and `**Key:**` l
 ## Constraints
 ```
 
-`objective new` writes the header lines, which belong to the verbs. The discussion writes the rest; the first line under `## Outcome` is the one-sentence outcome the digest shows.
+`objective new` writes the header lines, which belong to the verbs, and the idea under `## Idea` (`--idea`). The discussion writes the rest; the first line under `## Outcome` is the one-sentence outcome the digest shows.
 
 ### `decisions.md`
 
@@ -145,10 +145,11 @@ The check and the write run under a lock — the ref `refs/orca/claim/<dir name>
 
 ## Creating one: `/orca:new`
 
-1. **Create.** The slug comes from the idea — a provisional `objective-<h4>` when the idea is too vague to name. `objective new <repo> <slug> <base>` writes the files and creates `feature/<slug>` at the base commit, before anything else happens — the one point where a slug can collide. The base is the branch the user names, else the trunk. It refuses a conventional checkout (`NOT_BARE` → `/orca:init`), an existing branch (`BRANCH_EXISTS`), objective (`OBJECTIVE_EXISTS`), or worktree path (`WORKTREE_EXISTS`). A slug a branch or worktree already holds is retried with a `-<h4>` suffix; an existing objective with the slug is offered to the user to continue instead.
-2. **Set up and research, in the background.** `orca:worktree` in `open` mode claims the objective, creates and provisions the worktree (secrets, then `.orca/setup`), and checks the config and the reviewer. `orca:research` explores the code at the base: the current checkout when it is clean at the base commit, else the objective's worktree once it exists. A setup or Codex problem is reported in a line when it lands — with an offer of `/orca:doctor` — and never pauses the discussion.
-3. **Discuss.** Once research returns, the session opens with a reflection of the idea against the code and asks two or three questions at a time. It writes `objective.md`'s sections and one `decisions.md` entry per question as each is raised (`open`) or settled (`decided`), never one document at the end. The research report is never written into the files.
-4. **Hand off.** When the user says go and no decision is open, planning runs. A user who stops leaves the objective `discussing`; `/orca:open` picks it up.
+1. **Create.** The slug comes from the idea — a provisional `objective-<h4>` when the idea is too vague to name. Before anything else happens, the session runs `objective new <repo> <slug> <base> --idea -` with the idea on stdin: that writes the files, the idea verbatim under `## Idea`, and creates `feature/<slug>` at the base commit — the one point where a slug can collide. The base is the branch the user names, else the trunk. It refuses a conventional checkout (`NOT_BARE` → `/orca:init`), an existing branch (`BRANCH_EXISTS`), objective (`OBJECTIVE_EXISTS`), or worktree path (`WORKTREE_EXISTS`). A slug a branch or worktree already holds is retried once with a `-<h4>` suffix; an existing objective with the slug is offered to the user to continue instead.
+2. **Open and check the reviewer.** The session runs `objective open <dir>`: it claims the objective and creates the worktree off the base commit, provisioning nothing, so it returns at once. In the worktree it then runs `config validate` and the preflight's `REVIEWER:`/`CODEX:` lines itself — seconds, a few lines — and holds the reviewer for planning and the loop; re-checking after `/orca:doctor` or `/orca:config` is that call again.
+3. **Provision and research, in the background.** `orca:provision` runs `orca.sh provision` on the worktree (secrets, then `.orca/setup`) as a warm-up, so a cold install overlaps the discussion, and returns one compact object — the setup output never enters the session. `orca:research` explores the code at the base: the current checkout when it is clean at the base commit, else the objective's worktree, which already exists. A setup or Codex problem is reported in a line when it lands — with an offer of `/orca:doctor` — and never pauses the discussion.
+4. **Discuss.** Once research returns, the session opens with a reflection of the idea against the code and asks two or three questions at a time. It writes `objective.md`'s sections and one `decisions.md` entry per question as each is raised (`open`) or settled (`decided`), never one document at the end. The research report is never written into the files.
+5. **Hand off.** When the user says go and no decision is open, planning runs. A user who stops leaves the objective `discussing`; `/orca:open` picks it up.
 
 ## Planning and plan review
 
@@ -163,7 +164,7 @@ Planning turns the decided work into sequential phases and ends at one confirmat
 
 The session runs pending phases in file order, one at a time. It never edits code and never judges a round: after every implementer turn and every review, `orca.sh rounds next <phase-dir>` reads the phase directory and prints the one next action.
 
-1. **Start.** `orca:worktree` in `phase-start` mode runs `objective phase-start`: the phase becomes `active`, `base` is recorded (kept on a re-start, so a resumed phase keeps its base), `brief.md` is rendered from the phase block and every decision it lists, and the worktree is provisioned again. A provisioning failure is relayed and the implementer told; it does not stop the phase.
+1. **Start.** The session runs `objective phase-start`: the worktree is arrived in, `base` is recorded (kept on a re-start, so a resumed phase keeps its base), `brief.md` is rendered from the phase block and every decision it lists, and the phase becomes `active`. Then `orca:provision` provisions the worktree — again, after a warm-up at open, since phases change dependencies; it waits for a warm-up still in flight, one provisioning at a time — and the implementer starts once it has returned. A provisioning failure is relayed and the implementer told; it does not stop the phase.
 2. **Implement and review, round by round.** One `orca:loop-implement` agent per phase, kept alive by `SendMessage` until the phase's commit stands, runs the repository's full checks after every pass, writes `responses/round-<N>.json` every turn (checks, one disposition per finding, `followups`, status), and keeps `notes.md` current. Each review round strips secrets, spawns a fresh `orca:loop-review-codex` or `orca:loop-review-claude` with the brief, the rounds directory — so it verifies earlier `fixed` findings and skips settled declines — and the phase's base, writes `reviews/round-<N>.json`, and puts secrets back. The reviewer's subject is everything since the base, committed or not (`git diff <base>` plus untracked files).
 3. **Commit.** `loop snapshot` records the tree to commit in `snapshot`, against the latest review round, and returns that same tree until a new review round exists — across commit-only retries and a resumed session. The commit request names the round being committed, and the implementer answers it in that round's response file, so a failed commit hook is that round's red checks and the review after its fix is the next round. The implementer writes one Conventional Commit whose body carries a `- chose X over Y: <why>` line per decision the phase realizes, and `loop check` judges it: `accepted`, `needs_commit`, `incomplete`, `diverged`, a banned message reset softly (`violation_reset`), or content that differs from the snapshot reset the same way (`content_reset`, then checks and a review round again).
 4. **Done.** `objective phase-done <dir> <P> <sha>` marks the phase done and renders its report entry and follow-ups. The next pending phase starts with a fresh implementer.
@@ -238,7 +239,7 @@ git merge --no-ff feature/<slug>
 
 `/orca:open [slug]` lists the objectives and offers the newest — or one this session already owns — never forcing the choice. Another live session's objective is never taken; a stale owner is taken over only on the user's yes (`--steal`). An archived or abandoned one is restored with `/orca:archive --undo` first.
 
-`orca:worktree` in `open` mode claims it and arrives in its worktree, re-adding it when it is gone; a worktree at the saved path on another branch, detached, or not this repository's is `WORKTREE_MISMATCH` (as in `phase-start`), and nothing is provisioned. Then `objective digest <dir>` — at most 40 lines, whatever the objective's size: title and outcome, state, worktree (clean, dirty, absent) and branch, decision counts with the open ones listed, one line per phase (the active one always, then the other unfinished ones), the active phase's last action, open follow-ups by count, and the last report entry's heading. The digest is the session's whole starting context; an entry is read only when the conversation turns to it.
+`objective open` claims it and arrives in its worktree, re-adding it when it is gone; a worktree at the saved path on another branch, detached, or not this repository's is `WORKTREE_MISMATCH` (as in `phase-start`). The session checks the config and the reviewer in the worktree, then reads `objective digest <dir>` — at most 40 lines, whatever the objective's size: title and outcome, state, worktree (clean, dirty, absent) and branch, decision counts with the open ones listed, one line per phase (the active one always, then the other unfinished ones), the active phase's last action, open follow-ups by count, and the last report entry's heading. The digest is the session's whole starting context; an entry is read only when the conversation turns to it. A route into the phase loop (`active`, or `ready` and run now) provisions nothing at open — the loop's phase start does it; every other route spawns `orca:provision` in the background as a warm-up.
 
 Routing by state:
 
@@ -288,7 +289,7 @@ The session that owns an objective shows it live above the prompt, in the slot t
 
 - **Header** by state: `discussing · <n> decided · <n> open`; `reviewing plan`, then `planning` once a review of the current pass is written; `P<n>/<total>` while a phase is active; `blocked on D<n>`; `ready · <n> pending`; `idle · <n> phases done`; open follow-ups appended when there are any.
 - **Rows** while discussing are the open decisions (deferred ones dimmed); otherwise one row per phase. The active phase's tail comes from its `action` file: `implement`, `review rN`, `fix rN (<n> gating)`, `fix minor`, `fix checks`, `waiting on you: dispute rN | stall rN | questions | infeasible`, `committing`.
-- **What it follows:** the objective whose `owner` names this session, found by walking up from the session's directory to `.orca/objectives/`. It looks on session start, on every prompt, and when an `orca:worktree` agent finishes, then reads that objective's files every 1.5 s. A live run this session launched takes the slot over.
+- **What it follows:** the objective whose `owner` names this session, found by walking up from the session's directory to `.orca/objectives/`. It looks on session start, on every prompt, and after the session's own `objective open` call, then reads that objective's files every 1.5 s. A live run this session launched takes the slot over.
 - **When it goes:** at session end; when the directory, or this session's claim on it, disappears; when it is archived or landed; and when it has sat `idle` through three of your prompts. A new phase brings it back.
 - Collapse it with `[-]` or ctrl+x ctrl+a — the same collapse as the run band. It is read-only (`hooks/objective-band.tsx`, logic in `hooks/derive-objective.ts`).
 
@@ -296,7 +297,7 @@ The session that owns an objective shows it live above the prompt, in the slot t
 
 | Stage | Role | Model | Effort |
 |---|---|---|---|
-| `worktree` | Runs the claim, worktree arrival, provisioning, and reviewer checks (`open`), or a phase start (`phase-start`); names a setup failure's cause in one line | sonnet | low |
+| `provision` | Provisions the worktree after the session's `objective open` (a warm-up) or `phase-start` (`orca.sh provision`: secrets, then `.orca/setup`); names a setup failure's cause in one line | sonnet | low |
 | `phases` | Read-only planner: writes `plan/proposed.md` from the objective, its decisions, and the code | fable | high |
 | `phases-review-codex` | Courier driving the Codex plan review via `orca.sh codex` | sonnet | medium |
 | `phases-review-claude` | Performs the plan review itself | opus | high |

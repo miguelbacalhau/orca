@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # orca.sh objective — new (the files and its refusals), open (the claim,
-# worktree arrival, provisioning, idempotence), current, list (derived
+# worktree arrival without provisioning, idempotence), current, list (derived
 # states, counts, owner verdicts), and digest (its bound, never a body).
 
 load helpers
@@ -154,21 +154,40 @@ state_is() { # <state> — $D's derived state in `list --all`
   assert_fail_reason BAD_ARGS
 }
 
+@test "new: --idea writes the idea verbatim under ## Idea, from a file or stdin" {
+  printf 'add `dark mode` to $HOME\n\nsecond paragraph\n\n\n' >"$BATS_TEST_TMPDIR/idea"
+  run orca objective new "$R" alpha main --idea "$BATS_TEST_TMPDIR/idea"
+  [ "$status" -eq 0 ]
+  D="$(frame_value dir)"
+  [ "$(sed -n '/^## Idea$/,/^## Outcome$/p' "$D/objective.md")" = "$(printf '## Idea\n\nadd `dark mode` to $HOME\n\nsecond paragraph\n\n## Outcome')" ]
+  run bash -c "printf 'from stdin\n' | bash '$SCRIPTS/orca.sh' objective new '$R' beta main --idea -"
+  [ "$status" -eq 0 ]
+  D="$(frame_value dir)"
+  [ "$(sed -n '/^## Idea$/,/^## Outcome$/p' "$D/objective.md")" = "$(printf '## Idea\n\nfrom stdin\n\n## Outcome')" ]
+}
+
+@test "new: an unreadable idea or a stray option fails BAD_ARGS, writing nothing" {
+  run orca objective new "$R" alpha main --idea "$BATS_TEST_TMPDIR/missing"
+  assert_fail_reason BAD_ARGS
+  run orca objective new "$R" alpha main --notes x
+  assert_fail_reason BAD_ARGS
+  [ -z "$(ls "$R/.orca/objectives" 2>/dev/null)" ]
+  run git -C "$R" rev-parse -q --verify refs/heads/feature/alpha
+  [ "$status" -ne 0 ]
+}
+
 # ---- open -------------------------------------------------------------
 
-@test "open: claims, creates the worktree off the base, provisions, frames the list line" {
+@test "open: claims, creates the worktree off the base, frames the list line" {
   new_objective alpha
   git -C "$R/main" commit -q --allow-empty -m 'trunk moves after new'
   run orca objective open "$D"
   [ "$status" -eq 0 ]
-  has_line $'SETUP:\tabsent'
   has_line $'OBJECTIVE:\t'"$D"$'\talpha\tdiscussing\topen:0\tpending:0\tblocked:0\tfollowups:0\towner:mine'
   [ "$(frame_value claim)" = claimed ]
   [ "$(frame_value arrival)" = branch_resumed ]
   [ "$(frame_value worktree)" = "$R/orca-alpha" ]
   [ "$(frame_value branch)" = feature/alpha ]
-  [ "$(frame_value setup)" = absent ]
-  [ "$(frame_value setup_status)" = absent ]
   # the worktree starts at the base commit recorded by new, not today's trunk
   local base
   base="$(sed -n 's/^\*\*Base commit:\*\* `\(.*\)`$/\1/p' "$D/objective.md")"
@@ -181,6 +200,32 @@ state_is() { # <state> — $D's derived state in `list --all`
   grep -qE '^pid=[0-9]+$' "$D/owner"
   grep -q '^pidstart=' "$D/owner"
   grep -q '^taken=' "$D/owner"
+}
+
+@test "open and phase-start provision nothing: no secrets, no setup run, no setup keys" {
+  mkdir -p "$R/.orca/secrets"
+  echo 'SECRET=1' >"$R/.orca/secrets/.env"
+  printf 'echo "provisioned $ORCA_ARRIVAL" >>prov.log\n' >"$BATS_TEST_TMPDIR/cand"
+  ( cd "$R/main" && bash "$SCRIPTS/orca.sh" setup install "$BATS_TEST_TMPDIR/cand" --sources - ) >/dev/null
+  new_objective alpha
+  run orca objective open "$D"
+  [ "$status" -eq 0 ]
+  [ "$(frame_value arrival)" = branch_resumed ]
+  [ ! -e "$R/orca-alpha/.env" ] && [ ! -L "$R/orca-alpha/.env" ]
+  [ ! -e "$R/orca-alpha/prov.log" ]
+  ! printf '%s\n' "$output" | grep -qE '^(LINKED|SETUP|SETUP_TAIL):|^setup' || return 1
+  decision D1 decided 'Per key?'
+  phase P1 pending 'Bucket'
+  run orca objective phase-start "$D" P1
+  [ "$status" -eq 0 ]
+  [ "$(frame_value arrival)" = reused ]
+  [ ! -e "$R/orca-alpha/prov.log" ]
+  ! printf '%s\n' "$output" | grep -qE '^(LINKED|SETUP|SETUP_TAIL):|^setup' || return 1
+  # provisioning is the caller's own call, with the arrival the frame named
+  run orca provision "$R/orca-alpha" reused
+  [ "$status" -eq 0 ]
+  [ -L "$R/orca-alpha/.env" ]
+  [ "$(cat "$R/orca-alpha/prov.log")" = 'provisioned reused' ]
 }
 
 @test "open: run twice is reused and kept, the owner file untouched" {
@@ -1257,7 +1302,6 @@ blocked_section() { # the lines under report.md's ## Blocked, blanks dropped
   phase P1 pending 'Bucket'
   run orca objective phase-start "$D" P1
   [ "$status" -eq 0 ]
-  has_line $'SETUP:\tabsent'
   [ "$(frame_value started)" = yes ]
   [ "$(frame_value base_kept)" = no ]
   [ "$(frame_value arrival)" = branch_resumed ]

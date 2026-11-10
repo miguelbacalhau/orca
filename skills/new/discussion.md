@@ -9,7 +9,7 @@ The files are *what and why* — human intent, including the direction choices t
 **`objective.md`.** Its header lines — `**Base:**`, `**Base commit:**`, `**Branch:**`, `**Worktree:**` — belong to the verbs: never edit them. Write only:
 
 - `# <title>` — the first line starts as the slug; replace it with a short human title once the idea has one.
-- `## Idea` — the user's idea verbatim, written once at the start.
+- `## Idea` — the user's idea verbatim, written by `objective new` when the objective is created; leave it as it is.
 - `## Outcome` — what exists when this is done that does not exist now. **The first line is a one-sentence outcome** (it is the line `/orca:open`'s digest shows); one or two paragraphs may follow.
 - `## Non-goals` — bullets of explicitly excluded scope, each with its why where one was discussed.
 - `## Constraints` — bullets: code it must integrate with, compatibility or performance expectations, bounds on scope — each with its why.

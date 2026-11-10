@@ -5,7 +5,7 @@
 # is already loaded.
 #
 # Usage:
-#   orca.sh worktree-item <context-dir> <worktree> <branch> <base-ref>
+#   orca.sh worktree-item <context-dir> <worktree> <branch> <base-ref> [--no-provision]
 #
 # The three arrivals, in order:
 #   - the directory survives from a previous run  -> reused (resume in place)
@@ -27,7 +27,10 @@
 # and a setup script is required to be cheap when warm. Both verbs' typed
 # lines pass through for the caller to log. provision.sh is SOURCED in
 # library mode rather than dispatched: it emits a frame of its own, and
-# two frames in one output would not decode as one frame.
+# two frames in one output would not decode as one frame. The work loop
+# always takes the chained ritual; --no-provision skips it for a caller
+# that provisions on its own, later (the objective verbs, whose
+# provisioning is orca:provision's `orca.sh provision` call).
 #
 # The frame reports the worktree's head as a marker (lib.sh is_marker,
 # checked here before it is emitted), which the caller holds opaque as
@@ -39,8 +42,15 @@
 # setup=absent|ok|failed|timeout, setup_stamped, setup_rc, setup_seconds,
 # and setup_tail.b64 when provisioning failed — the loops turn the last
 # into the `Provisioning: FAILED` line in the implement agent's prompt.
+# With --no-provision: rc, arrival, head only, and no typed lines.
 
-[ $# -eq 4 ] || fail BAD_ARGS "usage: orca.sh worktree-item <context-dir> <worktree> <branch> <base-ref>"
+wti_usage="usage: orca.sh worktree-item <context-dir> <worktree> <branch> <base-ref> [--no-provision]"
+wti_provision=1
+if [ $# -eq 5 ] && [ "$5" = --no-provision ]; then
+  wti_provision=0
+elif [ $# -ne 4 ]; then
+  fail BAD_ARGS "$wti_usage"
+fi
 wti_ctx="$1"
 wti_wt="$2"
 wti_branch="$3"
@@ -85,18 +95,22 @@ rm -f "$wti_errlog"
 # The ritual's own typed lines (LINKED/UNIGNORED/SKIPPED_*, SETUP:) pass
 # through; a chained verb's misuse FAIL line is the typed failure, so no
 # re-wrapping. Provisioning itself is advisory and never fails here.
-# shellcheck disable=SC2034  # read by provision.sh as it is sourced below
-ORCA_PROVISION_LIB=1
-# shellcheck source=provision.sh disable=SC1091
-source "$orca_scripts_dir/verbs/provision.sh"
-provision_ritual "$wti_wt" "$wti_arrival" || exit 1
+if [ "$wti_provision" -eq 1 ]; then
+  # shellcheck disable=SC2034  # read by provision.sh as it is sourced below
+  ORCA_PROVISION_LIB=1
+  # shellcheck source=provision.sh disable=SC1091
+  source "$orca_scripts_dir/verbs/provision.sh"
+  provision_ritual "$wti_wt" "$wti_arrival" || exit 1
+fi
 
 wti_head="$(git -C "$wti_wt" rev-parse HEAD)" \
   || fail GIT_ERROR "could not read HEAD in $wti_wt"
 is_marker "$wti_head" \
   || fail GIT_ERROR "HEAD of $wti_wt is not a commit id: $wti_head"
 
-if [ -n "$provision_tail" ]; then
+if [ "$wti_provision" -eq 0 ]; then
+  emit_frame rc=0 "arrival=$wti_arrival" "head=$wti_head"
+elif [ -n "$provision_tail" ]; then
   emit_frame rc=0 "arrival=$wti_arrival" "head=$wti_head" "setup=$provision_setup" \
     "setup_stamped=$provision_stamped" "setup_rc=$provision_rc" \
     "setup_seconds=$provision_seconds" "setup_tail.b64=$provision_tail"

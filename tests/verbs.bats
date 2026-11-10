@@ -132,6 +132,41 @@ commit_in() { # <wt> <message>
   [[ "$(frame_get setup_tail.b64 | base64 --decode)" == *wrecked* ]]
 }
 
+@test "worktree-item: --no-provision arrives without secrets or setup, framing arrival and head only" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  mkdir -p "$BATS_TEST_TMPDIR/r/.orca/secrets"
+  echo 'SECRET=1' >"$BATS_TEST_TMPDIR/r/.orca/secrets/.env"
+  printf 'echo "provisioned $ORCA_ARRIVAL" >>prov.log\n' >"$BATS_TEST_TMPDIR/cand"
+  ( cd "$BATS_TEST_TMPDIR/r" &&
+    bash "$SCRIPTS/orca.sh" setup install "$BATS_TEST_TMPDIR/cand" --sources - ) >/dev/null
+
+  run orca worktree-item "$BATS_TEST_TMPDIR/r/int" "$BATS_TEST_TMPDIR/r/wt1" feature/x-W1 feature/x --no-provision
+  [ "$status" -eq 0 ]
+  [ "$(frame_get arrival)" = created ]
+  [ "$(frame_get head)" = "$(git -C "$BATS_TEST_TMPDIR/r/wt1" rev-parse HEAD)" ]
+  [ ! -e "$BATS_TEST_TMPDIR/r/wt1/.env" ] && [ ! -L "$BATS_TEST_TMPDIR/r/wt1/.env" ]
+  [ ! -e "$BATS_TEST_TMPDIR/r/wt1/prov.log" ]
+  ! printf '%s\n' "$output" | grep -qE '^(LINKED|SETUP):' || return 1
+  ! printf '%s\n' "$output" | grep -q '^setup' || return 1
+  # a re-run is still the reused arrival, still unprovisioned
+  run orca worktree-item "$BATS_TEST_TMPDIR/r/int" "$BATS_TEST_TMPDIR/r/wt1" feature/x-W1 feature/x --no-provision
+  [ "$status" -eq 0 ]
+  [ "$(frame_get arrival)" = reused ]
+  [ ! -e "$BATS_TEST_TMPDIR/r/wt1/prov.log" ]
+  # the provision verb the caller runs afterwards does the ritual
+  run orca provision "$BATS_TEST_TMPDIR/r/wt1" reused
+  [ "$status" -eq 0 ]
+  [ -L "$BATS_TEST_TMPDIR/r/wt1/.env" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/r/wt1/prov.log")" = 'provisioned reused' ]
+}
+
+@test "worktree-item: a fifth argument other than --no-provision is BAD_ARGS" {
+  make_run_layout "$BATS_TEST_TMPDIR/r"
+  run orca worktree-item "$BATS_TEST_TMPDIR/r/int" "$BATS_TEST_TMPDIR/r/wt1" feature/x-W1 feature/x --provision
+  assert_fail_reason BAD_ARGS
+  [ ! -e "$BATS_TEST_TMPDIR/r/wt1" ]
+}
+
 # ---- commit-verify -----------------------------------------------------
 
 @test "commit-verify: a clean new commit is accepted with hash and message" {

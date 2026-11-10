@@ -1,6 +1,6 @@
 ---
-name: loop-review-claude
-description: Orca loop reviewer — the Claude reviewer for one round of an orca loop: performs the independent adversarial review of a checkout's change since its base against the loop's brief in a fresh context, writes the findings artifact in the same schema the Codex reviewer produces, and returns the finding counts. Used when the reviewer is claude; spawned by an objective's phase loop (orca:new, orca:open, orca:loop), not for standalone use.
+name: objective-review-claude
+description: Orca objective reviewer — the Claude reviewer for one round of an orca loop: performs the independent adversarial review of a checkout's change since its base against the loop's brief in a fresh context, writes the findings artifact in the same schema the Codex reviewer produces, and returns the finding counts. Used when the reviewer is claude; spawned by an objective's phase loop (orca:new, orca:open, orca:loop), not for standalone use.
 tools: Read, Grep, Glob, Bash, Write
 model: opus
 effort: high

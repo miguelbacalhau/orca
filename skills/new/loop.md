@@ -40,7 +40,7 @@ Then provision the worktree: spawn `orca:provision` in the background with the t
 
 ## Step 3: The implementer
 
-One `orca:loop-implement` per phase, **spawned on the first action that needs it** (Step 4) and continued by `SendMessage` until the phase's commit stands. Its task message:
+One `orca:objective-implement` per phase, **spawned on the first action that needs it** (Step 4) and continued by `SendMessage` until the phase's commit stands. Its task message:
 
 ```text
 Worktree: <worktree>
@@ -121,7 +121,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh objective phase-block <dir> <P> D<n>
 ## Step 5: Review round N
 
 1. `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh secrets remove <worktree>` — the reviewer reads adversarial content and needs no credentials.
-2. Spawn a fresh `orca:loop-review-<reviewer>`. Its task message: the worktree, the brief path `<phase-dir>/brief.md`, the artifact path `<phase-dir>/reviews/round-<N>.json`, the declines path `<phase-dir>/declines.md` (whether or not it exists yet), the rounds directory `<phase-dir>`, the base `<base>` — the review covers everything since it, committed or not — and, for codex, the plugin root, `${CLAUDE_PLUGIN_ROOT}` substituted.
+2. Spawn a fresh `orca:objective-review-<reviewer>`. Its task message: the worktree, the brief path `<phase-dir>/brief.md`, the artifact path `<phase-dir>/reviews/round-<N>.json`, the declines path `<phase-dir>/declines.md` (whether or not it exists yet), the rounds directory `<phase-dir>`, the base `<base>` — the review covers everything since it, committed or not — and, for codex, the plugin root, `${CLAUDE_PLUGIN_ROOT}` substituted.
 3. `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh secrets place <worktree>` — on every path out of the round, the reviewer's failure included.
 
 `secrets` failing `OUTSIDE_ROOT` means orca never placed secrets in that checkout — carry on. Any other typed `FAIL:` from `secrets remove` stops the round before the reviewer spawns: tell the user, and stop the pass.

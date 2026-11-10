@@ -1,6 +1,6 @@
 ---
-name: loop-implement
-description: Orca loop implementer — implements one small change described by a short brief inside an existing checkout, runs the repository's full checks, fixes every independent-review round's findings, and on request writes the one Conventional Commit. Kept alive across the whole loop and continued by message; every turn it writes its dispositions and working notes into the rounds directory for the round engine. Spawned by an objective's phase loop (orca:new, orca:open, orca:loop); not for standalone use.
+name: objective-implement
+description: Orca objective implementer — implements one small change described by a short brief inside an existing checkout, runs the repository's full checks, fixes every independent-review round's findings, and on request writes the one Conventional Commit. Kept alive across the whole loop and continued by message; every turn it writes its dispositions and working notes into the rounds directory for the round engine. Spawned by an objective's phase loop (orca:new, orca:open, orca:loop); not for standalone use.
 tools: Read, Write, Edit, Bash, Grep, Glob, Skill
 model: opus
 effort: high

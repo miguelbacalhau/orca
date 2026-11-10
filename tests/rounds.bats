@@ -710,13 +710,13 @@ next_fails() {
 
 # ---- the implementer's documented response ----------------------------
 
-# The response example agents/loop-implement.md gives its rounds mode —
+# The response example agents/objective-implement.md gives its rounds mode —
 # the first json block after the "**The response file.**" paragraph.
 documented_response() {
   awk '/^\*\*The response file\.\*\*/ { found = 1; next }
        found && /^```json$/ { inside = 1; next }
        inside && /^```$/ { exit }
-       inside { print }' "$ORCA_ROOT/agents/loop-implement.md"
+       inside { print }' "$ORCA_ROOT/agents/objective-implement.md"
 }
 
 @test "the implementer's documented response is one next validates and matches" {
@@ -929,8 +929,8 @@ checked() {
 }
 
 @test "the implementer records each response's checked tree through rounds tree, and the loop hands it the plugin root" {
-  grep -qF '`tree` — the tree this turn'"'"'s checks were of' "$ORCA_ROOT/agents/loop-implement.md"
-  grep -qF 'bash "<plugin-root>/scripts/orca.sh" rounds tree <rounds-dir>' "$ORCA_ROOT/agents/loop-implement.md"
+  grep -qF '`tree` — the tree this turn'"'"'s checks were of' "$ORCA_ROOT/agents/objective-implement.md"
+  grep -qF 'bash "<plugin-root>/scripts/orca.sh" rounds tree <rounds-dir>' "$ORCA_ROOT/agents/objective-implement.md"
   grep -qx 'Plugin root: ${CLAUDE_PLUGIN_ROOT}' "$ORCA_ROOT/skills/new/loop.md"
   # the documented example carries one
   documented_response | grep -q '"tree": "[0-9a-f]\{40\}"'

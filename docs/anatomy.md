@@ -143,8 +143,8 @@ Twenty-four agents ship in `agents/<stage>.md`, loaded as `orca:<stage>`. Each r
 | `phases` | Read-only planner: proposes an objective's sequential phases | fable | high | |
 | `phases-review-codex` | Courier driving the Codex review of a proposed phase plan via `orca.sh codex` | sonnet | medium | |
 | `phases-review-claude` | Performs the phase-plan review itself | opus | high | |
-| `loop-implement` | Implements, fixes, and commits one objective phase, kept alive across its rounds | opus | high | |
-| `loop-review-codex` | Courier driving one phase round's Codex review via `orca.sh codex` | sonnet | medium | |
-| `loop-review-claude` | Performs one phase round's review itself | opus | high | |
+| `objective-implement` | Implements, fixes, and commits one objective phase, kept alive across its rounds | opus | high | |
+| `objective-review-codex` | Courier driving one phase round's Codex review via `orca.sh codex` | sonnet | medium | |
+| `objective-review-claude` | Performs one phase round's review itself | opus | high | |
 
 The resolved reviewer picks the item reviewer and the spec reviewer, and for objectives the plan reviewer and the phase reviewer. The workflow's internal helper agents (reconciliation, escalation) are not configurable.

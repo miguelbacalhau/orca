@@ -1,6 +1,6 @@
 ---
-name: loop-review-codex
-description: Orca loop reviewer — drives the independent cross-model Codex review for one round of an orca loop through the orca CLI's codex verb, checks the findings artifact it lands, and returns the finding counts. Used when the reviewer is codex; spawned by an objective's phase loop (orca:new, orca:open, orca:loop), not for standalone use.
+name: objective-review-codex
+description: Orca objective reviewer — drives the independent cross-model Codex review for one round of an orca loop through the orca CLI's codex verb, checks the findings artifact it lands, and returns the finding counts. Used when the reviewer is codex; spawned by an objective's phase loop (orca:new, orca:open, orca:loop), not for standalone use.
 tools: Bash, Read, Write
 model: sonnet
 effort: medium

@@ -1,5 +1,5 @@
 ---
-description: Re-open an orca objective — the long-lived unit `/orca:new` starts under `.orca/objectives/` — in this session, and carry it forward from wherever it stands. Picks one (the newest by default, or the slug named), claims it for this session, arrives in its worktree and checks the config and the reviewer, then loads only a bounded digest of it — never the objective's files — and routes by its derived state: open or blocking decisions go to the discussion, an unaccepted plan back to the planning gate, a confirmed plan to the phase loop, an interrupted phase to a fresh implementer that resumes it, a finished objective to what's next (its open follow-ups, new decisions, `/orca:review`, `/orca:pr`, `/orca:archive`). A route outside the phase loop warms the worktree up with secrets and `.orca/setup` in a background `orca:provision` agent; the loop provisions at each phase start. One session drives an objective at a time: another live session's claim is never taken, a provably dead one only with the user's yes. Requires the bare-repo-with-worktrees layout; needs no bypass mode.
+description: Re-open an orca objective — the long-lived unit `/orca:new` starts under `.orca/objectives/` — in this session, and carry it forward from wherever it stands. Picks one (the newest by default, or the slug named), claims it for this session, arrives in its worktree, and checks the config and the reviewer (all in a background `orca:objective-open` agent, so none of that output enters the session), then loads only a bounded digest of it — never the objective's files — and routes by its derived state: open or blocking decisions go to the discussion, an unaccepted plan back to the planning gate, a confirmed plan to the phase loop, an interrupted phase to a fresh implementer that resumes it, a finished objective to what's next (its open follow-ups, new decisions, `/orca:review`, `/orca:pr`, `/orca:archive`). A route outside the phase loop warms the worktree up with secrets and `.orca/setup` in a background `orca:provision` agent; the loop provisions at each phase start. One session drives an objective at a time: another live session's claim is never taken, a provably dead one only with the user's yes. Requires the bare-repo-with-worktrees layout; needs no bypass mode.
 args: <optional objective slug or directory>
 user-invocable: true
 disable-model-invocation: true
@@ -11,7 +11,7 @@ An objective keeps every piece of its state in files under `<repo-root>/.orca/ob
 
 **Minimal context.** The objective's bounded digest is this session's whole starting context. Never read `objective.md`, `decisions.md`, `phases.md`, `report.md`, or any phase directory here: read one decision, phase, or follow-up entry only when the conversation turns to it (`sed` on its heading or id — `sed -n '/^## D3 — /,/^## /p' <dir>/decisions.md`, `grep -F -- '- F4 · ' <dir>/report.md` — never the file), and pass paths, not contents, to every agent. The instructions are split the same way: the discussion, planning, and loop live in `${CLAUDE_PLUGIN_ROOT}/skills/new/{provision,discussion,planning,loop}.md`, each read only when the routed state needs it.
 
-You keep what needs the conversation and run the fast objective verbs and the reviewer check yourself; provisioning runs in `orca:provision`. Every spawn runs in the background: wait for its notification, and never fabricate a result. Shell calls go through `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh` with your own Bash tool — the work loop's verb hook plays no part, so this skill needs no bypass mode.
+You keep what needs the conversation and run the read-only objective verbs (`list`, `digest`) yourself. The open and the reviewer check run in `orca:objective-open`, and provisioning in `orca:provision`. Every spawn runs in the background: wait for its notification, and never fabricate a result. Shell calls go through `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh` with your own Bash tool — the work loop's verb hook plays no part, so this skill needs no bypass mode.
 
 ## Step 1: Pick the objective
 
@@ -33,7 +33,7 @@ Then, by the chosen line's owner and state:
 
 ## Step 2: Open
 
-Read `${CLAUDE_PLUGIN_ROOT}/skills/new/provision.md` and run its open — `objective open <dir>`, plus `--steal` when the user agreed above — with your own Bash tool. It claims the objective for this session and arrives in the worktree, re-adding it when it is gone. A typed `FAIL:` whose reason is one of these stops first:
+Read `${CLAUDE_PLUGIN_ROOT}/skills/new/provision.md` and run its open: spawn `orca:objective-open` with the `Mode: open` task on `<dir>`, with `Steal: yes` when the user agreed above. It claims the objective for this session, arrives in the worktree (re-adding it when it is gone), and checks the reviewer. None of that output enters this session. On `status: open_failed`, these reasons stop first:
 
 - `OWNED_ELSEWHERE` → another live session claimed it since the list: say which, and stop.
 - `OWNER_STALE` → offer `--steal` as in Step 1, and open once more on yes.
@@ -42,7 +42,7 @@ Read `${CLAUDE_PLUGIN_ROOT}/skills/new/provision.md` and run its open — `objec
 
 Any other is a worktree failure: the claim stands, and that file's rule holds.
 
-On the open's frame, run that file's reviewer check. Provisioning waits for the digest: whether it is worth spawning depends on the route (Step 4).
+Hold the reviewer values from the object, as that file says. Provisioning waits for the digest: whether it is worth spawning depends on the route (Step 4).
 
 ## Step 3: The digest
 

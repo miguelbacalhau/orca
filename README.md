@@ -61,7 +61,7 @@ A run's deliverable is a `feature/<slug>` branch in its own worktree. You review
 | **Repository layout** | Bare repository with worktrees (`.bare/` plus peer worktrees). `/orca:init` sets it up, including converting an existing checkout. |
 | **Codex CLI** *(codex reviewer only)* | The global `codex` binary ≥ 0.142.5, authenticated with `codex login`. Install with `brew install codex` or the official release binaries — **never via npm**. Plus `BASH_MAX_TIMEOUT_MS=1200000` in a settings `env` block, which `/orca:doctor` writes for you. |
 
-The twenty-four agents and the CLI ship inside the plugin; nothing else is installed per repository.
+The twenty-five agents and the CLI ship inside the plugin; nothing else is installed per repository.
 
 ## Installation
 
@@ -268,7 +268,7 @@ Bypass mode applies to the **whole session**, not just the run, so a dedicated s
 | Path | Contents |
 |---|---|
 | `skills/<name>/SKILL.md` | The fourteen skills. |
-| `agents/<stage>.md` | The twenty-four agents, loaded as `orca:<stage>`. |
+| `agents/<stage>.md` | The twenty-five agents, loaded as `orca:<stage>`. |
 | `scripts/orca.sh`, `scripts/lib.sh`, `scripts/verbs/` | The [orca CLI](docs/cli.md). |
 | `scripts/*.workflow.js` | Workflow scripts: the work loop, the spec gate, research. |
 | `hooks/` | The function-hooks module: the run band, the objective band, and the verb hook. `$.state` types in `types/index.d.ts`. |

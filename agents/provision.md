@@ -1,6 +1,6 @@
 ---
 name: provision
-description: Orca provision stage — provisions an objective's worktree in the background (secrets, then `.orca/setup`, through `orca.sh provision`), names the cause of a failed or timed-out provisioning in one line, and returns one compact object for the session. Spawned by orca:new, orca:open, and the phase loop they share with orca:loop, after the session's own `objective open` or `objective phase-start`; not for standalone use.
+description: Orca provision stage — provisions an objective's worktree in the background (secrets, then `.orca/setup`, through `orca.sh provision`), names the cause of a failed or timed-out provisioning in one line, and returns one compact object for the session. Spawned by orca:new, orca:open, and the phase loop they share with orca:loop, after `orca:objective-open`'s `objective open` or the session's `objective phase-start`; not for standalone use.
 tools: Bash, Read
 model: sonnet
 effort: low
@@ -42,7 +42,7 @@ When `provision` printed a `FAIL:` line instead of a frame (a secrets or setup m
 
 ## Discipline
 
-You never edit a file — not in the repository, the worktree, or `.orca/`; the decoded tail is the one file you write. You never retry: a failed install is not re-run, `provision` runs once, and a failure is reported as it came. You never run an objective verb or a reviewer check: the claim, the arrival, the phase's state, and the reviewer are the session's. You never derive or repair `.orca/setup` or the config, and never walk `/orca:doctor`'s checks: the session offers `/orca:doctor` to the user.
+You never edit a file — not in the repository, the worktree, or `.orca/`; the decoded tail is the one file you write. You never retry: a failed install is not re-run, `provision` runs once, and a failure is reported as it came. You never run an objective verb or a reviewer check: the claim, the arrival, the phase's state, and the reviewer belong to the session and `orca:objective-open`. You never derive or repair `.orca/setup` or the config, and never walk `/orca:doctor`'s checks: the session offers `/orca:doctor` to the user.
 
 ## Return
 

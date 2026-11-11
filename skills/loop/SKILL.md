@@ -25,7 +25,7 @@ One frame: `dir`, the objective this session owns, or `none`.
   - `open:` above 0 → a decision is open: refuse — settle it first, in the objective's discussion (`/orca:open`). Stop.
   - `blocked:` above 0 → a phase waits on a decision, and no phase runs until it is settled and the plan redone: refuse — `/orca:open` takes it to the discussion. Stop.
 
-Hold `<dir>`. The worktree comes from this session's `objective open` frame and the reviewer from its reviewer check; `${CLAUDE_PLUGIN_ROOT}/skills/new/loop.md` says what to do when you no longer hold them.
+Hold `<dir>`. The worktree and the reviewer come from this session's open (the `orca:objective-open` result); `${CLAUDE_PLUGIN_ROOT}/skills/new/loop.md` says what to do when you no longer hold them.
 
 ## Step 2: The phase
 

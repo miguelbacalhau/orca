@@ -1,12 +1,13 @@
 // The objective band: a live view of the objective this session owns, drawn
 // above the prompt where the run band draws. A read-only observer — it finds
 // the objective whose `owner` file names this session (the claim `objective
-// open` writes, run by the session itself), then reads that objective's files
-// on a short tick. It writes nothing anywhere but its own $.state.
+// open` writes, run by the session's orca:objective-open agent), then reads
+// that objective's files on a short tick. It writes nothing anywhere but its
+// own $.state.
 //
 // Ownership is looked up on session.start, on every prompt.submit, and after
-// the session's own Bash call runs `objective open` — never on the tick — and
-// the match is kept in $.state. A run the session launches takes the band
+// a Bash call of the session or one of its agents runs `objective open` —
+// never on the tick — and the match is kept in $.state. A run the session launches takes the band
 // over while it is live.
 // The band goes on session end, when the objective's directory or this
 // session's claim on it disappears, when it is archived, and when it sat idle
@@ -249,9 +250,10 @@ export async function objectiveBand($: EngineInterface): Promise<OrcaBand | null
 }
 
 export const register: Register = on => {
-  // The session runs `objective open` itself, which writes the claim.
+  // The session's orca:objective-open agent runs `objective open`, which
+  // writes the claim under the session's id; its Bash call carries an agentId.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-    if (e.tool !== 'Bash' || e.agentId !== undefined || !OPEN_VERB.test(e.command)) return next(e)
+    if (e.tool !== 'Bash' || !OPEN_VERB.test(e.command)) return next(e)
     const ran = await next(e)
     try { await rescan($) } catch { /* observe only */ }
     return ran

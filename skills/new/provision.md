@@ -4,37 +4,35 @@ This file is read by `/orca:new` and `/orca:open` when they open the objective, 
 
 ## The open
 
-The session runs it itself — it is fast and quiet, and nothing is provisioned in it:
+The open runs in **`orca:objective-open`**, never in this session. It is fast, but `objective new` and `objective open` write git refs, worktree internals, and the objective's files, and Claude Code shows every file a Bash call changed. Spawn it in the background (Agent tool) and wait for its notification. `/orca:new` gives it a `Mode: new` task (that skill gives the message). Every other open, `/orca:open`'s and every re-open below, gives it this one:
 
-```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh objective open <dir>
+```text
+Mode: open
+Plugin root: ${CLAUDE_PLUGIN_ROOT}
+Repository: <the session's working directory>
+Objective: <dir>
+Steal: no
 ```
 
-(plus `--steal` when the skill says so). It claims the objective for this session and arrives in its worktree — created off the base commit the first time, re-added when it is gone. Ignore its typed lines; from its frame hold `worktree`, `branch`, and `arrival` for the rest of the session — planning and the loop need the first two, and `orca:provision` needs the first and last. Then run the reviewer check (below) at once.
+(the plugin root substituted, absolute: nothing in a subagent's shell carries it; `Steal: yes` only when the skill says so). The agent claims the objective for this session, arrives in its worktree (creating it off the base commit the first time, re-adding it when it is gone), and runs the reviewer check there. It returns one object. For the rest of the session, hold its `worktree`, `branch`, and `arrival` (planning and the loop need the first two, `orca:provision` the first and last) and the reviewer values below.
 
-A typed `FAIL:` → the skill names the causes that stop it first. Any other (`WORKTREE_FAILED`, `WORKTREE_MISMATCH`, `BRANCH_FOREIGN`, `CLAIM_BUSY`, …) means the worktree is not there: relay the reason and detail in one line. The claim stands. The discussion still runs — it needs only the objective's files — but planning and the loop need the worktree: before either runs, run `objective open <dir>` once more (it continues where it stopped) and the reviewer check on its frame; a second failure goes to the user.
+`status: open_failed`: the skill names the causes (`reason`) that stop it first. Any other reason (`WORKTREE_FAILED`, `WORKTREE_MISMATCH`, `BRANCH_FOREIGN`, `CLAIM_BUSY`, …) means the worktree is not there. Relay the reason and detail in one line. The claim stands. The discussion still runs, since it needs only the objective's files. Planning and the loop need the worktree, though: before either runs, re-open (it continues where it stopped). A second failure goes to the user.
 
 ## The reviewer check
 
-One Bash call, in the worktree — it takes seconds and prints a few lines:
+It comes back in the open's object, so there is no call of your own to make. Hold three values for the rest of the session, because planning and the loop need them:
 
-```bash
-cd "<worktree>" && { bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh config validate; bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh preflight | grep -E '^(REVIEWER|CODEX):'; }
-```
+- **`reviewer`**: `codex`, `claude`, or `fail` (the config or the reviewer check failed).
+- **`codex`**: `ok`, `skipped`, or `fail`.
+- **`codex_fix`**: the remediation when `codex` is `fail`, else empty.
 
-The preflight's exit status is not yours to act on: the bare layout was checked when the objective was created. Derive and hold three values for the rest of the session — planning and the loop need them:
+Mention them in a line only when something is wrong, and never pause the discussion over them. `codex: fail` → relay `codex_fix` (`/orca:doctor` walks every remediation). `reviewer: fail` → one line pointing at `/orca:config`. The reviewer is first needed at plan review, and planning and the loop say what they need. Never switch reviewers on the user's behalf.
 
-- **`reviewer`** — `config validate`'s `reviewer` when its `VALID:` JSON carries one, else the `REVIEWER:` value (`codex` or `claude`, before the parenthesis). A typed `FAIL:` from `config validate`, or `REVIEWER: FAIL`, makes it `fail`.
-- **`codex`** — `CODEX: PASS` → `ok`, `CODEX: SKIPPED` → `skipped`, `CODEX: FAIL: <remediation>` → `fail`.
-- **`codex_fix`** — that remediation text when `codex` is `fail`, else empty.
-
-Report it in a line only when something is wrong, never as a reason to pause the discussion: `codex: fail` → relay `codex_fix` (`/orca:doctor` walks every remediation); `reviewer: fail` → the config or the reviewer check failed: one line pointing at `/orca:config`. The reviewer is first needed at plan review; planning and the loop say what they need. Never switch reviewers on the user's behalf.
-
-**Re-checking** — after the user ran `/orca:doctor` or `/orca:config`, or when you no longer hold the values (a compaction, say) — is this same call again, on the held `worktree`; when you no longer hold that either, run `objective open <dir>` first (it keeps this session's claim and frames the worktree). It never re-spawns `orca:provision`.
+**Re-checking** is a re-open: spawn `orca:objective-open` with the `Mode: open` task again. Do it after the user ran `/orca:doctor` or `/orca:config`, or when you no longer hold the values or the worktree (a compaction, say). It keeps this session's claim, returns the worktree, and checks the reviewer again. It never re-spawns `orca:provision`.
 
 ## Provisioning
 
-When the skill calls for it, spawn **`orca:provision`** in the background (Agent tool) on the open's frame. Its task message:
+When the skill calls for it, spawn **`orca:provision`** in the background (Agent tool) on the open's `worktree` and `arrival`. Its task message:
 
 ```text
 Worktree: <worktree>
@@ -55,4 +53,4 @@ It returns one object: `{status, setup, cause, log}`. Report it when it lands, i
 
 ## The hand-off
 
-When the user says go, plan it. First confirm no decision is open, from the files rather than memory: `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh objective list "$PWD"` and this objective's `OBJECTIVE:` line (the one whose dir is `<dir>`) reading `open:0`. An open one goes back to the discussion: settle it, or mark it `deferred` when the user wants to leave it out of this pass. The open, or its retry, must have returned a worktree, and the reviewer check must have run on it. Then read `${CLAUDE_PLUGIN_ROOT}/skills/new/planning.md` and follow it — the planner, the plan review, and the one confirmation. On its confirmation, read `${CLAUDE_PLUGIN_ROOT}/skills/new/loop.md` and follow it to run the phases. A decision that blocked a phase is settled this way too: the pending and blocked phases are replanned and confirmed before the loop runs again.
+When the user says go, plan it. First confirm no decision is open, from the files rather than memory: `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh objective list "$PWD"` and this objective's `OBJECTIVE:` line (the one whose dir is `<dir>`) reading `open:0`. An open one goes back to the discussion: settle it, or mark it `deferred` when the user wants to leave it out of this pass. The open, or a re-open, must have returned a worktree with its reviewer check. Then read `${CLAUDE_PLUGIN_ROOT}/skills/new/planning.md` and follow it — the planner, the plan review, and the one confirmation. On its confirmation, read `${CLAUDE_PLUGIN_ROOT}/skills/new/loop.md` and follow it to run the phases. A decision that blocked a phase is settled this way too: the pending and blocked phases are replanned and confirmed before the loop runs again.

@@ -276,7 +276,8 @@ function objectiveDisk(over: Record<string, string> = {}): Map<string, Node> {
 
 const start = ($: Engine, cwd: string) => $.session.start({ cwd, surface: 'terminal', isInteractive: true })
 const say = ($: Engine, text: string) => $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
-const ranBash = ($: Engine, command: string) => $.tool.call({ tool: 'Bash', command })
+const ranBash = ($: Engine, command: string, agentId?: string) =>
+  $.tool.call({ tool: 'Bash', command, ...(agentId ? { agentId } : {}) })
 
 async function shows($: Engine, text: string | RegExp) {
   const ui = await $.ui.mount({ plugin: 'orca', surface: 'terminal', ...BAND })
@@ -317,7 +318,7 @@ describe('the band in a session', () => {
     expect(await shows($, 'engine band')).toBe(true)
   })
 
-  test('the claim the session\'s own objective open writes is picked up after it; a --steal elsewhere drops it', async ($, on) => {
+  test('the claim the session\'s open agent writes is picked up after its objective open; a --steal elsewhere drops it', async ($, on) => {
     const clock = mock.clock(on, { now: 10_000 })
     const disk = objectiveDisk()
     disk.delete(`${DIR}/owner`)
@@ -330,7 +331,8 @@ describe('the band in a session', () => {
     // Another command does not rescan.
     await ranBash($, `bash /plugins/orca/scripts/orca.sh objective digest "${DIR}"`)
     expect(await shows($, 'engine band')).toBe(true)
-    await ranBash($, `bash /plugins/orca/scripts/orca.sh objective open "${DIR}"`)
+    // orca:objective-open runs the open in its own loop.
+    await ranBash($, `cd /repo/main && bash /plugins/orca/scripts/orca.sh objective open "${DIR}"`, 'agent-open')
     expect(await shows($, 'rate-limit-public-api')).toBe(true)
 
     // The files move on; the next tick redraws.

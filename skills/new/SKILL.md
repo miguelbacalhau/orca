@@ -17,9 +17,11 @@ The idea is the `<idea>` argument. Without one, ask what the user wants to build
 
 ## Step 1: Create the objective, first
 
-Nothing comes before this: no question, no research.
+Nothing comes before this: no question, no research. The one exception is reading the idea itself.
 
-**The slug** comes from the idea: short lowercase kebab-case, 3–5 words, at most 60 characters. If the idea is too vague to name, don't ask for a name. Use a provisional `objective-<h4>`, where `<h4>` is four random hex digits. The slug names the worktree and the branch for the objective's whole life, so a provisional one simply stays.
+**A reference is not an idea.** When the idea is, or leans on, a pointer to a tracked issue — a Linear or Jira key like `ENG-1234`, a GitHub `#123`, an issue URL — resolve it before naming anything: one lookup through whatever this session has for that tracker (a Linear or Jira MCP tool, `gh issue view`), for the issue's title and description. That lookup is reading the idea, not researching it, so it stays a single call. When nothing can resolve it, use what the reference itself carries: a Linear URL ends in the issue's title slug (`…/issue/ENG-1234/fix-login-redirect-loop`). Never name the objective after the identifier alone.
+
+**The slug** comes from what the idea asks for — for a reference, the issue's title, not its key: short lowercase kebab-case, 3–5 words, at most 60 characters, naming the change (`ENG-1234` titled "Login redirects loop after SSO timeout" → `fix-sso-login-redirect-loop`). If the idea is too vague to name, or a reference resolved to nothing, don't ask for a name. Use a provisional `objective-<h4>`, where `<h4>` is four random hex digits. The slug names the worktree and the branch for the objective's whole life, so a provisional one simply stays.
 
 **The base** is the branch the user named as the starting point, else the trunk (the bare repository's default branch).
 
@@ -33,7 +35,7 @@ Slug: <slug>
 Base: <the branch the user named, or empty>
 Idea:
 <<<ORCA_IDEA
-<the idea, exactly as given>
+<the idea, exactly as given; for a resolved reference, followed by the issue's title and description>
 ORCA_IDEA>>>
 ```
 

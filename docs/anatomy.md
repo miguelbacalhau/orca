@@ -144,6 +144,7 @@ Twenty-four agents ship in `agents/<stage>.md`, loaded as `orca:<stage>`. Each r
 | `phases-review-codex` | Courier driving the Codex review of a proposed phase plan via `orca.sh codex` | sonnet | medium | |
 | `phases-review-claude` | Performs the phase-plan review itself | opus | high | |
 | `objective-implement` | Implements, fixes, and commits one objective phase, kept alive across its rounds | opus | high | |
+| `objective-verify` | Verifies an objective's finished branch: full checks and every phase's acceptance; writes a fix phase for a regression | opus | high | |
 | `objective-review-codex` | Courier driving one phase round's Codex review via `orca.sh codex` | sonnet | medium | |
 | `objective-review-claude` | Performs one phase round's review itself | opus | high | |
 

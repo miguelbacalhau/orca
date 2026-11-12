@@ -1,6 +1,6 @@
 # Orca: objective — the phase loop
 
-This file is read by `/orca:new` and `/orca:open` once a plan is installed, and by `/orca:loop` for the one phase it adds. It runs an objective's pending phases in order, one at a time, on the objective's branch in its one worktree. Each phase gets one implementer, kept alive for that phase: it implements, fixes every review round, and commits. Each review round gets a fresh reviewer. The phase is done when a round has no Critical/High finding and the commit stands.
+This file is read by `/orca:new` and `/orca:open` once a plan is installed, and by `/orca:loop` for the one phase it adds. It runs an objective's pending phases in order, one at a time, on the objective's branch in its one worktree. Each phase gets one implementer, kept alive for that phase: it implements, fixes every review round, and commits. Each review round gets a fresh reviewer. The phase is done when a round has no Critical/High finding and the commit stands. Once every phase is done, a **final verification** checks the finished branch as a whole, and a regression it finds becomes one more phase.
 
 You sequence it; you never edit code, and you never apply the gate yourself. After every implementer turn and every review, **`rounds next` reads the phase directory and prints the one next action** — you execute it. Counts come from its frame and finding titles from `rounds summary`, so you never read a review or response file whole. The one exception is a dispute: the disputed entries of that round's response, and each disputed finding's own entry in the review, read by its title.
 
@@ -14,9 +14,9 @@ You hold, from the skill that loaded this file: the objective directory `<dir>`,
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh objective digest <dir>
 ```
 
-From its phase lines (`<P>  <state>  <title>`, where a done phase's state carries its commit and a blocked one's reads `blocked on D<n>`), take the `active` phase when there is one — an interrupted phase, resumed below — else the first `pending` one. A `blocked` phase stops the whole pass: while one is blocked no phase starts (`phase-start` refuses a pending phase with `PHASE_BLOCKED`, or `DECISION_OPEN` while a decision is open) — its decision is settled and the plan redone first. No phase to take, or a blocked one → the pass is over (Step 8).
+From its phase lines (`<P>  <state>  <title>`, where a done phase's state carries its commit and a blocked one's reads `blocked on D<n>`), take the `active` phase when there is one — an interrupted phase, resumed below — else the first `pending` one. A `blocked` phase stops the whole pass: while one is blocked no phase starts (`phase-start` refuses a pending phase with `PHASE_BLOCKED`, or `DECISION_OPEN` while a decision is open) — its decision is settled and the plan redone first. No phase to take → the digest's `State:` decides: `verify` → the final verification (Step 8); anything else → the pass is over (Step 9). A blocked phase → the pass is over (Step 9).
 
-When the skill that loaded this file named one phase (`/orca:loop`), take that phase only, and end the pass after it.
+When the skill that loaded this file named one phase (`/orca:loop`), take that phase only, then go to Step 8 when the state reads `verify`, and end the pass. A fix phase the verification adds runs in this pass too.
 
 Below, `<P>` is the phase id and `<phase-dir>` is `<dir>/phases/<P>`.
 
@@ -92,7 +92,7 @@ One frame: `action`, `round` (`N` below), and the round's `gating`, `minor`, `ou
   - **Commit anyway** → straight to Step 6's commit, without asking `rounds next`. The report marks the deliverable unverified.
   - **Stop** → the pass stops; the phase stays active, and `/orca:open` asks again.
 - **`infeasible N`** → the implementer judged the phase unbuildable as briefed. Tell the user why, from `<phase-dir>/notes.md`. The phase needs a different direction, which is a decision: write it `open` (`**Source:** <P> (infeasible)`), block the phase on it (Rulings, "decide later"), and the pass stops.
-- **`drifted N`** → the work tree changed since round `N`'s last file was written — an edit while the session was stopped, a hand edit, provisioning that left tracked files behind — so the checks and reviews on file are of a tree that is no longer there. The engine set round `N`'s stale response aside. Tell the user in one line, then send the implementer a **revalidation request** for round `N`: the tree changed outside the loop; re-answer round `N` over the tree as it is now — the full checks, and, for `N` ≥ 1, the dispositions of `reviews/round-<N>.json` again. On a resumed phase, spawn the implementer with the handoff and this request. Then `rounds next`: a review always follows before anything commits.
+- **`drifted N`** → the work tree changed since round `N`'s last file was written — an edit while the session was stopped, a hand edit, provisioning that left tracked files behind — so the checks and reviews on file are of a tree that is no longer there. The engine set round `N`'s stale response aside. Tell the user in one line, then send the implementer a **revalidation request** for round `N`: the tree changed outside the loop; re-answer round `N` over the tree as it is now — the targeted checks, and, for `N` ≥ 1, the dispositions of `reviews/round-<N>.json` again. On a resumed phase, spawn the implementer with the handoff and this request. Then `rounds next`: a review always follows before anything commits.
 - **`commit N`** → Step 6.
 
 A typed `FAIL:` from `rounds next` — `BAD_JSON` or `BAD_ROUNDS` naming a response file → send the implementer back once with the detail, to rewrite that file. A second failure, or one naming a review file, `BAD_DIR`, or anything else → relay the detail and stop the pass.
@@ -139,14 +139,16 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh loop check <worktree> <base> <tree>
 
 `<tree>` is the snapshot's `tree`. Run `loop snapshot` before **every** commit request — the first, each commit-only retry (`needs_commit` without a hook failure, `incomplete`, `violation_reset`), and a commit resumed in a new session: it records the tree in `<phase-dir>/snapshot` against the latest review round and returns that same tree (`kept=yes`) until a new review round exists, so a hook's change during a failed attempt is never blessed. It is retaken (`kept=no`) only after checks and a review round have run again (a failed hook's fix pass, a `content_reset`).
 
+The implementer runs the repository's **full** checks at the start of the commit turn, before it commits. During the rounds it ran only the checks that cover the change. A red full run leaves the commit unmade, the same as a failed commit hook: `checks.pass: false` in round `N`'s response, with the commands and the failure.
+
 The commit request asks for the body to carry one `- chose <the decision> over <the other options>: <why>` line per decision the brief lists — the trunk's decision log is rendered from them.
 
-**A red commit turn first.** Unless `check` says `accepted` or `diverged`, run `rounds next` before anything else. `fix-checks N` means the commit turn reported red checks — a commit hook failed — whatever `check` said: `needs_commit`, or `incomplete` when the branch already holds commits past the base (a salvaged `wip:` commit) and the hook left changes staged. That is never a commit problem: send the checks request, then record that the hook's fix needs a review — `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh rounds record <phase-dir> rereview <N>` — so `rounds next` answers `review N+1` (Step 5) instead of counting an edit no review has seen as reviewed; then follow `rounds next` to a fresh snapshot and the commit request again. Never resend the commit request over a red commit turn.
+**A red commit turn first.** Unless `check` says `accepted` or `diverged`, run `rounds next` before anything else. `fix-checks N` means the commit turn reported red checks — the full run or a commit hook failed — whatever `check` said: `needs_commit`, or `incomplete` when the branch already holds commits past the base (a salvaged `wip:` commit) and the hook left changes staged. That is never a commit problem: send the checks request (naming the full run or the hook as what failed), then record that the fix needs a review — `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh rounds record <phase-dir> rereview <N>` — so `rounds next` answers `review N+1` (Step 5) instead of counting an edit no review has seen as reviewed; then follow `rounds next` to a fresh snapshot and the commit request again. Never resend the commit request over a red commit turn.
 
 Otherwise, act on `check`'s `action`:
 
 - `accepted` → the commit stands: `head` is its hash, `message.b64` its message. On to Step 7.
-- `needs_commit` → no commit happened and the commit turn's checks are green (`rounds next` still says `commit N`): under a checks override, a hook failing on the very failure the user accepted still blocks every commit — ask the user; otherwise send the request back, naming that no commit happened.
+- `needs_commit` → no commit happened and `rounds next` still says `commit N`: the commit turn's checks are green, or red only on a failure the user accepted. Under a checks override, a hook or full run failing on the very failure the user accepted still blocks every commit: ask the user. Otherwise send the request back, naming that no commit happened.
 - `incomplete` → the commit left files behind; send it back to commit them too.
 - `violation_reset` → the message carried attribution and the commit was undone, changes left staged; send the request back with the warning that the message must not mention Claude, AI, agents, orca, or carry an attribution trailer.
 - `content_reset` → the commit held changes made after the snapshot — a commit hook that rewrote code, or an edit during the commit turn — so nothing checked or reviewed them. The commit was undone with everything left staged. Tell the user what changed (`git -C <worktree> diff --cached --stat <tree>` is enough), send the implementer a checks request saying why — the commit was undone, and the staged changes need the checks run over them — then `rounds record <phase-dir> rereview <N>`, and follow `rounds next` (`review N+1`, Step 5) from there to a fresh snapshot and commit. A hook that only reformats converges on the next commit, since its output is now in the snapshot.
@@ -164,12 +166,52 @@ It renders the phase's report entry and follow-ups into `<dir>/report.md` from t
 
 The phase's implementer is done. Back to Step 1 for the next phase.
 
-## Step 8: The end of the pass
+## Step 8: The final verification
 
-The pass ends when no phase is left to take, a phase blocks, or the user stops it; every stop leaves the files saying exactly where it is. Close with: the phases done this pass, each with its heading and commit; the follow-ups added, by count; any deliverable-state downgrade and why; and what comes next — the blocking decision, the active phase `/orca:open` resumes, or, when every phase is done, `/orca:review`, `/orca:pr`, `/orca:archive`, or more work through `/orca:open`.
+Every phase is done, and the digest's `State:` reads `verify`: no final verification covers the last phase. Each phase ran the full checks before its commit, but nothing has re-checked an earlier phase's acceptance since later phases built on it, or asked whether the phases together deliver the outcome. `<P>` below is the last phase in the digest.
+
+Wait for an `orca:provision` still in flight (`/orca:open`'s warm-up), then spawn `orca:objective-verify`. Secrets stay placed, since it runs the checks as the implementer does:
+
+```text
+Worktree: <worktree>
+Objective directory: <dir>
+Last phase: <P>
+Result: <dir>/verify/after-<P>.md
+Fix phase: <dir>/verify/fix-after-<P>.md
+```
+
+It returns `{status, regressions, gaps, accepted, summary, result, fix_phase}`. Relay `summary` in a line, with the `result` path. Then, by `status`:
+
+- **`pass`** → record it, then Step 9:
+
+  ```bash
+  bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh objective verify-done <dir> pass
+  ```
+
+- **`fail` with `regressions` above 0, the first time** — `<P>` is not itself a verification's fix phase: its `**Source:**` line (`sed -n '/^## <P> — /,/^## /p' <dir>/phases.md | grep -m1 '^\*\*Source:\*\*'`) does not read `verify`. Add the fix phase without asking. It restores what the confirmed plan already promised, and it runs through its own implementer and review rounds:
+
+  ```bash
+  bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh objective phase-add <dir> <fix_phase>
+  ```
+
+  Name the regressions and the `phase` id from its frame, then back to Step 1. The phase runs in this pass, and this step runs again after it. Gaps wait for that re-verification. A typed `FAIL:` from `phase-add` → relay it, and Step 9.
+- **`fail` otherwise** — a fix phase already ran and the re-verification still fails, or there are only gaps — ask the user. Record the ruling as a decision (Rulings, with `**Source:** final verification after <P>`):
+  - **Fix it** (regressions) → add the fix phase as above, and back to Step 1.
+  - **Discuss** → a gap, or a regression that needs a different direction, becomes a decision: follow `${CLAUDE_PLUGIN_ROOT}/skills/new/discussion.md`, then `${CLAUDE_PLUGIN_ROOT}/skills/new/planning.md`, as `/orca:open` would. The plan's new phases run, and the verification follows them.
+  - **Accept** → with regressions, `objective verify-done <dir> fail "<summary>"`: the deliverable becomes unverified. With gaps only, the user judges the outcome delivered: `objective verify-done <dir> pass`.
+  - **Stop** → nothing recorded. The state stays `verify`, and `/orca:open` runs the verification again.
+- **`dirty`** → the worktree holds uncommitted changes (`summary` names them), and the verification checks only the committed tip. Tell the user, and Step 9. The state stays `verify`.
+- **`error`**, or no JSON → spawn it once more. A second failure → relay both causes and ask: retry, accept it failed (`objective verify-done <dir> fail "<the cause>"`), or stop.
+
+A typed `FAIL:` from `verify-done` → relay it, and Step 9.
+
+## Step 9: The end of the pass
+
+The pass ends when no phase is left to take and the verification is settled, a phase blocks, or the user stops it; every stop leaves the files saying exactly where it is. Close with: the phases done this pass, each with its heading and commit; the final verification's result, when it ran; the follow-ups added, by count; any deliverable-state downgrade and why; and what comes next — the blocking decision, the active phase `/orca:open` resumes, or, when every phase is done, `/orca:review`, `/orca:pr`, `/orca:archive`, or more work through `/orca:open`.
 
 ## Guidelines
 
 - You never edit code, never read a review or response file beyond what a dispute needs, and never edit `phases.md`, `report.md`, `declines.md`, `overrides`, or `trees` — the verbs own them. `decisions.md` is the one file this loop writes, entry by entry.
 - Never decline a Critical/High finding on the user's behalf. Disputes, stalls, and the implementer's questions are the user's decisions; everything else the engine settles.
 - Out-of-scope findings never reach the implementer as work: they become the phase's follow-ups, rendered by `phase-done`.
+- The final verification never edits code and never plans new work. A regression becomes a fix phase; a gap goes to the user.

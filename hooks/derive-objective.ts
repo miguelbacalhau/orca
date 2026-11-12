@@ -29,7 +29,7 @@ export type ObjectiveFiles = {
   action: string | null
 }
 
-export type ObjectiveState = 'active' | 'planning' | 'blocked' | 'discussing' | 'ready' | 'idle'
+export type ObjectiveState = 'active' | 'planning' | 'blocked' | 'discussing' | 'ready' | 'verify' | 'idle'
 
 export type ObjectiveDerived = { finished: boolean; state: ObjectiveState | null; band: OrcaBand | null }
 
@@ -102,6 +102,15 @@ export function ownerSession(text: string | null): string | null {
   return line ? line.slice('session='.length).trim() || null : null
 }
 
+// Whether report.md's `**Final verification:** <pass|fail> after <P> (…)`
+// line covers the last phase: a phase added since makes it stale.
+export function finalVerified(report: string | null, phases: Entry[]): boolean {
+  const line = (report ?? '').split('\n').find(l => l.startsWith('**Final verification:**'))
+  const after = line ? /^\*\*Final verification:\*\* +(?:pass|fail) after (P[1-9][0-9]*)(?: |$)/.exec(line.replace(/[\t\r]/g, ' ')) : null
+  const last = phases[phases.length - 1]
+  return !!after && !!last && after[1] === last.id
+}
+
 // <YYYYMMDD-HHMMSS>-<slug> → <slug>
 export function objectiveSlug(dir: string): string {
   const base = dir.replace(/\/+$/, '').split('/').pop() ?? dir
@@ -170,12 +179,13 @@ function count(decisions: Entry[], phases: Entry[]): Counts {
 }
 
 // objective.sh's rules, in its order, the first that holds.
-export function objectiveState(c: Counts, proposed: boolean): ObjectiveState {
+export function objectiveState(c: Counts, proposed: boolean, verified: boolean): ObjectiveState {
   if (c.active > 0) return 'active'
   if (proposed && c.open === 0) return 'planning'
   if (c.blocked > 0) return 'blocked'
   if (c.open > 0 || c.total === 0) return 'discussing'
   if (c.pending > 0) return 'ready'
+  if (!verified) return 'verify'
   return 'idle'
 }
 
@@ -197,6 +207,7 @@ function header(state: ObjectiveState, c: Counts, phases: Entry[], files: Object
       return { phase: on && on !== '-' ? `blocked on ${on}` : 'blocked', detail: '' }
     }
     case 'ready': return { phase: 'ready', detail: `${c.pending} pending` }
+    case 'verify': return { phase: 'verify', detail: `${plural(c.done, 'phase')} done` }
     case 'idle': return { phase: 'idle', detail: `${plural(c.done, 'phase')} done` }
   }
 }
@@ -232,7 +243,7 @@ export function deriveObjective(objective: OrcaObjective, files: ObjectiveFiles,
   const decisions = parseEntries(files.decisions, 'D')
   const phases = parseEntries(files.phases, 'P')
   const c = count(decisions, phases)
-  const state = objectiveState(c, files.plan.some(f => f.name === 'proposed.md'))
+  const state = objectiveState(c, files.plan.some(f => f.name === 'proposed.md'), finalVerified(files.report, phases))
   const head = header(state, c, phases, files)
   const followups = openFollowups(files.report, decisions)
   const detail = [head.detail, followups ? plural(followups, 'follow-up') : ''].filter(Boolean).join(' · ')

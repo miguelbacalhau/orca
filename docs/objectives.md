@@ -4,7 +4,7 @@ An objective is a long-lived unit of work: discussed into decisions, planned int
 
 ```text
 /orca:new <idea>     → files → worktree → provisioning ∥ research → discussion → decisions
-                     → phase plan → plan review → confirm → phase loop → report
+                     → phase plan → plan review → confirm → phase loop → final verification → report
 /orca:open [obj]     → digest → discussion · planning · phase loop, by state
 /orca:loop [change]  → one small phase added to this session's objective, run now
 /orca:archive        → retire it, landed or abandoned; --undo restores it
@@ -18,6 +18,7 @@ Objectives need the bare-repo-with-worktrees layout but not bypass mode: the ses
 - [Creating one: `/orca:new`](#creating-one-orcanew)
 - [Planning and plan review](#planning-and-plan-review)
 - [The phase loop](#the-phase-loop)
+- [The final verification](#the-final-verification)
 - [Blocks and replanning](#blocks-and-replanning)
 - [The report and follow-ups](#the-report-and-follow-ups)
 - [Re-opening: `/orca:open`](#re-opening-orcaopen)
@@ -34,11 +35,14 @@ Objectives need the bare-repo-with-worktrees layout but not bypass mode: the ses
 ├── objective.md           # title, header lines, idea, outcome, non-goals, constraints
 ├── decisions.md           # D-entries — written by the session (discussion and loop rulings)
 ├── phases.md              # P-entries — installed by plan-accept / phase-add, states set by the verbs
-├── report.md              # rendered by phase-done and phase-block
+├── report.md              # rendered by phase-done, phase-block, and verify-done
 ├── followups              # the ledger behind the report's follow-up ids
 ├── owner                  # the session driving it
 ├── archiving              # an archive's decision, written before anything is removed
 ├── archived               # present once archived
+├── verify/
+│   ├── after-P<n>.md      # a final verification's result, after the last phase P<n>
+│   └── fix-after-P<n>.md  # the fix phase it wrote, when an earlier phase's work regressed
 ├── plan/
 │   ├── proposed.md        # the planner's proposal, until accepted
 │   └── review-<n>.json    # plan-review findings, one per planning pass
@@ -126,7 +130,8 @@ An objective's state is never stored. `objective list` derives it from the files
 | `discussing` | a decision is open, or there are no phases |
 | `ready` | a phase is `pending` |
 | `landed` | every phase done, and the branch moved past its base commit and is merged into the trunk |
-| `idle` | every phase done |
+| `verify` | every phase done, and no final verification covers the last phase: the report's `**Final verification:**` line is missing or names an earlier one |
+| `idle` | every phase done and its final verification recorded, pass or fail |
 
 `objective list <repo> [--all]` prints one line per objective — `OBJECTIVE:`, the directory, slug, state, `open:<n>` decisions, `pending:<n>` and `blocked:<n>` phases, `followups:<n>` open, and `owner:<verdict>` — oldest first, archived and abandoned ones only with `--all`.
 
@@ -165,8 +170,8 @@ Planning turns the decided work into sequential phases and ends at one confirmat
 The session runs pending phases in file order, one at a time. It never edits code and never judges a round: after every implementer turn and every review, `orca.sh rounds next <phase-dir>` reads the phase directory and prints the one next action.
 
 1. **Start.** The session runs `objective phase-start`: the worktree is arrived in, `base` is recorded (kept on a re-start, so a resumed phase keeps its base), `brief.md` is rendered from the phase block and every decision it lists, and the phase becomes `active`. Then `orca:provision` provisions the worktree — again, after a warm-up at open, since phases change dependencies; it waits for a warm-up still in flight, one provisioning at a time — and the implementer starts once it has returned. A provisioning failure is relayed and the implementer told; it does not stop the phase.
-2. **Implement and review, round by round.** One `orca:objective-implement` agent per phase, kept alive by `SendMessage` until the phase's commit stands, runs the repository's full checks after every pass, writes `responses/round-<N>.json` every turn (checks, one disposition per finding, `followups`, status), and keeps `notes.md` current. Each review round strips secrets, spawns a fresh `orca:objective-review-codex` or `orca:objective-review-claude` with the brief, the rounds directory — so it verifies earlier `fixed` findings and skips settled declines — and the phase's base, writes `reviews/round-<N>.json`, and puts secrets back. The reviewer's subject is everything since the base, committed or not (`git diff <base>` plus untracked files).
-3. **Commit.** `loop snapshot` records the tree to commit in `snapshot`, against the latest review round, and returns that same tree until a new review round exists — across commit-only retries and a resumed session. The commit request names the round being committed, and the implementer answers it in that round's response file, so a failed commit hook is that round's red checks and the review after its fix is the next round. The implementer writes one Conventional Commit whose body carries a `- chose X over Y: <why>` line per decision the phase realizes, and `loop check` judges it: `accepted`, `needs_commit`, `incomplete`, `diverged`, a banned message reset softly (`violation_reset`), or content that differs from the snapshot reset the same way (`content_reset`, then checks and a review round again).
+2. **Implement and review, round by round.** One `orca:objective-implement` agent per phase, kept alive by `SendMessage` until the phase's commit stands, runs the targeted checks after every pass — lint, typecheck, and the tests that exercise what the change touches — writes `responses/round-<N>.json` every turn (checks, one disposition per finding, `followups`, status), and keeps `notes.md` current. Each review round strips secrets, spawns a fresh `orca:objective-review-codex` or `orca:objective-review-claude` with the brief, the rounds directory — so it verifies earlier `fixed` findings and skips settled declines — and the phase's base, writes `reviews/round-<N>.json`, and puts secrets back. The reviewer's subject is everything since the base, committed or not (`git diff <base>` plus untracked files).
+3. **Commit.** `loop snapshot` records the tree to commit in `snapshot`, against the latest review round, and returns that same tree until a new review round exists — across commit-only retries and a resumed session. The commit request names the round being committed, and the implementer answers it in that round's response file. Before committing, it runs the repository's **full** checks once. A red full run leaves the commit unmade, like a failed commit hook: it is that round's red checks, the fix gets a checks request, and the review after the fix is the next round. A failure the user already accepted with a checks override does not block the commit. The implementer writes one Conventional Commit whose body carries a `- chose X over Y: <why>` line per decision the phase realizes, and `loop check` judges it: `accepted`, `needs_commit`, `incomplete`, `diverged`, a banned message reset softly (`violation_reset`), or content that differs from the snapshot reset the same way (`content_reset`, then checks and a review round again).
 4. **Done.** `objective phase-done <dir> <P> <sha>` marks the phase done and renders its report entry and follow-ups. The next pending phase starts with a fresh implementer.
 
 `rounds next`'s actions:
@@ -182,12 +187,33 @@ The session runs pending phases in file order, one at a time. It never edits cod
 | `ask-disputes N` | puts each disputed Critical/High to the user: decline it (`rounds record … decline`) or have it fixed |
 | `stalled N` | from round 2, the gating count did not shrink or a `fixed` finding came back: the user chooses continue (`rounds record … continue N`), commit anyway, or stop |
 | `infeasible N` | tells the user why; the phase blocks on a new open decision |
-| `drifted N` | the work tree changed since round N's last file (edits while the session was stopped): sends a revalidation request for round N — checks and dispositions over the current tree — after which a review follows before any commit |
+| `drifted N` | the work tree changed since round N's last file (edits while the session was stopped): sends a revalidation request for round N — targeted checks and dispositions over the current tree — after which a review follows before any commit |
 | `commit N` | takes the snapshot and sends the commit request |
 
 The round engine guards the tree: it records the tree each review was asked for (`trees`, against the phase's `worktree` file), and each response carries the tree its checks were of (`tree`, from `rounds tree`), and a work tree that no longer matches the latest one is `drifted N` until the implementer answers that round again over the tree as it is, and a review is required before the round commits. Findings routed to `another work item` never gate a round and never reach the implementer as work; an unknown severity gates. There is no round cap — the stall rule is the brake. A malformed or missing round file is a typed failure (`BAD_JSON`, `BAD_ROUNDS`), never a guessed action. The verb's full rules are in its header, `scripts/verbs/rounds.sh`.
 
 Every ruling the user makes on the spot — an answer, a dispute settled either way, a stall's continue or commit anyway — is recorded twice: by `rounds record` where one applies, and as a decided entry in `decisions.md`.
+
+## The final verification
+
+Once no phase is left to take and the state reads `verify`, the loop runs a final verification of the committed branch tip. It runs at the end of every pass that leaves every phase done, `/orca:loop`'s included. A fresh `orca:objective-verify` agent:
+
+1. Refuses a dirty worktree (`dirty`): it verifies the committed tip only.
+2. Runs the repository's full checks.
+3. Checks every done phase's acceptance lines against the tip. A line that no longer holds is a **regression**, and so is every red check, except one the user accepted with a checks override during a phase (noted as **accepted**).
+4. Checks whether the phases together deliver `objective.md`'s outcome. A shortfall no phase's acceptance line covered is a **gap**: work the plan never had.
+5. Writes `verify/after-P<n>.md`, and, when there are regressions, one fix phase block (`**Source:** verify`) in `verify/fix-after-P<n>.md`. It never edits code.
+
+The session then acts on the verdict:
+
+| Verdict | The session |
+|---|---|
+| `pass` | `objective verify-done <dir> pass` |
+| `fail` with regressions, the first time | adds the fix phase without asking (`objective phase-add`), runs it like any phase, then verifies again |
+| `fail` after a fix phase, or with gaps only | asks you: fix it again, discuss (gaps become decisions, then a replan), accept, or stop |
+| `dirty` | says so; the state stays `verify` |
+
+Accepting regressions records `objective verify-done <dir> fail "<why>"`, which turns the deliverable `unverified`. Accepting gaps only records a pass. Stopping records nothing, and `/orca:open` runs the verification again. Every ruling is recorded as a decision. `verify-done` writes the report's `**Final verification:** <pass|fail> after P<n> (<sha>)` line, which ends the `verify` state until a phase is added after `P<n>`.
 
 ## Blocks and replanning
 
@@ -206,6 +232,7 @@ A blocked phase the accepted plan keeps **starts over**, and runs before every p
 
 **Deliverable:** `feature/<slug>`
 **Deliverable state:** verified | unverified — P2 (a1b2c3d) committed <why>
+**Final verification:** pass after P4 (e5f6a7b) | fail after P4 (e5f6a7b) — <why>
 
 ## Phases
 
@@ -232,7 +259,8 @@ None | P4 — waiting on D7: <question>
 git merge --no-ff feature/<slug>
 ```
 
-- **Deliverable state** starts `verified` and only goes down: a phase committed with red checks in its latest response, with gating findings left in its last review (a stall's commit anyway), or with no review turns it `unverified`, naming the phase. An `unverified` line is never touched again.
+- **Deliverable state** starts `verified` and only goes down: a phase committed with red checks in its latest response, with gating findings left in its last review (a stall's commit anyway), or with no review turns it `unverified`, naming the phase, and so does a final verification accepted as failed. An `unverified` line is never touched again.
+- **Final verification** is written by `verify-done` only, and names the last phase at the time. A phase added later makes it stale, and the objective reads `verify` again.
 - **Follow-ups** come from each phase: the last review's `another work item` findings, Medium/Low findings the implementer left declined, and the implementer's `followups[]` (gaps it left on purpose). Ids come from the `followups` ledger: a title and file already listed keeps its id, and no id is given twice. A follow-up is **taken** — no longer counted open — once a decision's `**Source:**` cites it (`**Source:** F4`); the list itself is never edited.
 
 ## Re-opening: `/orca:open`
@@ -249,17 +277,18 @@ Routing by state:
 | `planning` | the planning gate, from where it stopped |
 | `ready` | one confirmation, then the phase loop |
 | `active` | the phase loop: a fresh implementer resumes the active phase from its notes, its diff, and its latest round |
+| `verify` | the phase loop's final verification, after the open's warm-up provisioning lands |
 | `idle` | what's next: open follow-ups, new decisions, `/orca:review`, `/orca:pr`, `/orca:archive` |
 | `landed` | `/orca:archive`, or more work as `idle` |
 
 ## One more phase: `/orca:loop`
 
-`/orca:loop [instructions]` works only in a session that owns an objective (`objective current`). It refuses with no objective (pointing at `/orca:new` and `/orca:open`), while a phase is `active` or `blocked`, or while a decision is open. Otherwise the session writes one phase block from the conversation — title, goal, one to three acceptance lines, `**Source:** loop` — without asking the user to confirm it, adds it with `objective phase-add <dir> <block-file>` (no planner, no plan review), and runs that one phase through the phase loop. Work it cannot describe in a few lines goes to the objective's discussion instead.
+`/orca:loop [instructions]` works only in a session that owns an objective (`objective current`). It refuses with no objective (pointing at `/orca:new` and `/orca:open`), while a phase is `active` or `blocked`, or while a decision is open. Otherwise the session writes one phase block from the conversation — title, goal, one to three acceptance lines, `**Source:** loop` — without asking the user to confirm it, adds it with `objective phase-add <dir> <block-file>` (no planner, no plan review), and runs that one phase through the phase loop, then the final verification. Work it cannot describe in a few lines goes to the objective's discussion instead.
 
 ## Review and PR
 
 - **`/orca:review`** opens an objective's branch like a run's; addressing its comments needs this session to own the objective with no phase active, blocked, or restarted and waiting (`objective idle`, else it points at `/orca:open`): `review discover` follows the deliverable with an `OBJECTIVE_DIR:` line from its `objective.md`, report or not, and a `REPORT:` line once it has a report. Review rounds are recorded in that report under `## Review rounds`, which phases leave as they are. A comment that changes the objective's direction is not addressed in review; it becomes a decision at the next `/orca:open`.
-- **`/orca:pr`** publishes an objective whose report says `verified`, with `## Blocked` reading `None` and no phase pending, blocked, or active. The description is composed from `report.md`, `objective.md`'s outcome and idea, and the decided entries of `decisions.md`.
+- **`/orca:pr`** publishes an objective whose report says `verified`, with `## Blocked` reading `None`, no phase pending, blocked, or active, and its final verification run since the last phase (not `verify`). The description is composed from `report.md`, `objective.md`'s outcome and idea, and the decided entries of `decisions.md`.
 - **`/orca:status`** lists objectives in their own group, each naming its next command; archived and abandoned ones are counted, not listed.
 
 ## Archive and undo
@@ -287,10 +316,10 @@ The session that owns an objective shows it live above the prompt, in the slot t
   P4  Docs                                 ◌ pending
 ```
 
-- **Header** by state: `discussing · <n> decided · <n> open`; `reviewing plan`, then `planning` once a review of the current pass is written; `P<n>/<total>` while a phase is active; `blocked on D<n>`; `ready · <n> pending`; `idle · <n> phases done`; open follow-ups appended when there are any.
+- **Header** by state: `discussing · <n> decided · <n> open`; `reviewing plan`, then `planning` once a review of the current pass is written; `P<n>/<total>` while a phase is active; `blocked on D<n>`; `ready · <n> pending`; `verify · <n> phases done`; `idle · <n> phases done`; open follow-ups appended when there are any.
 - **Rows** while discussing are the open decisions (deferred ones dimmed); otherwise one row per phase. The active phase's tail comes from its `action` file: `implement`, `review rN`, `fix rN (<n> gating)`, `fix minor`, `fix checks`, `waiting on you: dispute rN | stall rN | questions | infeasible`, `committing`.
 - **What it follows:** the objective whose `owner` names this session, found by walking up from the session's directory to `.orca/objectives/`. It looks on session start, on every prompt, and after an `objective open` call by the session or one of its agents, then reads that objective's files every 1.5 s. A live run this session launched takes the slot over.
-- **When it goes:** at session end; when the directory, or this session's claim on it, disappears; when it is archived or landed; and when it has sat `idle` through three of your prompts. A new phase brings it back.
+- **When it goes:** at session end; when the directory, or this session's claim on it, disappears; when it is archived or landed (asked once every phase is done); and when it has sat `idle` through three of your prompts. A new phase brings it back.
 - Collapse it with `[-]` or ctrl+x ctrl+a — the same collapse as the run band. It is read-only (`hooks/objective-band.tsx`, logic in `hooks/derive-objective.ts`).
 
 ## Stage agents
@@ -303,7 +332,8 @@ The session that owns an objective shows it live above the prompt, in the slot t
 | `phases-review-codex` | Courier driving the Codex plan review via `orca.sh codex` | sonnet | medium |
 | `phases-review-claude` | Performs the plan review itself | opus | high |
 | `research` | Explores what the idea touches, before the discussion | fable | high |
-| `objective-implement` | Implements, fixes, and commits one phase, kept alive across its rounds | opus | high |
+| `objective-implement` | Implements, fixes, and commits one phase, kept alive across its rounds: targeted checks every pass, the full checks before its commit | opus | high |
+| `objective-verify` | The final verification: full checks and every phase's acceptance on the finished branch; writes the fix phase for a regression | opus | high |
 | `objective-review-codex` | Courier driving one round's Codex review via `orca.sh codex` | sonnet | medium |
 | `objective-review-claude` | Performs one round's review itself | opus | high |
 

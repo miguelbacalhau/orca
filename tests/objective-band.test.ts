@@ -33,7 +33,13 @@ function phases(...ps: Phase[]): string {
 }
 
 function report(...followups: string[]): string {
-  return '# Report: x\n\n**Deliverable:** `feature/x`\n\n## Phases\n\n### P1 — a — abc\n\n## Blocked\n\nNone\n\n' +
+  return reportVerified(null, ...followups)
+}
+
+// A report whose `**Final verification:**` line names <after>, or none.
+function reportVerified(after: string | null, ...followups: string[]): string {
+  const line = after ? `**Final verification:** pass after ${after} (abc1234)\n` : ''
+  return `# Report: x\n\n**Deliverable:** \`feature/x\`\n**Deliverable state:** verified\n${line}\n## Phases\n\n### P1 — a — abc\n\n## Blocked\n\nNone\n\n` +
     `## Follow-ups\n\n${followups.map(f => `- ${f} · P1 · gap · a title — why`).join('\n')}\n\n## Landing\n`
 }
 
@@ -116,13 +122,23 @@ describe('header by derived state', () => {
     expect(rowsOf(f)).toEqual({ P1: '✓ done abc', P2: '✕ blocked on D7', P3: '◌ pending' })
   })
 
-  test('ready counts the pending phases; idle the done ones', () => {
+  test('ready counts the pending phases; verify and idle the done ones', () => {
     const decided = decisions(['D1', 'q', 'decided'])
+    const two = phases(['P1', 'a', 'done'], ['P2', 'b', 'done'])
     expect(header(files({ decisions: decided, phases: phases(['P1', 'a', 'done'], ['P2', 'b', 'pending'], ['P3', 'c', 'pending']) })))
       .toEqual(['ready', '2 pending'])
-    expect(header(files({ decisions: decided, phases: phases(['P1', 'a', 'done'], ['P2', 'b', 'done']), report: report('F1') })))
+    expect(header(files({ decisions: decided, phases: two, report: reportVerified('P2', 'F1') })))
       .toEqual(['idle', '2 phases done · 1 follow-up'])
-    expect(header(files({ decisions: decided, phases: phases(['P1', 'a', 'done']) }))).toEqual(['idle', '1 phase done'])
+    expect(header(files({ decisions: decided, phases: phases(['P1', 'a', 'done']), report: reportVerified('P1') })))
+      .toEqual(['idle', '1 phase done'])
+    // No final verification, or one a later phase made stale: verify.
+    expect(header(files({ decisions: decided, phases: two, report: report('F1') })))
+      .toEqual(['verify', '2 phases done · 1 follow-up'])
+    expect(header(files({ decisions: decided, phases: two, report: reportVerified('P1') }))).toEqual(['verify', '2 phases done'])
+    expect(header(files({ decisions: decided, phases: two }))).toEqual(['verify', '2 phases done'])
+    // A recorded fail ends the verify state too.
+    const failed = reportVerified('P2').replace('pass after P2 (abc1234)', 'fail after P2 (abc1234) — make test red')
+    expect(header(files({ decisions: decided, phases: two, report: failed }))).toEqual(['idle', '2 phases done'])
   })
 })
 
@@ -404,6 +420,7 @@ describe('the band in a session', () => {
     const disk = objectiveDisk({
       [`${DIR}/decisions.md`]: decisions(['D1', 'q', 'decided']),
       [`${DIR}/phases.md`]: phases(['P1', 'a', 'done'], ['P2', 'b', 'done']),
+      [`${DIR}/report.md`]: reportVerified('P2'),
     })
     serveFiles(on, disk)
     serveList(on, { value: 'idle' }, [])
@@ -440,6 +457,7 @@ describe('the band in a session', () => {
     serveFiles(on, objectiveDisk({
       [`${DIR}/decisions.md`]: decisions(['D1', 'q', 'decided']),
       [`${DIR}/phases.md`]: phases(['P1', 'a', 'done']),
+      [`${DIR}/report.md`]: reportVerified('P1'),
     }))
     serveList(on, state, calls)
     session(on, { id: SESSION, cwd: '/repo' })
@@ -454,7 +472,23 @@ describe('the band in a session', () => {
     expect(await shows($, 'engine band')).toBe(true)
   })
 
-  test('only an idle objective asks whether it landed', async ($, on) => {
+  test('an objective awaiting its final verification that landed is dropped too', async ($, on) => {
+    mock.clock(on, { now: 10_000 })
+    const state = { value: 'verify' }
+    serveFiles(on, objectiveDisk({
+      [`${DIR}/decisions.md`]: decisions(['D1', 'q', 'decided']),
+      [`${DIR}/phases.md`]: phases(['P1', 'a', 'done']),
+    }))
+    serveList(on, state, [])
+    session(on, { id: SESSION, cwd: '/repo' })
+    await start($, '/repo')
+    expect(await shows($, 'verify')).toBe(true)
+    state.value = 'landed'
+    await say($, 'merged it')
+    expect(await shows($, 'engine band')).toBe(true)
+  })
+
+  test('only an objective with every phase done asks whether it landed', async ($, on) => {
     mock.clock(on, { now: 10_000 })
     const calls: string[][] = []
     serveFiles(on, objectiveDisk())

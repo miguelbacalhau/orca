@@ -12,7 +12,7 @@
 // The band goes on session end, when the objective's directory or this
 // session's claim on it disappears, when it is archived, and when it sat idle
 // through three of the person's prompts or landed (which needs git, so it is
-// asked of the read-only `objective list`).
+// asked of the read-only `objective list` once every phase is done).
 //
 // The derivation itself is pure and lives in ./derive-objective.ts; the
 // drawing, and the events both bands hear, are shared with the run band
@@ -206,7 +206,7 @@ async function rescan($: EngineInterface) {
   }
   const dropped = await read($, droppedAtom)
   if (dropped?.dir === dir && dropped.band === JSON.stringify(out.band)) return
-  if (out.state === 'idle' && await isLanded($, objective)) {
+  if ((out.state === 'idle' || out.state === 'verify') && await isLanded($, objective)) {
     await drop($, dir, out.band)
     return
   }

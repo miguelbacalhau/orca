@@ -17,6 +17,7 @@
 #   orca.sh objective phase-start <dir> <P>
 #   orca.sh objective phase-done <dir> <P> <sha>
 #   orca.sh objective phase-block <dir> <P> <D>
+#   orca.sh objective verify-done <dir> pass|fail [<why>]
 #   orca.sh objective archive <dir> [--abandon] [--note <text>]
 #   orca.sh objective unarchive <dir>
 #
@@ -39,10 +40,11 @@
 #                  `**Decisions:**`, `**Goal:**`, `**Acceptance:**`,
 #                  `**Commit:**`, `**Blocked on:**`
 #   report.md      `# Report: <title>`, `**Deliverable:**`, `**Deliverable
-#                  state:**`, then `## Phases` (one `### ` entry per done
+#                  state:**`, `**Final verification:**` (once verify-done
+#                  ran), then `## Phases` (one `### ` entry per done
 #                  phase), `## Blocked`, `## Follow-ups` (`- F<n> · ...`
-#                  lines), `## Landing` — written by phase-done and
-#                  phase-block only
+#                  lines), `## Landing` — written by phase-done,
+#                  phase-block, and verify-done only
 #   followups      the follow-up ledger behind report.md's ids, one line
 #                  per id ever given: F<n><TAB>P<n><TAB><kind><TAB>
 #                  <title><TAB><file><TAB><detail>
@@ -144,7 +146,9 @@
 #     landed      every phase done, and the branch has moved past the
 #                 base commit and is merged into the trunk (the branch
 #                 the repository's HEAD names)
-#     idle        every phase done
+#     verify      every phase done, and no final verification on record
+#                 covers the last one (verify-done)
+#     idle        every phase done and verified
 #
 # digest — read-only, at most 40 lines whatever the objective's size,
 #   plain text: title and outcome line, state, worktree (clean | dirty |
@@ -153,8 +157,9 @@
 #   with one line per phase (id, state, commit or blocked-on, title —
 #   the active phase always, every other phase not done next, then the
 #   latest done ones, at most 13 in file order, the rest counted by
-#   state), the active phase's last action, open
-#   follow-ups by count, and the last report entry's heading. Titles are
+#   state), the active phase's last action, the final verification on
+#   record (or none), open follow-ups by count, and the last report
+#   entry's heading. Titles are
 #   truncated to 60 bytes; nothing is quoted from a body.
 #
 # ---- phase subcommands ----------------------------------------------------
@@ -214,7 +219,8 @@
 #   the one given): refused while a phase is active (PHASE_ACTIVE) or a
 #   decision open (DECISION_OPEN); the file must hold exactly one phase
 #   block and nothing before it (PLAN_BAD_PHASE), a `## P<n> — <title>`
-#   heading (PLAN_BAD_ID), `**Source:** loop`, pending, a Goal and an acceptance
+#   heading (PLAN_BAD_ID), `**Source:** loop` (/orca:loop) or `verify` (a
+#   final verification's fix phase), pending, a Goal and an acceptance
 #   line (PLAN_BAD_PHASE), every referenced decision decided
 #   (PLAN_UNDECIDED); refused too while a phase is blocked (PHASE_BLOCKED)
 #   or a restarted phase — pending with a recorded base — waits to run
@@ -287,6 +293,17 @@
 #   created when absent). Every later pending phase waits behind it.
 #   Frame: rc, phase, blocked_on, waiting (pending phases after it).
 #
+# verify-done — records the final verification of the branch tip, run
+#   once every phase is done (not so: PHASE_STATE; no phase at all:
+#   NO_PHASE): report.md's `**Final verification:**` line set to
+#   `pass after <P> (<sha, 7>)` or `fail after <P> (<sha, 7>) — <why>`,
+#   <P> the last phase, <sha> the branch tip (GIT_ERROR when it cannot
+#   be read). A fail needs <why> (BAD_ARGS) and turns a `verified`
+#   deliverable state into `unverified — final verification failed after
+#   <P> (<sha, 7>): <why>`. The line ends the derived `verify` state
+#   until a phase is added after <P>. Frame: rc, result, phase, tip,
+#   deliverable_state, report.
+#
 # ---- archive subcommands --------------------------------------------------
 #
 # archive — retires the objective, landed or not; the directory stays.
@@ -351,7 +368,7 @@
 # Sourced by orca.sh with the verb arguments in place; lib.sh is already
 # loaded.
 
-objective_usage="usage: orca.sh objective new <repo> <slug> <base-ref> [--idea <file>|-] | open <dir> [--steal] | current <repo> | idle <dir> | list <repo> [--all] | digest <dir> | plan-accept <dir> [--check] | phase-add <dir> <block-file> | phase-start <dir> <P> | phase-done <dir> <P> <sha> | phase-block <dir> <P> <D> | archive <dir> [--abandon] [--note <text>] | unarchive <dir>"
+objective_usage="usage: orca.sh objective new <repo> <slug> <base-ref> [--idea <file>|-] | open <dir> [--steal] | current <repo> | idle <dir> | list <repo> [--all] | digest <dir> | plan-accept <dir> [--check] | phase-add <dir> <block-file> | phase-start <dir> <P> | phase-done <dir> <P> <sha> | phase-block <dir> <P> <D> | verify-done <dir> pass|fail [<why>] | archive <dir> [--abandon] [--note <text>] | unarchive <dir>"
 obj_tab='	'
 
 # ---- repository and directory resolution ----------------------------------
@@ -478,6 +495,8 @@ obj_last_entry() {
 #   obj_open obj_decided obj_deferred         decision counts
 #   obj_total obj_done obj_active obj_blocked obj_pending   phase counts
 #   obj_active_id              the first active phase, or empty
+#   obj_last_id                the last phase in file order, or empty
+#   obj_verification           report.md's `**Final verification:**` value
 #   obj_followups_open         open follow-ups
 #   obj_branch obj_base_commit obj_worktree   from objective.md's header
 #   obj_state                  the derived state
@@ -486,7 +505,7 @@ obj_load() {
   obj_decisions="$(obj_entries "$dir/decisions.md" D)"
   obj_phases="$(obj_entries "$dir/phases.md" P)"
   obj_open=0 obj_decided=0 obj_deferred=0
-  obj_total=0 obj_done=0 obj_active=0 obj_blocked=0 obj_pending=0 obj_active_id=""
+  obj_total=0 obj_done=0 obj_active=0 obj_blocked=0 obj_pending=0 obj_active_id="" obj_last_id=""
   while IFS="$obj_tab" read -r id state _ _ source _; do
     [ -n "$id" ] || continue
     case "$state" in
@@ -501,6 +520,7 @@ EOF
   while IFS="$obj_tab" read -r id state _; do
     [ -n "$id" ] || continue
     obj_total=$((obj_total + 1))
+    obj_last_id="$id"
     case "$state" in
       done) obj_done=$((obj_done + 1)) ;;
       active)
@@ -522,7 +542,16 @@ EOF
   obj_branch="$(obj_header "$dir/objective.md" Branch)"
   obj_base_commit="$(obj_header "$dir/objective.md" "Base commit")"
   obj_worktree="$(obj_header "$dir/objective.md" Worktree)"
+  obj_verification="$(obj_header "$dir/report.md" "Final verification")"
   obj_derive_state "$dir"
+}
+
+# obj_verified — the final verification on record covers the last phase:
+# report.md's `**Final verification:** <pass|fail> after <P> (<sha>)`
+# names obj_last_id. A phase added since makes it stale.
+obj_verified() {
+  [[ $obj_verification =~ ^(pass|fail)\ after\ (P[1-9][0-9]*)( |$) ]] || return 1
+  [ "${BASH_REMATCH[2]}" = "$obj_last_id" ]
 }
 
 # obj_marker <dir> — the archive marker: `archived` once an archive
@@ -572,6 +601,8 @@ obj_derive_state() { # <dir> — sets obj_state; the first rule that holds
     obj_state=ready
   elif obj_landed; then
     obj_state=landed
+  elif ! obj_verified; then
+    obj_state=verify
   else
     obj_state=idle
   fi
@@ -1041,6 +1072,7 @@ obj_digest() { # <dir>
       }
     }'
   [ -n "$obj_active_id" ] && obj_action_line "$obj_dir" "$obj_active_id"
+  printf 'Final verification: %s\n' "$(obj_trunc "${obj_verification:-none}" 100)"
   printf 'Follow-ups: %s open\n' "$obj_followups_open"
   printf 'Last report entry: %s\n' "$(obj_trunc "${last:-none}" 80)"
 }
@@ -1202,9 +1234,10 @@ obj_check_decided() { # <phase> <space-separated D ids>
   done
 }
 
-# obj_check_new_phase <facts-row> [<source>] — a phase about to be
+# obj_check_new_phase <facts-row> [<sources>] — a phase about to be
 # installed: pending with no Blocked on line, a Goal, an acceptance line,
-# decided decisions, and (when given) that Source.
+# decided decisions, and (when given) one of those space-separated
+# Sources.
 obj_check_new_phase() {
   local id state source decs goal acc blocked
   IFS="$obj_tab" read -r id state source decs goal acc _ blocked <<EOF
@@ -1212,8 +1245,8 @@ $1
 EOF
   [ "$state" = pending ] || fail PLAN_BAD_PHASE "$id is '$state' — a new or rewritten phase is pending"
   [ "$blocked" != 1 ] || fail PLAN_BAD_PHASE "$id has a **Blocked on:** line — a new or rewritten phase is pending, blocked on nothing"
-  [ -z "${2:-}" ] || [ "$source" = "$2" ] \
-    || fail PLAN_BAD_PHASE "$id has Source '$source' — a phase added this way is **Source:** $2"
+  [ -z "${2:-}" ] || in_list "$source" "$2" \
+    || fail PLAN_BAD_PHASE "$id has Source '$source' — a phase added this way is **Source:** ${2// / or }"
   [ "$goal" = 1 ] || fail PLAN_BAD_PHASE "$id has no **Goal:** line"
   [ "$acc" -ge 1 ] || fail PLAN_BAD_PHASE "$id has no acceptance line (\`- \` under **Acceptance:**)"
   [ "$decs" = - ] || obj_check_decided "$id" "$decs"
@@ -1319,7 +1352,9 @@ END { print "ids\t" ids; print "added\t" added + 0 }'
 # ---- the report -----------------------------------------------------------
 
 # obj_report_awk — report.md (stdin) rewritten: the `**Deliverable
-# state:**` line replaced by OBJ_STATE when set; under `## Phases` the
+# state:**` line replaced by OBJ_STATE when set, and the `**Final
+# verification:**` line by OBJ_VERIFY (added after the deliverable state
+# when absent); under `## Phases` the
 # `### <OBJ_ID> — ` entry replaced by OBJ_ENTRY, or OBJ_ENTRY appended;
 # `## Blocked` replaced by OBJ_BLOCKED; OBJ_FOLLOWUPS appended under
 # `## Follow-ups` (`None` dropped, or kept when it stays empty); missing
@@ -1372,6 +1407,20 @@ function followups(k,    b, n, j, m) {
   put(F, fu_n)
   if (!m && !fu_n) emit("None")
 }
+# preamble(key, value) — the preamble line starting with key set to
+# value, else value inserted after the line starting with `after`, else
+# after the last non-blank preamble line.
+function preamble(key, value, after,    i, at_line, last) {
+  for (i = 1; i <= pn; i++) if (index(pre[i], key) == 1) { pre[i] = value; return }
+  at_line = 0; last = 0
+  for (i = 1; i <= pn; i++) {
+    if (pre[i] ~ /[^ \t\r]/) last = i
+    if (after != "" && index(pre[i], after) == 1) at_line = i
+  }
+  if (!at_line) at_line = last
+  for (i = pn; i > at_line; i--) pre[i + 1] = pre[i]
+  pre[at_line + 1] = value; pn++
+}
 function missing() {
   if (did_missing++) return
   if (!("## Phases" in at)) phases(0)
@@ -1384,6 +1433,7 @@ BEGIN {
   fu_n = lines(ENVIRON["OBJ_FOLLOWUPS"], F)
   id = ENVIRON["OBJ_ID"]
   state = ENVIRON["OBJ_STATE"]
+  verify = ENVIRON["OBJ_VERIFY"]
 }
 /^## / {
   s++; head[s] = $0; cnt[s] = 0
@@ -1393,16 +1443,8 @@ BEGIN {
 }
 { if (s == 0) pre[++pn] = $0; else L[s, ++cnt[s]] = $0 }
 END {
-  done = 0
-  if (state != "") {
-    for (i = 1; i <= pn && !done; i++) if (index(pre[i], "**Deliverable state:**") == 1) { pre[i] = state; done = 1 }
-    if (!done) {
-      last = 0
-      for (i = 1; i <= pn; i++) if (pre[i] ~ /[^ \t\r]/) last = i
-      for (i = pn; i > last; i--) pre[i + 1] = pre[i]
-      pre[last + 1] = state; pn++
-    }
-  }
+  if (state != "") preamble("**Deliverable state:**", state, "")
+  if (verify != "") preamble("**Final verification:**", verify, "**Deliverable state:**")
   for (i = 1; i <= pn; i++) emit(pre[i])
   for (k = 1; k <= s; k++) {
     if (at[name[k]] != k) { raw(k); continue }
@@ -1435,7 +1477,8 @@ EOF
 }
 
 # obj_write_report <entry-id> <entry> <blocked> <follow-up lines> <state-line>
-# — report.md through obj_report_awk, created from its header when absent.
+# [<verification-line>] — report.md through obj_report_awk, created from
+# its header when absent.
 obj_write_report() {
   local report="$obj_dir/report.md" title source content
   if [ -f "$report" ]; then
@@ -1447,7 +1490,7 @@ obj_write_report() {
       "${title:-$(obj_slug_of "$obj_dir")}" "$obj_branch")"
   fi
   content="$(printf '%s\n' "$source" | OBJ_ID="$1" OBJ_ENTRY="$2" OBJ_BLOCKED="$3" OBJ_FOLLOWUPS="$4" \
-    OBJ_STATE="$5" OBJ_LANDING="git merge --no-ff $obj_branch" LC_ALL=C awk "$obj_report_awk")" \
+    OBJ_STATE="$5" OBJ_VERIFY="${6:-}" OBJ_LANDING="git merge --no-ff $obj_branch" LC_ALL=C awk "$obj_report_awk")" \
     || fail WRITE_ERROR "could not render $report"
   printf '%s\n' "$content" | obj_write "$report" || exit 1
 }
@@ -1666,7 +1709,7 @@ obj_phase_add() { # <dir> <block-file>
   id="$headings"
   want="P$(($(obj_max_phase) + 1))"
   facts="$(obj_phase_facts "$file")"
-  obj_check_new_phase "$facts" loop
+  obj_check_new_phase "$facts" "loop verify"
   block="$(obj_block "$file" "$id")"
   block="## $want — ${block#"## $id — "}"
   current="$(cat "$obj_dir/phases.md" 2>/dev/null)"
@@ -1822,6 +1865,39 @@ obj_phase_block() { # <dir> <P> <D>
     after && $2 != "active" && $2 != "done" && $2 != "blocked" && $1 != "" { n++ }
     END { print n + 0 }')"
   emit_frame rc=0 "phase=$p" "blocked_on=$d" "waiting=$waiting"
+}
+
+obj_verify_done() { # <dir> pass|fail [<why>]
+  local result="$2" why="${3:-}" tip short line current state_line="" final=verified
+  case "$result" in
+    pass) [ -z "$why" ] || fail BAD_ARGS "a pass takes no reason — $objective_usage" ;;
+    fail) [ -n "$why" ] || fail BAD_ARGS "a fail names what failed — $objective_usage" ;;
+    *) fail BAD_ARGS "'$result' is not pass or fail — $objective_usage" ;;
+  esac
+  obj_require_dir "$1"
+  obj_require_live
+  obj_load "$obj_dir"
+  obj_require_header
+  [ "$obj_total" -gt 0 ] || fail NO_PHASE "no phase in phases.md — nothing to verify"
+  [ "$obj_done" -eq "$obj_total" ] \
+    || fail PHASE_STATE "$obj_done of $obj_total phases done — the final verification runs once every phase is done"
+  tip="$(git --git-dir="$common_dir" rev-parse -q --verify "refs/heads/$obj_branch^{commit}" 2>/dev/null)" \
+    || fail GIT_ERROR "could not read the tip of $obj_branch"
+  short="${tip:0:7}"
+  why="$(printf '%s' "$why" | LC_ALL=C tr '\001-\037' ' ')"
+  line="**Final verification:** $result after $obj_last_id ($short)${why:+ — $why}"
+  current="$(obj_header "$obj_dir/report.md" "Deliverable state")"
+  case "$current" in
+    unverified*) final=unverified ;;
+    *)
+      if [ "$result" = fail ]; then
+        state_line="**Deliverable state:** unverified — final verification failed after $obj_last_id ($short): $why"
+        final=unverified
+      fi ;;
+  esac
+  obj_write_report "" "" "$(obj_blocked_body)" "" "$state_line" "$line"
+  emit_frame rc=0 "result=$result" "phase=$obj_last_id" "tip=$tip" \
+    "deliverable_state=$final" "report=$obj_dir/report.md"
 }
 
 # ---- archive and unarchive ------------------------------------------------
@@ -2104,6 +2180,9 @@ case "$objective_cmd" in
   phase-block)
     [ $# -eq 3 ] || fail BAD_ARGS "$objective_usage"
     obj_phase_block "$@" ;;
+  verify-done)
+    [ $# -eq 2 ] || [ $# -eq 3 ] || fail BAD_ARGS "$objective_usage"
+    obj_verify_done "$@" ;;
   archive)
     [ $# -ge 1 ] || fail BAD_ARGS "$objective_usage"
     obj_archive "$@" ;;

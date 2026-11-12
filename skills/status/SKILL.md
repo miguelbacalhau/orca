@@ -57,7 +57,8 @@ The grouping is handed to you: each `ACTION:` line's slug names the group, its r
   - `ready` → `/orca:open <slug>` confirms and runs the pending phases.
   - `active` → `/orca:open <slug>` resumes the active phase.
   - `blocked` → `/orca:open <slug>` — a phase waits on a decision; settling it replans.
-  - `idle` → every phase done, not landed: `/orca:review` to walk it, `/orca:pr` to publish it, `/orca:open <slug>` for more work, `/orca:archive` to set it aside. Open follow-ups by count.
+  - `verify` → every phase done, the final verification not yet run on the last one: `/orca:open <slug>` runs it.
+  - `idle` → every phase done and verified, not landed: `/orca:review` to walk it, `/orca:pr` to publish it, `/orca:open <slug>` for more work, `/orca:archive` to set it aside. Open follow-ups by count.
   - `landed` → `/orca:archive` retires it.
   - `owner:live` → *owned by an open session* instead of any command — never offered over; `owner:unknown` adds that another machine may hold it; `owner:stale` → `/orca:open <slug>` offers to take it over.
   - `archived` and `abandoned` → counted with the archived runs at the bottom, never listed.

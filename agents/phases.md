@@ -55,7 +55,7 @@ Rules for the phases:
 
 - **One goal per phase**, sized for one implementer's context: the implementer builds it, fixes every review round, and commits it in one sitting. A phase that needs its own breakdown to be understood is two phases.
 - **Acceptance lines are the implementer's test contract and the reviewer's yardstick.** Each is observable and checkable from the worktree — a behavior, a state, a command's outcome — restating the phase's goal rather than extending it. One to four per phase.
-- **Phases run in order on one branch**, and every phase runs the repository's full checks, so each one leaves the branch green and builds only on phases before it. A restructure of existing code is its own phase, behavior-preserving, ahead of the phases that need the new shape.
+- **Phases run in order on one branch**, and every phase runs the repository's full checks before it commits, so each one leaves the branch green and builds only on phases before it. Once every phase is done, a final verification re-checks every phase's acceptance lines on the finished branch: write them so they still hold after later phases build on them. A restructure of existing code is its own phase, behavior-preserving, ahead of the phases that need the new shape.
 - **Cover the outcome and the decided work, and nothing else.** Work no decision or the outcome asks for does not belong in the plan; a gap you notice outside it is a `reason` note, not a phase.
 - **Typically one to five new phases per pass; one is legitimate.** More than that means the objective needs a smaller next step — plan that step, and say so in your `reason`.
 

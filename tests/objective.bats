@@ -514,7 +514,7 @@ release_lock() { git -C "$R/main" update-ref -d "$(lock_ref)"; wait "$BPID" || t
   [ "$status" -eq 0 ]
   run orca objective idle "$D"
   [ "$status" -eq 0 ]
-  [ "$(frame_value state)" = idle ]
+  [ "$(frame_value state)" = verify ]
   CLAUDE_CODE_SESSION_ID=sess-other run orca objective idle "$D"
   assert_fail_reason NOT_OWNER
   [[ "$output" == *'session sess-mine'* ]] || return 1
@@ -604,7 +604,16 @@ release_lock() { git -C "$R/main" update-ref -d "$(lock_ref)"; wait "$BPID" || t
   state_is planning
   rm "$D/plan/proposed.md"
   sed -i.bak 's/^\*\*State:\*\* blocked$/**State:** done/' "$D/phases.md"
+  # every phase done: verify until a final verification covers the last one
+  state_is verify
+  printf '# Report: alpha\n\n**Deliverable state:** verified\n**Final verification:** pass after P1 (0123456)\n' >"$D/report.md"
+  state_is verify
+  sed -i.bak 's/after P1/after P2/' "$D/report.md"
   state_is idle
+  sed -i.bak 's/pass after P2/fail after P2/' "$D/report.md"
+  state_is idle
+  sed -i.bak 's/fail after P2/later after P2/' "$D/report.md"
+  state_is verify
 }
 
 @test "list: landed once the branch moved and merged into trunk; archived and abandoned only with --all" {
@@ -613,12 +622,12 @@ release_lock() { git -C "$R/main" update-ref -d "$(lock_ref)"; wait "$BPID" || t
   [ "$status" -eq 0 ]
   decision D1 decided 'Per key?'
   phase P1 done 'Bucket'
-  # every phase done but the branch still at its base: idle, never landed
-  state_is idle
+  # every phase done but the branch still at its base: never landed
+  state_is verify
   echo work >"$R/orca-alpha/work.txt"
   git -C "$R/orca-alpha" add work.txt
   git -C "$R/orca-alpha" commit -qm 'add work'
-  state_is idle
+  state_is verify
   git -C "$R/main" merge -q --no-ff -m 'land alpha' feature/alpha
   state_is landed
   printf 'state=landed\ndate=2026-11-03\n' >"$D/archived"
@@ -711,6 +720,7 @@ Phases: 1 of 3 done
   P2  active  Middleware on public routes
   P3  pending  429 responses
 Action: P2 · review round 2 · gating 1, minor 0, out of scope 3
+Final verification: none
 Follow-ups: 1 open
 Last report entry: P1 — Token bucket — abcdef0"
   if [ "$output" != "$want" ]; then
@@ -1293,6 +1303,19 @@ blocked_section() { # the lines under report.md's ## Blocked, blanks dropped
   assert_fail_reason NO_FILE
 }
 
+@test "phase-add: a final verification's fix phase is Source verify" {
+  new_objective alpha
+  decision D1 decided 'Per key?'
+  phase P1 done 'Bucket'
+  local b="$BATS_TEST_TMPDIR/block.md"
+  block "$b" P1 pending 'Restore the bucket tests' none verify
+  run orca objective phase-add "$D" "$b"
+  [ "$status" -eq 0 ]
+  [ "$(frame_value phase)" = P2 ]
+  grep -qx '\*\*Source:\*\* verify' "$D/phases.md"
+  state_is ready
+}
+
 # ---- phase-start ----------------------------------------------------------
 
 @test "phase-start: pending to active with base and brief; a re-start keeps the base" {
@@ -1581,7 +1604,7 @@ git merge --no-ff feature/alpha"
     return 1
   fi
   ! grep -q BODY-TEXT "$D/report.md" || return 1
-  state_is idle
+  state_is verify
   [ "$(list_line | cut -f8)" = followups:3 ]
 }
 
@@ -1695,6 +1718,81 @@ git merge --no-ff feature/alpha"
   assert_fail_reason NO_DECISION
   run orca objective phase-block "$D" P4 decision
   assert_fail_reason BAD_ARGS
+}
+
+# ---- verify-done ----------------------------------------------------------
+
+@test "verify-done: a pass after the last phase ends the verify state until a phase is added" {
+  new_objective alpha
+  decision D1 decided 'Per key?'
+  phase P1 done 'Bucket'
+  printf '# Report: alpha\n\n**Deliverable:** `feature/alpha`\n**Deliverable state:** verified\n\n## Phases\n\n### P1 — Bucket — 0123456\n- Checks: pass\n\n## Blocked\n\nNone\n\n## Follow-ups\n\nNone\n\n## Landing\n\ngit merge --no-ff feature/alpha\n' >"$D/report.md"
+  state_is verify
+  local tip
+  tip="$(git -C "$R" rev-parse feature/alpha)"
+  run orca objective verify-done "$D" pass
+  [ "$status" -eq 0 ]
+  [ "$(frame_value result)" = pass ]
+  [ "$(frame_value phase)" = P1 ]
+  [ "$(frame_value tip)" = "$tip" ]
+  [ "$(frame_value deliverable_state)" = verified ]
+  # the line sits right after the deliverable state; nothing else moves
+  [ "$(sed -n 4,5p "$D/report.md")" = "**Deliverable state:** verified
+**Final verification:** pass after P1 (${tip:0:7})" ]
+  grep -qx '### P1 — Bucket — 0123456' "$D/report.md"
+  state_is idle
+  run orca objective digest "$D"
+  [[ "$output" == *"Final verification: pass after P1 (${tip:0:7})"* ]] || return 1
+  # a phase added after it makes the record stale
+  phase P2 done 'Fix'
+  state_is verify
+  run orca objective verify-done "$D" pass
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^\*\*Final verification:\*\*' "$D/report.md")" = 1 ]
+  grep -qx "\*\*Final verification:\*\* pass after P2 (${tip:0:7})" "$D/report.md"
+  state_is idle
+}
+
+@test "verify-done: a fail names why, turns the deliverable unverified, and ends the verify state" {
+  new_objective alpha
+  decision D1 decided 'Per key?'
+  phase P1 done 'Bucket'
+  local tip
+  tip="$(git -C "$R" rev-parse feature/alpha)"
+  run orca objective verify-done "$D" fail
+  assert_fail_reason BAD_ARGS
+  [ ! -e "$D/report.md" ]
+  run orca objective verify-done "$D" pass 'no reason wanted'
+  assert_fail_reason BAD_ARGS
+  run orca objective verify-done "$D" maybe
+  assert_fail_reason BAD_ARGS
+  run orca objective verify-done "$D" fail 'make test: 2 failing in bucket_test'
+  [ "$status" -eq 0 ]
+  [ "$(frame_value deliverable_state)" = unverified ]
+  grep -qx "\*\*Deliverable state:\*\* unverified — final verification failed after P1 (${tip:0:7}): make test: 2 failing in bucket_test" "$D/report.md"
+  grep -qx "\*\*Final verification:\*\* fail after P1 (${tip:0:7}) — make test: 2 failing in bucket_test" "$D/report.md"
+  state_is idle
+  # a later pass never raises the state again
+  run orca objective verify-done "$D" pass
+  [ "$status" -eq 0 ]
+  [ "$(frame_value deliverable_state)" = unverified ]
+  grep -q '^\*\*Deliverable state:\*\* unverified — final verification failed' "$D/report.md"
+}
+
+@test "verify-done: refused before every phase is done, with no phase, and on an archived objective" {
+  new_objective alpha
+  run orca objective verify-done "$D" pass
+  assert_fail_reason NO_PHASE
+  decision D1 decided 'Per key?'
+  phase P1 done 'Bucket'
+  phase P2 pending 'Middleware'
+  run orca objective verify-done "$D" pass
+  assert_fail_reason PHASE_STATE
+  [ ! -e "$D/report.md" ]
+  sed -i.bak 's/^\*\*State:\*\* pending$/**State:** done/' "$D/phases.md"
+  printf 'state=abandoned\n' >"$D/archived"
+  run orca objective verify-done "$D" pass
+  assert_fail_reason ARCHIVED
 }
 
 @test "phase subcommands refuse an archived objective" {

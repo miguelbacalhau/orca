@@ -56,19 +56,19 @@
 #       Follows every RUN: and DONE: line — the lease reader's verdict on
 #       that run directory's .lock:
 #         none    — no .lock.
-#         live    — host matches, the pid is running, and its start time
-#                   matches verbatim: AN OPEN SESSION ON THIS HOST OWNS
+#         live    — machine matches, the pid is running, and its start time
+#                   matches verbatim: AN OPEN SESSION ON THIS MACHINE OWNS
 #                   THIS RUN. The pid is the session's claude process, not
 #                   the workflow — a TaskStop'd or /clear'ed session reads
 #                   live too, so skills must phrase live as "owned by an
 #                   open session", never "executing right now".
-#         stale   — host matches but the pid is gone or its start time
+#         stale   — machine matches but the pid is gone or its start time
 #                   differs: the holder provably crashed; safe to steal
 #                   (claim --steal) without asking. A stale lease on a
 #                   DONE: run is stranded garbage from a session that died
 #                   between writing report.md and releasing — without this
 #                   line it would be invisible forever.
-#         unknown — another host (or an unreadable owner file); the only
+#         unknown — another machine (or an unreadable owner file); the only
 #                   case where the liveness caveat survives.
 #   BLOCKED:<TAB><run-dir><TAB><b64>
 #   FOLLOWUP:<TAB><run-dir><TAB><b64>
@@ -235,8 +235,8 @@ triage_resolve_repo() {
 
 # ---- the lease: claim/release writer pair and the LEASE: reader --------
 # Atomic mkdir <run-dir>/.lock is the lock; the owner file inside is
-# machine-readable identity (runid=, host=, pid=, pidstart=, note=,
-# taken=). This verb is the lease's single home: the workflows and the
+# machine-readable identity (runid=, host=, machine=, pid=, pidstart=,
+# note=, taken=). This verb is the lease's single home: the workflows and the
 # run skills all take and release it through orca.sh, and nothing else
 # may write a lock's owner file. The pid-capture rule (lease_session_pid)
 # and the verdict live in lib.sh, shared with the objective claim.
@@ -284,6 +284,7 @@ cmd_claim() {
   {
     printf 'runid=%s\n' "$runid"
     printf 'host=%s\n' "$(hostname)"
+    printf 'machine=%s\n' "$(lease_machine)"
     printf 'pid=%s\n' "$pid"
     printf 'pidstart=%s\n' "$(ps -o lstart= -p "$pid" 2>/dev/null)"
     printf 'note=%s\n' "$note"
@@ -406,6 +407,7 @@ is_archived() { # <run-dir>
 collect_discover() {
   local orca="$repo_root/.orca"
   local runid args value
+  lease_machine_load # once, before the loops' $(lease_read ...) subshells
 
   # --- runs: .orca/*/spec.md at depth 1, no sibling report.md ---
   # A sibling report.md means the run finished; DONE: lines feed
@@ -835,6 +837,7 @@ cmd_archive() {
   if [[ "$scan" -eq 1 ]]; then
     [[ -z "${1:-}" ]] || triage_fail BAD_ARGS "archive --scan takes no run directory"
     local spec kind a rest
+    lease_machine_load # once, before the loop's lease-reading subshells
     for spec in "$repo_root/.orca"/*/spec.md; do
       [[ -f "$spec" ]] || continue
       dir="$(dirname "$spec")"

@@ -460,29 +460,73 @@ is_banned() { # <text> — exit 0 iff the text trips the attribution regex
 # ---- lease reading ----------------------------------------------------
 # The read side of the per-run lease (atomic mkdir <run-dir>/.lock with
 # a machine-readable owner file inside) and of an objective's `owner`
-# claim, which carries the same host=/pid=/pidstart=/taken= fields.
-# Writing — the run lease's claim, release, and steal — lives solely in
-# verbs/triage.sh, the lease's single home, and the objective claim in
-# verbs/objective.sh; the verdict and the pid-capture rule live here so
-# both writers and every reader share one implementation.
+# claim, which carries the same host=/machine=/pid=/pidstart=/taken=
+# fields. Writing — the run lease's claim, release, and steal — lives
+# solely in verbs/triage.sh, the lease's single home, and the objective
+# claim in verbs/objective.sh; the verdict, the machine identity, and the
+# pid-capture rule live here so both writers and every reader share one
+# implementation.
+#
+# Same machine? is judged by machine=, a stable machine ID, never by
+# host=: on macOS with no HostName set, `hostname` is whatever the
+# current network's DHCP or reverse DNS hands out, so a session's own
+# claims would read "another host" after a move between networks. host=
+# is still written, for people to read. Owner files written before
+# machine= existed carry only host= and are judged by it, as they were.
+# The ID comes from ioreg on macOS — outside the bash + git + coreutils
+# envelope, like the ps and kill -0 the verdict already relies on, and
+# base macOS; hostname is the fallback when nothing else answers.
 lease_owner_field() { # <owner-file> <key> — the value, verbatim (leading padding kept)
   sed -n "s/^$2=//p" "$1" 2>/dev/null | head -1
 }
 
+# This machine's ID, first source that answers: ORCA_MACHINE_ID (the
+# test seam; also a container sharing its host's machine-id), macOS's
+# IOPlatformUUID (bound to the hardware), Linux's /etc/machine-id or
+# /var/lib/dbus/machine-id, then hostname. Cached in orca_machine:
+# lease_machine_load assigns it in the calling shell, so a verb that
+# judges many owners in a loop loads it once before the loop and every
+# $(lease_verdict ...) subshell inherits it.
+orca_machine=""
+lease_machine_load() {
+  [ -n "$orca_machine" ] && return 0
+  local id="${ORCA_MACHINE_ID:-}" f
+  if [ -z "$id" ] && [ "$(uname -s 2>/dev/null)" = Darwin ]; then
+    id="$(ioreg -rd1 -c IOPlatformExpertDevice 2>/dev/null \
+      | sed -n 's/.*"IOPlatformUUID" = "\([^"]*\)".*/\1/p' | head -1)"
+  fi
+  if [ -z "$id" ]; then
+    for f in /etc/machine-id /var/lib/dbus/machine-id; do
+      [ -r "$f" ] && id="$(head -1 "$f" 2>/dev/null | tr -d '[:space:]')"
+      [ -n "$id" ] && break
+    done
+  fi
+  [ -n "$id" ] || id="$(hostname)"
+  orca_machine="$id"
+}
+
+lease_machine() { # prints this machine's ID
+  lease_machine_load
+  printf '%s' "$orca_machine"
+}
+
 # The verdict on one owner file: "<verdict>\tpid:<n|->\tsince:<iso|->",
-# verdict live | stale | unknown.
+# verdict live | stale | unknown. Same machine? by machine= when present;
+# a legacy file without it, by host= against hostname.
 lease_verdict() { # <owner-file>
-  local owner="$1" host pid pidstart taken cur
+  local owner="$1" host machine pid pidstart taken cur
   host="$(lease_owner_field "$owner" host)"
+  machine="$(lease_owner_field "$owner" machine)"
   pid="$(lease_owner_field "$owner" pid)"
   pidstart="$(lease_owner_field "$owner" pidstart)"
   taken="$(lease_owner_field "$owner" taken)"
-  if [[ -z "$host" || -z "$pid" ]] || ! [[ "$pid" =~ ^[0-9]+$ ]]; then
+  if [[ -z "$machine" && -z "$host" || -z "$pid" ]] || ! [[ "$pid" =~ ^[0-9]+$ ]]; then
     # A pre-verb prose owner file or a hand-mangled one — nothing testable.
     printf 'unknown\tpid:%s\tsince:%s' "${pid:--}" "${taken:--}"
     return
   fi
-  if [[ "$host" != "$(hostname)" ]]; then
+  if [[ -n "$machine" && "$machine" != "$(lease_machine)" ]] \
+    || [[ -z "$machine" && "$host" != "$(hostname)" ]]; then
     printf 'unknown\tpid:%s\tsince:%s' "$pid" "${taken:--}"
     return
   fi

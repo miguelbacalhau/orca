@@ -25,6 +25,9 @@ setup() {
   export PATH="$BATS_TEST_TMPDIR/envelope-bin:$PATH"
   export GIT_CONFIG_GLOBAL=/dev/null
   export GIT_CONFIG_SYSTEM=/dev/null
+  # Leases and claims judge "same machine?" by this ID (lib.sh
+  # lease_machine); pinned so fixtures can name this machine and another.
+  export ORCA_MACHINE_ID=test-machine
   export GIT_AUTHOR_NAME="orca test" GIT_AUTHOR_EMAIL="orca-test@example.invalid"
   export GIT_COMMITTER_NAME="orca test" GIT_COMMITTER_EMAIL="orca-test@example.invalid"
 }

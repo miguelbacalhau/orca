@@ -54,8 +54,8 @@ phase() {
 # write_owner <dir> <session> <pid> <pidstart> — a hand-built claim whose
 # liveness the test controls.
 write_owner() {
-  printf 'session=%s\nhost=%s\npid=%s\npidstart=%s\ntaken=2026-01-01T00:00:00+0000\n' \
-    "$2" "$(hostname)" "$3" "$4" >"$1/owner"
+  printf 'session=%s\nhost=%s\nmachine=%s\npid=%s\npidstart=%s\ntaken=2026-01-01T00:00:00+0000\n' \
+    "$2" "$(hostname)" "$ORCA_MACHINE_ID" "$3" "$4" >"$1/owner"
 }
 
 # list_line — the OBJECTIVE: line for $D from `list --all`.
@@ -197,6 +197,7 @@ state_is() { # <state> — $D's derived state in `list --all`
   [ "$(git -C "$R/orca-alpha" symbolic-ref --short HEAD)" = feature/alpha ]
   grep -qx 'session=sess-mine' "$D/owner"
   grep -qx "host=$(hostname)" "$D/owner"
+  grep -qx 'machine=test-machine' "$D/owner"
   grep -qE '^pid=[0-9]+$' "$D/owner"
   grep -q '^pidstart=' "$D/owner"
   grep -q '^taken=' "$D/owner"
@@ -301,12 +302,46 @@ state_is() { # <state> — $D's derived state in `list --all`
   has_line $'OBJECTIVE:\t'"$D"$'\talpha\tdiscussing\topen:0\tpending:0\tblocked:0\tfollowups:0\towner:live'
 }
 
-@test "open: another host's claim reads unknown and is never taken" {
+@test "open: another machine's claim reads unknown and is never taken" {
+  new_objective alpha
+  printf 'session=sess-other\nhost=%s\nmachine=elsewhere\npid=%s\npidstart=x\ntaken=t\n' "$(hostname)" "$$" >"$D/owner"
+  run orca objective open "$D" --steal
+  assert_fail_reason OWNED_ELSEWHERE
+  grep -qx 'session=sess-other' "$D/owner"
+  run orca objective list "$R"
+  has_line $'OBJECTIVE:\t'"$D"$'\talpha\tdiscussing\topen:0\tpending:0\tblocked:0\tfollowups:0\towner:unknown'
+}
+
+@test "open: a legacy claim without machine= is judged by host= — another host unknown, this host live" {
   new_objective alpha
   printf 'session=sess-other\nhost=elsewhere.invalid\npid=1234\npidstart=x\ntaken=t\n' >"$D/owner"
   run orca objective open "$D" --steal
   assert_fail_reason OWNED_ELSEWHERE
   grep -qx 'session=sess-other' "$D/owner"
+  SPID="$( (sleep 60 >/dev/null 2>&1 & echo $!) )"
+  printf 'session=sess-other\nhost=%s\npid=%s\npidstart=%s\ntaken=t\n' \
+    "$(hostname)" "$SPID" "$(ps -o lstart= -p "$SPID")" >"$D/owner"
+  run orca objective list "$R"
+  has_line $'OBJECTIVE:\t'"$D"$'\talpha\tdiscussing\topen:0\tpending:0\tblocked:0\tfollowups:0\towner:live'
+}
+
+@test "open: this machine's claim under another network's hostname — live is OWNED_ELSEWHERE, stale is stolen" {
+  new_objective alpha
+  SPID="$( (sleep 60 >/dev/null 2>&1 & echo $!) )"
+  printf 'session=sess-other\nhost=elsewhere.invalid\nmachine=%s\npid=%s\npidstart=%s\ntaken=t\n' \
+    "$ORCA_MACHINE_ID" "$SPID" "$(ps -o lstart= -p "$SPID")" >"$D/owner"
+  run orca objective list "$R"
+  has_line $'OBJECTIVE:\t'"$D"$'\talpha\tdiscussing\topen:0\tpending:0\tblocked:0\tfollowups:0\towner:live'
+  run orca objective open "$D" --steal
+  assert_fail_reason OWNED_ELSEWHERE
+  printf 'session=sess-other\nhost=elsewhere.invalid\nmachine=%s\npid=%s\npidstart=%s\ntaken=t\n' \
+    "$ORCA_MACHINE_ID" "$SPID" "not the real lstart" >"$D/owner"
+  run orca objective open "$D"
+  assert_fail_reason OWNER_STALE
+  run orca objective open "$D" --steal
+  [ "$status" -eq 0 ]
+  [ "$(frame_value claim)" = stolen ]
+  grep -qx 'session=sess-mine' "$D/owner"
 }
 
 @test "open: a stale claim needs --steal, which takes it over" {
@@ -357,11 +392,12 @@ state_is() { # <state> — $D's derived state in `list --all`
 }
 
 # lock_ref — the objective's claim lock ref; lock_by <pid> <lstart> — a
-# claim lock held by that process, on this host; lock_held — the lock
-# exists; lock_blob <pid> <lstart> — the blob such a holder writes.
+# claim lock held by that process, on this machine; lock_held — the lock
+# exists; lock_blob <pid> <lstart> [<machine>] — the blob such a holder
+# writes.
 lock_ref() { printf 'refs/orca/claim/%s' "${D##*/}"; }
 lock_blob() {
-  printf '%s\t%s\t%s' "$(hostname)" "$1" "$2" | git -C "$R/main" hash-object -w --stdin
+  printf '%s\t%s\t%s' "${3:-$ORCA_MACHINE_ID}" "$1" "$2" | git -C "$R/main" hash-object -w --stdin
 }
 lock_by() {
   git -C "$R/main" update-ref "$(lock_ref)" "$(lock_blob "$1" "$2")"
@@ -411,6 +447,24 @@ lock_held() { git -C "$R/main" rev-parse -q --verify "$(lock_ref)" >/dev/null; }
   # and the archive's lock goes on a typed failure too
   run orca objective archive "$D"
   assert_fail_reason NOT_LANDED
+  ! lock_held
+}
+
+@test "open: a claim lock left by a dead pid — another machine's is waited on, this machine's is recovered" {
+  new_objective alpha
+  sleep 0.01 &
+  local dpid=$!
+  wait "$dpid"
+  git -C "$R/main" update-ref "$(lock_ref)" "$(lock_blob "$dpid" gone elsewhere)"
+  ORCA_OBJ_LOCK_TRIES=2 run orca objective open "$D"
+  assert_fail_reason CLAIM_BUSY
+  [[ "$output" == *elsewhere* ]] || return 1
+  [ ! -e "$D/owner" ]
+  lock_held
+  lock_by "$dpid" gone
+  run orca objective open "$D"
+  [ "$status" -eq 0 ]
+  [ "$(frame_value claim)" = claimed ]
   ! lock_held
 }
 

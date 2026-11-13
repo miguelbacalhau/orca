@@ -251,13 +251,15 @@ EOF
 
 # ---- lease: claim/release and the LEASE: reader ----
 
-# write_owner <run-dir> <host> <pid> <pidstart> — a hand-built lock whose
+# write_owner <run-dir> <machine> <pid> <pidstart> — a hand-built lock whose
 # liveness the test controls; only the claim verb may write REAL owners.
+# host= is this host's, for display only; machine= decides sameness.
 write_owner() {
   mkdir -p "$1/.lock"
   {
     printf 'runid=\n'
-    printf 'host=%s\n' "$2"
+    printf 'host=%s\n' "$(hostname)"
+    printf 'machine=%s\n' "$2"
     printf 'pid=%s\n' "$3"
     printf 'pidstart=%s\n' "$4"
     printf 'note=test fixture\n'
@@ -275,6 +277,7 @@ write_owner() {
   local owner=.orca/20250101-1200-feat-alpha/.lock/owner
   grep -q '^runid=wf_abc$' "$owner"
   grep -q "^host=$(hostname)$" "$owner"
+  grep -q '^machine=test-machine$' "$owner"
   grep -qE '^pid=[0-9]+$' "$owner"
   grep -q '^pidstart=' "$owner"
   grep -q '^note=orca test; slug=alpha$' "$owner"
@@ -314,11 +317,11 @@ write_owner() {
   # live: a real process whose start time matches verbatim
   sleep 60 &
   local spid=$!
-  write_owner .orca/20250102-feat-live "$(hostname)" "$spid" "$(ps -o lstart= -p "$spid")"
+  write_owner .orca/20250102-feat-live "$ORCA_MACHINE_ID" "$spid" "$(ps -o lstart= -p "$spid")"
   # stale: a live pid whose recorded start time does not match (pid reuse shape)
-  write_owner .orca/20250103-feat-stale "$(hostname)" "$$" "not the real lstart"
-  # unknown: another host
-  write_owner .orca/20250104-feat-other "elsewhere.invalid" "$$" "whatever"
+  write_owner .orca/20250103-feat-stale "$ORCA_MACHINE_ID" "$$" "not the real lstart"
+  # unknown: another machine
+  write_owner .orca/20250104-feat-other "elsewhere-machine" "$$" "whatever"
   run triage discover
   kill "$spid" 2>/dev/null || true
   [ "$status" -eq 0 ]
@@ -326,6 +329,58 @@ write_owner() {
   has_line $'LEASE:\tlive\tpid:'"$spid"$'\tsince:2026-01-01T00:00:00+0000'
   has_line $'LEASE:\tstale\tpid:'"$$"
   has_line $'LEASE:\tunknown\tpid:'"$$"
+}
+
+@test "the machine id, not the hostname, decides sameness: a renamed host still reads live or stale" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  mkdir -p .orca/20250101-feat-live/.lock .orca/20250102-feat-stale/.lock
+  echo '# spec' >.orca/20250101-feat-live/spec.md
+  echo '# spec' >.orca/20250102-feat-stale/spec.md
+  # this machine's id under a hostname from another network
+  sleep 60 &
+  local spid=$!
+  printf 'runid=\nhost=elsewhere.invalid\nmachine=%s\npid=%s\npidstart=%s\ntaken=t\n' \
+    "$ORCA_MACHINE_ID" "$spid" "$(ps -o lstart= -p "$spid")" >.orca/20250101-feat-live/.lock/owner
+  printf 'runid=\nhost=elsewhere.invalid\nmachine=%s\npid=%s\npidstart=%s\ntaken=t\n' \
+    "$ORCA_MACHINE_ID" "$spid" "not the real lstart" >.orca/20250102-feat-stale/.lock/owner
+  run triage discover
+  kill "$spid" 2>/dev/null || true
+  [ "$status" -eq 0 ]
+  has_line $'LEASE:\tlive\tpid:'"$spid"
+  has_line $'LEASE:\tstale\tpid:'"$spid"
+  ! has_line $'LEASE:\tunknown'
+}
+
+@test "a legacy owner without machine= is judged by host=: this host live, another unknown" {
+  make_repo "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  mkdir -p .orca/20250101-feat-mine/.lock .orca/20250102-feat-other/.lock
+  echo '# spec' >.orca/20250101-feat-mine/spec.md
+  echo '# spec' >.orca/20250102-feat-other/spec.md
+  sleep 60 &
+  local spid=$!
+  printf 'runid=\nhost=%s\npid=%s\npidstart=%s\ntaken=t\n' \
+    "$(hostname)" "$spid" "$(ps -o lstart= -p "$spid")" >.orca/20250101-feat-mine/.lock/owner
+  printf 'runid=\nhost=elsewhere.invalid\npid=%s\npidstart=x\ntaken=t\n' \
+    "$$" >.orca/20250102-feat-other/.lock/owner
+  run triage discover
+  kill "$spid" 2>/dev/null || true
+  [ "$status" -eq 0 ]
+  has_line $'LEASE:\tlive\tpid:'"$spid"
+  has_line $'LEASE:\tunknown\tpid:'"$$"
+}
+
+@test "lease_machine honors ORCA_MACHINE_ID; unset, it prints one stable non-empty id" {
+  run bash -c 'source "$1"; lease_machine' _ "$SCRIPTS/lib.sh"
+  [ "$status" -eq 0 ]
+  [ "$output" = test-machine ]
+  local a b
+  a="$(env -u ORCA_MACHINE_ID bash -c 'source "$1"; lease_machine' _ "$SCRIPTS/lib.sh")"
+  b="$(env -u ORCA_MACHINE_ID bash -c 'source "$1"; lease_machine' _ "$SCRIPTS/lib.sh")"
+  [ -n "$a" ]
+  [ "$a" = "$b" ]
+  [ "$a" != test-machine ]
 }
 
 @test "a dead pid reads stale; a pre-verb prose owner reads unknown" {
@@ -337,7 +392,7 @@ write_owner() {
   sleep 0.01 &
   local dpid=$!
   wait "$dpid"
-  write_owner .orca/20250101-feat-dead "$(hostname)" "$dpid" "long gone"
+  write_owner .orca/20250101-feat-dead "$ORCA_MACHINE_ID" "$dpid" "long gone"
   mkdir -p .orca/20250102-feat-prose/.lock
   printf 'orca work loop; slug=prose\n2026-01-01\n' >.orca/20250102-feat-prose/.lock/owner
   run triage discover
@@ -355,7 +410,7 @@ write_owner() {
   sleep 0.01 &
   local dpid=$!
   wait "$dpid"
-  write_owner .orca/20250101-feat-a "$(hostname)" "$dpid" "gone"
+  write_owner .orca/20250101-feat-a "$ORCA_MACHINE_ID" "$dpid" "gone"
   run triage discover
   [ "$status" -eq 0 ]
   has_line $'DONE:\t'"$PWD/.orca/20250101-feat-a"$'\tclean'
@@ -369,7 +424,7 @@ write_owner() {
   sleep 0.01 &
   local dpid=$!
   wait "$dpid"
-  write_owner .orca/20250101-feat-alpha "$(hostname)" "$dpid" "gone"
+  write_owner .orca/20250101-feat-alpha "$ORCA_MACHINE_ID" "$dpid" "gone"
   run triage claim --steal --runid wf_new .orca/20250101-feat-alpha 'resume claim'
   [ "$status" -eq 0 ]
   has_line $'CLAIMED:\t'
@@ -474,7 +529,7 @@ EOF
 EOF
   sleep 60 &
   local spid=$!
-  write_owner .orca/20250101-feat-alpha "$(hostname)" "$spid" "$(ps -o lstart= -p "$spid")"
+  write_owner .orca/20250101-feat-alpha "$ORCA_MACHINE_ID" "$spid" "$(ps -o lstart= -p "$spid")"
   run triage snapshot
   kill "$spid" 2>/dev/null || true
   [ "$status" -eq 0 ]
@@ -565,7 +620,7 @@ make_finished() {
   git branch feature/owned
   sleep 60 &
   local spid=$!
-  write_owner .orca/20250104-feat-owned "$(hostname)" "$spid" "$(ps -o lstart= -p "$spid")"
+  write_owner .orca/20250104-feat-owned "$ORCA_MACHINE_ID" "$spid" "$(ps -o lstart= -p "$spid")"
   run triage archive --scan
   kill "$spid" 2>/dev/null || true
   [ "$status" -eq 0 ]

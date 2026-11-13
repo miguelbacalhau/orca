@@ -114,7 +114,7 @@ A state that is not `active`, `done`, or `blocked` counts as pending. The file's
 
 ### `owner` and `archived`
 
-`owner` holds `session=`, `host=`, `pid=`, `pidstart=`, and `taken=` lines. `archived` holds `state=landed|abandoned`, `date=`, `tip=`, and `note=`.
+`owner` holds `session=`, `host=`, `machine=`, `pid=`, `pidstart=`, and `taken=` lines. `archived` holds `state=landed|abandoned`, `date=`, `tip=`, and `note=`.
 
 ## Derived states
 
@@ -137,13 +137,13 @@ An objective's state is never stored. `objective list` derives it from the files
 
 ## Ownership
 
-One session drives an objective at a time. `objective open` claims it by writing `owner` with this session's `CLAUDE_CODE_SESSION_ID`, its pid, and its host, judged by the same lease verdicts as a run:
+One session drives an objective at a time. `objective open` claims it by writing `owner` with this session's `CLAUDE_CODE_SESSION_ID`, its pid, and its machine, judged by the same lease verdicts as a run. `host=` is kept for display; whether an owner is on this machine is judged by a stable machine ID, not the hostname, which on macOS changes with the network:
 
 | Owner | `open` |
 |---|---|
 | none | claimed |
 | this session | kept (claimed afresh when its recorded pid is gone) |
-| another session, live or unknown (another host) | `OWNED_ELSEWHERE` — nothing done |
+| another session, live or unknown (another machine) | `OWNED_ELSEWHERE` — nothing done |
 | another session, provably dead | `OWNER_STALE`; taken over with `--steal` |
 
 The check and the write run under a lock — the ref `refs/orca/claim/<dir name>`, naming the holding process and changed only by compare-and-swap — so of two sessions opening one objective at once exactly one claims it and the other gets `OWNED_ELSEWHERE`; a lock still held after a short wait is `CLAIM_BUSY`, and one whose process is gone is taken over by exactly one contender. `objective archive` and `objective unarchive` hold the same lock, taken before any check, so an open that waited behind an archive finds it archived. A claim releases any other objective this session owned. `objective current <repo>` names the objective this session owns, or `none`. A session without a session id cannot claim (`NO_SESSION_ID`). `/clear` starts a new session id, so `/orca:loop` refuses until `/orca:open` claims the objective again.

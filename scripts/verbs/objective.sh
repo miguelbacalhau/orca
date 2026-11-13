@@ -53,7 +53,8 @@
 #                  (reviews/, responses/, declines.md, overrides, action,
 #                  trees, snapshot)
 #   phases/P<n>/action the round engine's last frame for that phase
-#   owner          the claim: session=, host=, pid=, pidstart=, taken=
+#   owner          the claim: session=, host=, machine=, pid=, pidstart=,
+#                  taken= (host= for display; machine= judges sameness)
 #   archived       present once archived: state=landed|abandoned (plus
 #                  date=, tip=, note=)
 #
@@ -655,6 +656,7 @@ obj_write_owner() { # <dir>
   {
     printf 'session=%s\n' "$obj_sid"
     printf 'host=%s\n' "$(hostname)"
+    printf 'machine=%s\n' "$(lease_machine)"
     printf 'pid=%s\n' "$pid"
     printf 'pidstart=%s\n' "$(ps -o lstart= -p "$pid" 2>/dev/null)"
     printf 'taken=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')"
@@ -679,12 +681,12 @@ EOF
 # removal, unarchive) runs under the claim lock, so two sessions opening
 # one objective at once cannot both read "no owner" and both claim it.
 # The lock is a ref, refs/orca/claim/<YYYYMMDD-HHMMSS>-<slug>, pointing
-# at a blob that names its holder — `<host><TAB><pid><TAB><lstart>`,
+# at a blob that names its holder — `<machine><TAB><pid><TAB><lstart>`,
 # this orca.sh process. Every change to it is a compare-and-swap by
 # `git update-ref <ref> <new> <old>`, which git applies only while the
 # ref still holds <old>:
 #   take     <old> empty — only while no lock exists
-#   recover  <old> the stale holder's blob — a holder on this host whose
+#   recover  <old> the stale holder's blob — a holder on this machine whose
 #            process is gone (or whose pid was reused); of several
 #            contenders that judged it stale, exactly one swaps, and a
 #            lock taken since is never replaced
@@ -694,14 +696,14 @@ EOF
 # it on exit, whatever the exit.
 
 obj_lock_target() {
-  printf '%s\t%s\t%s' "$(hostname)" "$$" "$(ps -o lstart= -p "$$" 2>/dev/null)"
+  printf '%s\t%s\t%s' "$(lease_machine)" "$$" "$(ps -o lstart= -p "$$" 2>/dev/null)"
 }
 
-obj_lock_stale() { # <target> — exit 0 iff it names a gone process on this host
-  local host pid start rest
-  host="${1%%"$obj_tab"*}"; rest="${1#*"$obj_tab"}"
+obj_lock_stale() { # <target> — exit 0 iff it names a gone process on this machine
+  local machine pid start rest
+  machine="${1%%"$obj_tab"*}"; rest="${1#*"$obj_tab"}"
   pid="${rest%%"$obj_tab"*}"; start="${rest#*"$obj_tab"}"
-  [ "$host" = "$(hostname)" ] && [[ $pid =~ ^[0-9]+$ ]] || return 1
+  [ "$machine" = "$(lease_machine)" ] && [[ $pid =~ ^[0-9]+$ ]] || return 1
   kill -0 "$pid" 2>/dev/null || return 0
   [ "$(ps -o lstart= -p "$pid" 2>/dev/null)" != "$start" ]
 }
@@ -953,6 +955,7 @@ obj_list() { # <repo> [--all]
   [ $# -eq 1 ] || { [ $# -eq 2 ] && [ "$2" = --all ]; } || fail BAD_ARGS "$objective_usage"
   [ $# -eq 2 ] && all=1
   obj_resolve_repo "$1"
+  lease_machine_load # once, before the loop's $(obj_owner_verdict ...) subshells
   while IFS= read -r d; do
     [ -n "$d" ] || continue
     [ "$all" -eq 1 ] || [ -z "$(obj_marker "$d")" ] || continue

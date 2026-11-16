@@ -181,7 +181,7 @@ The full lifecycle — pre-flight gates, escalation rules, the run band, the dec
 4. **Final verification** — once every phase is done, a verifier runs the full checks on the finished branch and confirms every phase's acceptance still holds. A regression becomes one more phase, run the same way.
 5. **Report** — each phase adds its entry (review rounds, declines, checks) and its follow-ups to `report.md`, which `/orca:review` and `/orca:pr` read like a run's.
 
-Everything is a file under `.orca/objectives/`, so `/orca:open` continues an objective from any session, and the objective band shows its decisions or phases above the prompt:
+Everything is a file under `.orca/objectives/`, so `/orca:open` continues an objective from any session — one session holds it at a time, and its claim ends with that session (exit or `/clear`) — and the objective band shows its decisions or phases above the prompt:
 
 ```text
 ── orca ─ rate-limit-public-api · P2/4 · 2 follow-ups ──────────────────
@@ -272,7 +272,7 @@ Bypass mode applies to the **whole session**, not just the run, so a dedicated s
 | `agents/<stage>.md` | The twenty-five agents, loaded as `orca:<stage>`. |
 | `scripts/orca.sh`, `scripts/lib.sh`, `scripts/verbs/` | The [orca CLI](docs/cli.md). |
 | `scripts/*.workflow.js` | Workflow scripts: the work loop, the spec gate, research. |
-| `hooks/` | The function-hooks module: the run band, the objective band, and the verb hook. `$.state` types in `types/index.d.ts`. |
+| `hooks/` | The function-hooks module: the run band, the objective band (and the objective claim's release at session end), and the verb hook. `$.state` types in `types/index.d.ts`. |
 | `tests/` | Bats suite (`bats tests/`) and hook tests (`claude plugin test .`). |
 
 Commit with Conventional Commit messages and don't edit the version in `.claude-plugin/plugin.json`: CI bumps it on every push to `main` that changes shipped files, sized from the commit types.

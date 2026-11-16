@@ -87,7 +87,7 @@ One `OBJECTIVE:` line per objective, TAB-separated: dir, slug, state, `open:`, `
 
 - **`landed`** — every phase done and the branch merged into the trunk. Present it with the archivable runs: archiving removes its worktree (`<repo-root>/orca-<slug>`) and branch (`feature/<slug>`), and keeps its directory.
 - **Any other state** — not landed. Never offered unprompted: abandoning is the user's call. When the argument or the user names one, prepare the abandon confirmation below.
-- **`owner:live`** or **`owner:unknown`** — another session drives it (`unknown`: another machine, maybe). It cannot be archived from here; say which, and that it can be once that session has ended. `owner:mine` and `owner:stale` are fine.
+- **`owner:live`** or **`owner:unknown`** — another session drives it (`unknown`: another machine, maybe). It cannot be archived from here; say which, and that it can be once that session has ended (exit or `/clear` ends it). `owner:mine`, `owner:stale` (the owning session has ended), and `owner:none` are fine.
 
 **One confirmation per objective**, never one for a batch — each names what that one retires:
 

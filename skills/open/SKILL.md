@@ -1,5 +1,5 @@
 ---
-description: Re-open an orca objective — the long-lived unit `/orca:new` starts under `.orca/objectives/` — in this session, and carry it forward from wherever it stands. Picks one (the newest by default, or the slug named), claims it for this session, arrives in its worktree, and checks the config and the reviewer (all in a background `orca:objective-open` agent, so none of that output enters the session), then loads only a bounded digest of it — never the objective's files — and routes by its derived state: open or blocking decisions go to the discussion, an unaccepted plan back to the planning gate, a confirmed plan to the phase loop, an interrupted phase to a fresh implementer that resumes it, a finished objective whose final verification has not run to that verification, a verified one to what's next (its open follow-ups, new decisions, `/orca:review`, `/orca:pr`, `/orca:archive`). A route outside the phase loop warms the worktree up with secrets and `.orca/setup` in a background `orca:provision` agent; the loop provisions at each phase start. One session drives an objective at a time: another live session's claim is never taken, a provably dead one only with the user's yes. Requires the bare-repo-with-worktrees layout; needs no bypass mode.
+description: Re-open an orca objective — the long-lived unit `/orca:new` starts under `.orca/objectives/` — in this session, and carry it forward from wherever it stands. Picks one (the newest by default, or the slug named), claims it for this session, arrives in its worktree, and checks the config and the reviewer (all in a background `orca:objective-open` agent, so none of that output enters the session), then loads only a bounded digest of it — never the objective's files — and routes by its derived state: open or blocking decisions go to the discussion, an unaccepted plan back to the planning gate, a confirmed plan to the phase loop, an interrupted phase to a fresh implementer that resumes it, a finished objective whose final verification has not run to that verification, a verified one to what's next (its open follow-ups, new decisions, `/orca:review`, `/orca:pr`, `/orca:archive`). A route outside the phase loop warms the worktree up with secrets and `.orca/setup` in a background `orca:provision` agent; the loop provisions at each phase start. One session drives an objective at a time: another live session's claim is never taken, and one whose session has ended is taken over without asking. Requires the bare-repo-with-worktrees layout; needs no bypass mode.
 args: <optional objective slug or directory>
 user-invocable: true
 disable-model-invocation: true
@@ -27,20 +27,19 @@ One `OBJECTIVE:` line per objective, oldest first: `<dir>`, slug, state, `open:<
 
 Then, by the chosen line's owner and state:
 
-- `owner:live` or `owner:unknown` → another session holds it. Say which — the `session=` and `host=` lines of `<dir>/owner`, nothing else — and stop. Never steal a live claim; the user ends that session first.
-- `owner:stale` → its owner is provably gone. Offer to take it over; on yes, open with `--steal` below, else stop.
-- `landed` → its branch is merged into the trunk. Say so and offer `/orca:archive`; open it only if the user wants more work on it.
+- `owner:live` or `owner:unknown` → another session holds it. Say which — the `session=` and `host=` lines of `<dir>/owner`, nothing else — and stop. Never take a live claim; the user ends that session first.
+- `landed` → its branch is merged into the trunk (whatever its owner is, `mine`, `stale`, or `none`). Say so and offer `/orca:archive`; open it only if the user wants more work on it.
+- `owner:stale`, `owner:none`, or `owner:mine` → open it. A `stale` owner's session has ended (its process is gone, or it was this terminal's conversation before a `/clear`): the open takes it over without asking.
 
 ## Step 2: Open
 
-Read `${CLAUDE_PLUGIN_ROOT}/skills/new/provision.md` and run its open: spawn `orca:objective-open` with the `Mode: open` task on `<dir>`, with `Steal: yes` when the user agreed above. It claims the objective for this session, arrives in the worktree (re-adding it when it is gone), and checks the reviewer. None of that output enters this session. On `status: open_failed`, these reasons stop first:
+Read `${CLAUDE_PLUGIN_ROOT}/skills/new/provision.md` and run its open: spawn `orca:objective-open` with the `Mode: open` task on `<dir>`. It claims the objective for this session, arrives in the worktree (re-adding it when it is gone), and checks the reviewer. None of that output enters this session. On `status: open_failed`, these reasons stop first:
 
 - `OWNED_ELSEWHERE` → another live session claimed it since the list: say which, and stop.
-- `OWNER_STALE` → offer `--steal` as in Step 1, and open once more on yes.
 - `ARCHIVED` → restore it first with `/orca:archive --undo <slug>`, and stop.
 - `NO_SESSION_ID` → this session has no id to claim with: relay it, and stop.
 
-Any other is a worktree failure: the claim stands, and that file's rule holds.
+Any other is a worktree failure: the claim stands, and that file's rule holds. On `status: ok` with `claim: stolen`, say in one line that the objective's earlier session had ended and this session took its claim over.
 
 Hold the reviewer values from the object, as that file says. Provisioning waits for the digest: whether it is worth spawning depends on the route (Step 4).
 
@@ -73,6 +72,6 @@ A user who stops anywhere needs nothing from you: the files already say where th
 ## Guidelines
 
 - The digest is the starting context. Reading an objective's files whole — even "just to check" — is exactly what this skill exists to avoid; read the one entry the conversation needs.
-- Never steal a live session's claim, and never steal a stale one without the user's yes.
+- Never take a live session's claim. A claim whose session has ended (`stale`) is free: the open takes it without asking.
 - You never edit code and never touch the worktree. `objective.md` and `decisions.md`, through the discussion and the loop's rulings, are the only files this skill writes.
 - Never read `.orca/config`, `.orca/setup`, or a setup log into the conversation; the provision agent reports them, and `/orca:doctor` owns fixing them.

@@ -5,11 +5,13 @@
 // are registered here once, for both — an event takes one unmatched hook per
 // module. The slot draws the run band whenever it has one, so a live run takes
 // it over. One slot also means the person's collapse of it (`[-]`, ctrl+x
-// ctrl+a) holds whichever band is showing.
+// ctrl+a) holds whichever band is showing. The session.end hook here also
+// releases the ending session's objective claims (./claim-release.ts).
 
 import type { EngineInterface, Register, RenderInput } from 'claude-code'
 
 import type { OrcaBand, OrcaTone } from '../types'
+import { releaseClaims } from './claim-release'
 import { headerRule, layoutRows } from './layout'
 import type { RuleTone } from './layout'
 import { objectiveBand, objectiveEnd, objectivePrompt, objectiveStart } from './objective-band'
@@ -77,6 +79,8 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('session.end', async ($, e, next) => {
+    // First: the one call here with work to do inside the end's short bound.
+    try { await releaseClaims($, e.sessionId, next.budget.remainingMs) } catch { /* observe only */ }
     try { await runEnd($) } catch { /* observe only */ }
     try { await objectiveEnd($) } catch { /* observe only */ }
     return next(e)

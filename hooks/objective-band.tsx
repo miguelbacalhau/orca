@@ -3,7 +3,8 @@
 // the objective whose `owner` file names this session (the claim `objective
 // open` writes, run by the session's orca:objective-open agent), then reads
 // that objective's files on a short tick. It writes nothing anywhere but its
-// own $.state.
+// own $.state. (Releasing the session's claim when it ends is
+// ./claim-release.ts's, through the release verb.)
 //
 // Ownership is looked up on session.start, on every prompt.submit, and after
 // a Bash call of the session or one of its agents runs `objective open` —
@@ -51,7 +52,7 @@ let rootCache: { cwd: string; root: string } | null = null
 // The nearest directory at or above the session's cwd that holds
 // .orca/objectives: the repository root. Only a find is cached — an
 // objective created later is still found.
-async function repoRootOf($: EngineInterface): Promise<string | null> {
+export async function repoRootOf($: EngineInterface): Promise<string | null> {
   const cwd = (await $.session.cwd()).replace(/\/+$/, '') || '/'
   if (rootCache?.cwd === cwd) return rootCache.root
   let dir = cwd

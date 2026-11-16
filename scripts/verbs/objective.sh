@@ -7,7 +7,8 @@
 #
 # Usage:
 #   orca.sh objective new <repo> <slug> <base-ref> [--idea <file>|-]
-#   orca.sh objective open <dir> [--steal]
+#   orca.sh objective open <dir>
+#   orca.sh objective release <repo> [--session <id>]
 #   orca.sh objective current <repo>
 #   orca.sh objective idle <dir>
 #   orca.sh objective list <repo> [--all]
@@ -88,13 +89,20 @@
 #   provisioned here: secrets and `.orca/setup` are the caller's
 #   `orca.sh provision <worktree> <arrival>` afterwards (orca:provision),
 #   so the verb stays fast and quiet. The claim, by the owner's verdict
-#   (lib.sh lease_verdict over the owner file):
+#   (obj_judge over the owner file, below):
 #     no owner                      claimed
 #     this session, live            kept (nothing written)
 #     this session, not live        claimed (the pid is refreshed)
 #     another session, live|unknown OWNED_ELSEWHERE, nothing done
-#     another session, stale        OWNER_STALE without --steal;
-#                                   stolen with it
+#     another session, stale        stolen
+#   A claim lasts as long as the session that took it: another session's
+#   claim reads stale once its process is provably gone (pid and start
+#   time, on this machine), and also while its process is the very one
+#   this shell runs under — one Claude Code process hosts one session at
+#   a time, so a claim it holds under another session id was left by a
+#   conversation that ended there (/clear, /resume). A live session
+#   keeps its claim however long it sits idle; the hooks module releases
+#   it when the session ends (release, below).
 #   No CLAUDE_CODE_SESSION_ID is NO_SESSION_ID and an archived objective
 #   ARCHIVED (restore it first), both before anything is written. The
 #   archived check and the claim's read and write run under the claim
@@ -105,7 +113,8 @@
 #   claim releases every other objective this session owned, so a
 #   session owns one objective at a time. Output: the objective's
 #   OBJECTIVE: line (as `list`), then one frame:
-#     rc, dir, claim (claimed | kept | stolen), worktree, branch,
+#     rc, dir, claim (claimed | kept | stolen — an ended session's
+#     claim taken over), worktree, branch,
 #     base (the base commit), arrival (created | reused |
 #     branch_resumed — provision's <arrival>), head
 #   A branch of the objective's name that does not descend from its base
@@ -116,6 +125,15 @@
 #   checked before arrival, as in phase-start. worktree-item's typed
 #   failure (WORKTREE_FAILED, ...) passes through; the claim stays, and a
 #   re-run continues where it stopped.
+#
+# release — drops a session's claims when it ends (the hooks module runs it
+#   on session.end): removes the owner file of every objective of the
+#   repository that names the session — --session <id>, else
+#   CLAUDE_CODE_SESSION_ID (neither: NO_SESSION_ID) — archived ones
+#   included. Each is re-read under that objective's claim lock and removed
+#   only while it still names the session, so a claim another session took
+#   meanwhile stays. Nothing to release is a no-op. Frame: rc, released (how
+#   many owner files were removed).
 #
 # current — read-only. Frame: rc, dir (the objective whose owner names
 #   this session's CLAUDE_CODE_SESSION_ID, archived ones skipped; the
@@ -135,7 +153,9 @@
 #   archived ones only with --all:
 #     OBJECTIVE:<TAB><dir><TAB><slug><TAB><state><TAB>open:<n><TAB>pending:<n><TAB>blocked:<n><TAB>followups:<n><TAB>owner:<verdict>
 #   open = open decisions, pending/blocked = phases, followups = open
-#   follow-ups, owner none | mine | live | stale | unknown. The state is
+#   follow-ups, owner none | mine | live | stale | unknown (open's verdict:
+#   a claim this shell's process holds under another session id is
+#   stale). The state is
 #   derived, never stored — the first rule that holds:
 #     archived    the archived file, state=landed (or no state)
 #     abandoned   the archived file, state=abandoned
@@ -311,7 +331,7 @@
 #   Runs under the claim lock, taken before any check (CLAIM_BUSY while
 #   another holds it), like open's claim and unarchive. Refused (nothing done) while another session's
 #   claim reads live or unknown (OWNED_ELSEWHERE; this session's own or
-#   a stale one passes),
+#   a stale one, by open's verdict, passes),
 #   and when the worktree is not this repository's, has another branch
 #   checked out, holds this shell's current directory, or the branch is
 #   checked out anywhere else (WORKTREE_IN_USE). It is landed when the
@@ -356,7 +376,7 @@
 #   FAIL:<TAB><reason><TAB><detail>    exit 1
 #     reasons: BAD_ARGS BAD_DIR BAD_SLUG BAD_REF NOT_GIT OLD_GIT NOT_BARE
 #              BRANCH_EXISTS OBJECTIVE_EXISTS WORKTREE_EXISTS
-#              NO_SESSION_ID ARCHIVED OWNED_ELSEWHERE OWNER_STALE CLAIM_BUSY
+#              NO_SESSION_ID ARCHIVED OWNED_ELSEWHERE CLAIM_BUSY
 #              NO_PLAN NO_FILE NO_PHASE NO_DECISION DECISION_OPEN
 #              PHASE_ACTIVE PHASE_STATE PHASE_BLOCKED PLAN_BAD_ID
 #              PLAN_BAD_PHASE PLAN_REWRITES_DONE PLAN_UNDECIDED
@@ -369,7 +389,7 @@
 # Sourced by orca.sh with the verb arguments in place; lib.sh is already
 # loaded.
 
-objective_usage="usage: orca.sh objective new <repo> <slug> <base-ref> [--idea <file>|-] | open <dir> [--steal] | current <repo> | idle <dir> | list <repo> [--all] | digest <dir> | plan-accept <dir> [--check] | phase-add <dir> <block-file> | phase-start <dir> <P> | phase-done <dir> <P> <sha> | phase-block <dir> <P> <D> | verify-done <dir> pass|fail [<why>] | archive <dir> [--abandon] [--note <text>] | unarchive <dir>"
+objective_usage="usage: orca.sh objective new <repo> <slug> <base-ref> [--idea <file>|-] | open <dir> | release <repo> [--session <id>] | current <repo> | idle <dir> | list <repo> [--all] | digest <dir> | plan-accept <dir> [--check] | phase-add <dir> <block-file> | phase-start <dir> <P> | phase-done <dir> <P> <sha> | phase-block <dir> <P> <D> | verify-done <dir> pass|fail [<why>] | archive <dir> [--abandon] [--note <text>] | unarchive <dir>"
 obj_tab='	'
 
 # ---- repository and directory resolution ----------------------------------
@@ -609,6 +629,33 @@ obj_derive_state() { # <dir> — sets obj_state; the first rule that holds
   fi
 }
 
+# This shell's session process (lease_session_pid), looked up once:
+# obj_self_load assigns it in the calling shell, as lease_machine_load
+# does the machine, so a loop of $(obj_judge ...) subshells inherits it.
+obj_self_pid=""
+obj_self_load() {
+  [ -n "$obj_self_pid" ] || obj_self_pid="$(lease_session_pid)"
+}
+
+# obj_judge <owner-file> — lease_verdict's line, except that another
+# session's live claim whose process is this shell's own session process
+# reads stale: one Claude Code process hosts one session at a time, so
+# the session that claimed it ended there (/clear, /resume) and the
+# process went on under another id. Judged only with a session id to
+# compare against.
+obj_judge() {
+  local owner="$1" verdict session
+  verdict="$(lease_verdict "$owner")"
+  if [ "${verdict%%"$obj_tab"*}" = live ] && [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then
+    session="$(lease_owner_field "$owner" session)"
+    if [ "$session" != "$CLAUDE_CODE_SESSION_ID" ]; then
+      obj_self_load
+      [ "$(lease_owner_field "$owner" pid)" != "$obj_self_pid" ] || verdict="stale${verdict#live}"
+    fi
+  fi
+  printf '%s' "$verdict"
+}
+
 # obj_owner_verdict <dir> — none | mine | live | stale | unknown
 obj_owner_verdict() {
   local owner="$1/owner" session
@@ -621,7 +668,7 @@ obj_owner_verdict() {
     printf 'mine'
     return
   fi
-  lease_verdict "$owner" | cut -f1
+  obj_judge "$owner" | cut -f1
 }
 
 obj_line() { # <dir> — the OBJECTIVE: line; obj_load must have run for <dir>
@@ -741,16 +788,16 @@ obj_unlock() {
   obj_lock_held=""
 }
 
-# obj_claim <dir> <steal 0|1> — sets obj_claim to claimed | kept | stolen.
-# Runs under the claim lock (obj_open).
+# obj_claim <dir> — sets obj_claim to claimed | kept | stolen. Runs
+# under the claim lock (obj_open).
 obj_claim() {
-  local dir="$1" steal="$2" owner="$1/owner" session verdict
+  local dir="$1" owner="$1/owner" session verdict
   if [ ! -e "$owner" ]; then
     obj_claim=claimed
   else
     session="$(lease_owner_field "$owner" session)"
-    verdict="$(lease_verdict "$owner")"
     if [ -n "$session" ] && [ "$session" = "$obj_sid" ]; then
+      verdict="$(lease_verdict "$owner")"
       if [ "${verdict%%"$obj_tab"*}" = live ]; then
         obj_claim=kept
         obj_release_others "$dir"
@@ -758,10 +805,9 @@ obj_claim() {
       fi
       obj_claim=claimed
     else
+      verdict="$(obj_judge "$owner")"
       case "${verdict%%"$obj_tab"*}" in
-        stale)
-          [ "$steal" -eq 1 ] || fail OWNER_STALE "$dir is claimed by session ${session:-unknown}, whose process is gone ($(printf '%s' "$verdict" | tr '\t' ' ')) — rerun with --steal to take it over"
-          obj_claim=stolen ;;
+        stale) obj_claim=stolen ;;
         *)
           fail OWNED_ELSEWHERE "$dir is owned by session ${session:-unknown} ($(printf '%s' "$verdict" | tr '\t' ' ')) — one session drives an objective at a time; nothing done" ;;
       esac
@@ -892,10 +938,8 @@ EOF
   obj_arrival_keys=("arrival=$arrival" "head=$head")
 }
 
-obj_open() { # <dir> [--steal]
-  local steal=0
-  [ $# -eq 1 ] || { [ $# -eq 2 ] && [ "$2" = --steal ]; } || fail BAD_ARGS "$objective_usage"
-  [ $# -eq 2 ] && steal=1
+obj_open() { # <dir>
+  [ $# -eq 1 ] || fail BAD_ARGS "$objective_usage"
   obj_require_dir "$1"
   obj_session
   # Under the lock before any check: an open that waited behind an
@@ -904,12 +948,43 @@ obj_open() { # <dir> [--steal]
   obj_require_live
   obj_load "$obj_dir"
   obj_require_header
-  obj_claim "$obj_dir" "$steal"
+  obj_claim "$obj_dir"
   obj_unlock
   obj_arrive
   obj_line "$obj_dir"
   emit_frame rc=0 "dir=$obj_dir" "claim=$obj_claim" "worktree=$obj_worktree" "branch=$obj_branch" \
     "base=$obj_base_commit" "${obj_arrival_keys[@]}"
+}
+
+# obj_release <repo> [--session <id>] — removes the owner files that name
+# the session, each re-read under its objective's claim lock.
+obj_release() {
+  local sid="" d released=0
+  case $# in
+    1) ;;
+    3) [ "$2" = --session ] && [ -n "$3" ] || fail BAD_ARGS "$objective_usage"
+       sid="$3" ;;
+    *) fail BAD_ARGS "$objective_usage" ;;
+  esac
+  if [ -z "$sid" ]; then
+    obj_session
+    sid="$obj_sid"
+  fi
+  obj_resolve_repo "$1"
+  while IFS= read -r d; do
+    [ -n "$d" ] && [ -f "$d/owner" ] || continue
+    [ "$(lease_owner_field "$d/owner" session)" = "$sid" ] || continue
+    obj_dir="$d"
+    obj_lock
+    if [ -f "$d/owner" ] && [ "$(lease_owner_field "$d/owner" session)" = "$sid" ]; then
+      rm -f "$d/owner" 2>/dev/null || fail WRITE_ERROR "could not remove $d/owner"
+      released=$((released + 1))
+    fi
+    obj_unlock
+  done <<EOF
+$(obj_dirs)
+EOF
+  emit_frame rc=0 "released=$released"
 }
 
 obj_current() { # <repo>
@@ -955,7 +1030,9 @@ obj_list() { # <repo> [--all]
   [ $# -eq 1 ] || { [ $# -eq 2 ] && [ "$2" = --all ]; } || fail BAD_ARGS "$objective_usage"
   [ $# -eq 2 ] && all=1
   obj_resolve_repo "$1"
-  lease_machine_load # once, before the loop's $(obj_owner_verdict ...) subshells
+  # once, before the loop's $(obj_owner_verdict ...) subshells
+  lease_machine_load
+  [ -z "${CLAUDE_CODE_SESSION_ID:-}" ] || obj_self_load
   while IFS= read -r d; do
     [ -n "$d" ] || continue
     [ "$all" -eq 1 ] || [ -z "$(obj_marker "$d")" ] || continue
@@ -1910,13 +1987,13 @@ obj_archive_ref() { # the hidden ref an archived objective's tip is kept under
 }
 
 # obj_require_unowned — another session's live or unknown claim refuses;
-# this session's own, a stale one, or none passes.
+# this session's own, a stale one (obj_judge), or none passes.
 obj_require_unowned() {
   local session verdict
   [ -e "$obj_dir/owner" ] || return 0
   session="$(lease_owner_field "$obj_dir/owner" session)"
   [ -n "$session" ] && [ "$session" = "${CLAUDE_CODE_SESSION_ID:-}" ] && return 0
-  verdict="$(lease_verdict "$obj_dir/owner")"
+  verdict="$(obj_judge "$obj_dir/owner")"
   [ "${verdict%%"$obj_tab"*}" = stale ] && return 0
   fail OWNED_ELSEWHERE "$obj_dir is owned by session ${session:-unknown} ($(printf '%s' "$verdict" | tr '\t' ' ')) — archive it from that session, or once it has ended; nothing done"
 }
@@ -2156,6 +2233,9 @@ case "$objective_cmd" in
   open)
     [ $# -ge 1 ] || fail BAD_ARGS "$objective_usage"
     obj_open "$@" ;;
+  release)
+    [ $# -ge 1 ] || fail BAD_ARGS "$objective_usage"
+    obj_release "$@" ;;
   current)
     [ $# -eq 1 ] || fail BAD_ARGS "$objective_usage"
     obj_current "$@" ;;

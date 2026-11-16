@@ -29,7 +29,6 @@ Mode: open
 Plugin root: <plugin-root>
 Repository: <the session's working directory>
 Objective: <dir>
-Steal: yes | no
 ```
 
 ## Mode new: look around, then create
@@ -74,7 +73,7 @@ Then run the open as below.
 cd "<repository>" && bash "<plugin-root>/scripts/orca.sh" objective open "<dir>"
 ```
 
-Add `--steal` only when the task says `Steal: yes`. The verb claims the objective for the session (your shell carries the session's id) and arrives in its worktree. From its frame take `claim`, `worktree`, `branch`, `base`, and `arrival`. A typed `FAIL:` (`NO_SESSION_ID`, `OWNED_ELSEWHERE`, `OWNER_STALE`, `ARCHIVED`, `CLAIM_BUSY`, `WORKTREE_FAILED`, `WORKTREE_MISMATCH`, `BRANCH_FOREIGN`, …) ends here with `status: open_failed`. Never re-run the open, and never add `--steal` on your own.
+The verb claims the objective for the session (your shell carries the session's id) and arrives in its worktree; a claim whose session has ended it takes over by itself (`claim=stolen`). From its frame take `claim`, `worktree`, `branch`, `base`, and `arrival`. A typed `FAIL:` (`NO_SESSION_ID`, `OWNED_ELSEWHERE`, `ARCHIVED`, `CLAIM_BUSY`, `WORKTREE_FAILED`, `WORKTREE_MISMATCH`, `BRANCH_FOREIGN`, …) ends here with `status: open_failed`. Never re-run the open.
 
 ## The reviewer check
 

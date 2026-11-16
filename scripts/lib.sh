@@ -562,8 +562,14 @@ lease_read() { # <run-dir>
 # command in some configurations and the intermediate layer collapses; a
 # pinned grandparent rule would then record the terminal app — a lease
 # that reads live essentially forever, the worst failure direction.
+# ORCA_SESSION_PID, when set, is taken as the answer: the test seam, as
+# ORCA_MACHINE_ID is for the machine.
 lease_session_pid() {
   local pid=$$ parent comm
+  if [ -n "${ORCA_SESSION_PID:-}" ]; then
+    printf '%s' "$ORCA_SESSION_PID"
+    return
+  fi
   while :; do
     parent="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d '[:space:]')"
     case "$parent" in '' | 0 | 1) break ;; esac

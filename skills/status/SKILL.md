@@ -59,8 +59,8 @@ The grouping is handed to you: each `ACTION:` line's slug names the group, its r
   - `blocked` → `/orca:open <slug>` — a phase waits on a decision; settling it replans.
   - `verify` → every phase done, the final verification not yet run on the last one: `/orca:open <slug>` runs it.
   - `idle` → every phase done and verified, not landed: `/orca:review` to walk it, `/orca:pr` to publish it, `/orca:open <slug>` for more work, `/orca:archive` to set it aside. Open follow-ups by count.
-  - `landed` → `/orca:archive` retires it.
-  - `owner:live` → *owned by an open session* instead of any command — never offered over; `owner:unknown` adds that another machine may hold it; `owner:stale` → `/orca:open <slug>` offers to take it over.
+  - `landed` → `/orca:archive` retires it — with `owner:mine`, `owner:stale`, or `owner:none` alike.
+  - `owner:live` → *owned by an open session* instead of any command — never offered over; `owner:unknown` adds that another machine may hold it. `owner:stale` means the owning session has ended: the objective is free, and the state's command above stands (`/orca:open <slug>` takes the claim over without asking; `/orca:archive` archives it). A claim lasts as long as its session — exit and `/clear` both end it.
   - `archived` and `abandoned` → counted with the archived runs at the bottom, never listed.
 - **Archived** (`ARCHIVED:` lines) — runs the user retired through `/orca:archive`: landed, clean, and out of the routing. They carry no action and no enrichment by construction. Render them, with the `archived` and `abandoned` objectives, as a **one-line count** at the very bottom ("3 archived runs, 1 abandoned objective"), never itemized — the whole point of the marker is that finished history stops competing for attention. Name a directory only when the argument filter matched one.
 

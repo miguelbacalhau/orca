@@ -334,7 +334,7 @@ describe('the band in a session', () => {
     expect(await shows($, 'engine band')).toBe(true)
   })
 
-  test('the claim the session\'s open agent writes is picked up after its objective open; a --steal elsewhere drops it', async ($, on) => {
+  test('the claim the session\'s open agent writes is picked up after its objective open; a takeover elsewhere drops it', async ($, on) => {
     const clock = mock.clock(on, { now: 10_000 })
     const disk = objectiveDisk()
     disk.delete(`${DIR}/owner`)
@@ -356,7 +356,7 @@ describe('the band in a session', () => {
     await clock.advance(1500)
     expect(await shows($, '2 decided · 1 open')).toBe(true)
 
-    // Another session takes it over with --steal: the band goes on the next tick.
+    // Another session takes it over: the band goes on the next tick.
     disk.set(`${DIR}/owner`, { text: 'session=sess-B\nhost=h\npid=9\n', mtimeMs: 13_000 })
     await clock.advance(1500)
     expect(await shows($, 'engine band')).toBe(true)
@@ -532,6 +532,105 @@ describe('the band in a session', () => {
     await start($, '/repo')
     expect(await shows($, 'rate-limit-public-api')).toBe(true)
     await $.session.end({ reason: 'other', sessionId: SESSION, resume: { id: SESSION } })
+    expect(await shows($, 'engine band')).toBe(true)
+  })
+})
+
+// ---------- the claim's release on session end ----------
+
+type Ran = { argv: readonly string[]; env?: Record<string, string>; timeoutMs?: number }
+
+// $.process.run served beneath the plugin, recording every call.
+function serveRelease(on: On, ran: Ran[], deny?: string) {
+  on('process.run', ($, e) => {
+    ran.push({ argv: e.argv, env: e.init?.env, timeoutMs: e.init?.timeoutMs })
+    if (deny) return { deny }
+    return { value: { exitCode: 0, stdout: '@@ORCA@@\nrc=0\nreleased=1\n@@ORCA_END@@\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+}
+
+const end = ($: Engine, reason: 'clear' | 'resume' | 'logout' | 'prompt_input_exit' | 'other', sessionId = SESSION) =>
+  $.session.end({ reason, sessionId, resume: { id: sessionId } })
+
+const releaseCalls = (ran: Ran[]) => ran.filter(r => r.argv[2] === 'objective' && r.argv[3] === 'release')
+
+describe('the claim\'s release on session end', () => {
+  for (const reason of ['clear', 'resume', 'prompt_input_exit', 'other'] as const) {
+    test(`a ${reason} runs objective release for the ending session's id`, async ($, on) => {
+      mock.clock(on, { now: 10_000 })
+      const ran: Ran[] = []
+      serveFiles(on, objectiveDisk())
+      serveRelease(on, ran)
+      session(on, { id: SESSION, cwd: '/repo/main' })
+      await start($, '/repo/main')
+      expect(await end($, reason)).toEqual({ sessionId: SESSION })
+      const calls = releaseCalls(ran)
+      expect(calls).toHaveLength(1)
+      expect(calls[0]?.argv[0]).toBe('bash')
+      expect(calls[0]?.argv[1]).toMatch(/\/scripts\/orca\.sh$/)
+      expect(calls[0]?.argv.slice(2)).toEqual(['objective', 'release', '/repo', '--session', SESSION])
+      expect(calls[0]?.env).toEqual({ ORCA_OBJ_LOCK_TRIES: '4' })
+    })
+  }
+
+  test('the id released is the ending session\'s, not the one the process goes on with after a /clear', async ($, on) => {
+    mock.clock(on, { now: 10_000 })
+    const ran: Ran[] = []
+    serveFiles(on, objectiveDisk())
+    serveRelease(on, ran)
+    session(on, { id: 'sess-after-clear', cwd: '/repo' })
+    await start($, '/repo')
+    await end($, 'clear')
+    expect(releaseCalls(ran).map(r => r.argv.slice(2))).toEqual([['objective', 'release', '/repo', '--session', SESSION]])
+  })
+
+  test('no owner file naming the ending session runs nothing', async ($, on) => {
+    mock.clock(on, { now: 10_000 })
+    const ran: Ran[] = []
+    serveFiles(on, objectiveDisk({ [`${DIR}/owner`]: 'session=sess-B\nhost=h\npid=2\n' }))
+    serveRelease(on, ran)
+    session(on, { id: SESSION, cwd: '/repo' })
+    await start($, '/repo')
+    await end($, 'prompt_input_exit')
+    expect(releaseCalls(ran)).toEqual([])
+  })
+
+  test('outside a repository with objectives nothing runs', async ($, on) => {
+    mock.clock(on, { now: 10_000 })
+    const ran: Ran[] = []
+    serveFiles(on, objectiveDisk())
+    serveRelease(on, ran)
+    session(on, { id: SESSION, cwd: '/elsewhere' })
+    await start($, '/elsewhere')
+    await end($, 'other')
+    expect(ran).toEqual([])
+  })
+
+  test('it runs where no band is drawn, and never waits on the permission mode', async ($, on) => {
+    mock.clock(on, { now: 10_000 })
+    const ran: Ran[] = []
+    serveFiles(on, objectiveDisk())
+    serveRelease(on, ran)
+    on('session.id', () => ({ value: SESSION }))
+    on('session.cwd', () => ({ value: '/repo/main/src' }))
+    on('session.surfaces', () => ({ value: [] }))
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+    await $.session.start({ cwd: '/repo/main/src', surface: 'terminal', isInteractive: false })
+    await end($, 'other')
+    expect(releaseCalls(ran).map(r => r.argv.slice(2))).toEqual([['objective', 'release', '/repo', '--session', SESSION]])
+  })
+
+  test('a release that cannot run never stands in the end\'s way, and the band still goes', async ($, on) => {
+    mock.clock(on, { now: 10_000 })
+    const ran: Ran[] = []
+    serveFiles(on, objectiveDisk())
+    serveRelease(on, ran, 'spawn bash ENOENT')
+    session(on, { id: SESSION, cwd: '/repo' })
+    await start($, '/repo')
+    expect(await shows($, 'rate-limit-public-api')).toBe(true)
+    expect(await end($, 'clear')).toEqual({ sessionId: SESSION })
+    expect(releaseCalls(ran)).toHaveLength(1)
     expect(await shows($, 'engine band')).toBe(true)
   })
 })

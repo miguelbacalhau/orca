@@ -137,16 +137,20 @@ An objective's state is never stored. `objective list` derives it from the files
 
 ## Ownership
 
-One session drives an objective at a time. `objective open` claims it by writing `owner` with this session's `CLAUDE_CODE_SESSION_ID`, its pid, and its machine, judged by the same lease verdicts as a run. `host=` is kept for display; whether an owner is on this machine is judged by a stable machine ID, not the hostname, which on macOS changes with the network:
+One session drives an objective at a time, and a claim lasts exactly as long as the session that took it. `objective open` claims it by writing `owner` with this session's `CLAUDE_CODE_SESSION_ID`, its pid, and its machine, judged by the same lease verdicts as a run. `host=` is kept for display; whether an owner is on this machine is judged by a stable machine ID, not the hostname, which on macOS changes with the network:
 
 | Owner | `open` |
 |---|---|
 | none | claimed |
 | this session | kept (claimed afresh when its recorded pid is gone) |
 | another session, live or unknown (another machine) | `OWNED_ELSEWHERE` — nothing done |
-| another session, provably dead | `OWNER_STALE`; taken over with `--steal` |
+| another session, ended (`stale`) | taken over without asking (`claim=stolen`) |
 
-The check and the write run under a lock — the ref `refs/orca/claim/<dir name>`, naming the holding process and changed only by compare-and-swap — so of two sessions opening one objective at once exactly one claims it and the other gets `OWNED_ELSEWHERE`; a lock still held after a short wait is `CLAIM_BUSY`, and one whose process is gone is taken over by exactly one contender. `objective archive` and `objective unarchive` hold the same lock, taken before any check, so an open that waited behind an archive finds it archived. A claim releases any other objective this session owned. `objective current <repo>` names the objective this session owns, or `none`. A session without a session id cannot claim (`NO_SESSION_ID`). `/clear` starts a new session id, so `/orca:loop` refuses until `/orca:open` claims the objective again.
+Another session's claim reads `stale` — ended — when its process is provably gone (pid and start time, on this machine), and also when its process is the one the caller runs under: a Claude Code process holds one conversation at a time, so a claim it made under an earlier session id was left by a conversation that `/clear` or `/resume` ended there. A live session keeps its claim however long it sits idle. `list`, `idle`, and `archive` judge an owner the same way.
+
+When a session ends — exit, `/clear`, `/resume` into another conversation, logout, a signal — the hooks module runs `objective release <repo> --session <id>` for the ending session's id, which removes every `owner` naming it, each under its claim lock and only while it still names that session. A session that ends without it (a crash, `kill -9`, the hooks module not loaded) leaves a claim that reads `stale` by the rules above.
+
+The check and the write run under a lock — the ref `refs/orca/claim/<dir name>`, naming the holding process and changed only by compare-and-swap — so of two sessions opening one objective at once exactly one claims it and the other gets `OWNED_ELSEWHERE`; a lock still held after a short wait is `CLAIM_BUSY`, and one whose process is gone is taken over by exactly one contender. `objective archive` and `objective unarchive` hold the same lock, taken before any check, so an open that waited behind an archive finds it archived. A claim releases any other objective this session owned. `objective current <repo>` names the objective this session owns, or `none`. A session without a session id cannot claim (`NO_SESSION_ID`). `/clear` ends the session and starts a new session id, so `/orca:loop` refuses until `/orca:open` claims the objective again.
 
 ## Creating one: `/orca:new`
 
@@ -265,7 +269,7 @@ git merge --no-ff feature/<slug>
 
 ## Re-opening: `/orca:open`
 
-`/orca:open [slug]` lists the objectives and offers the newest — or one this session already owns — never forcing the choice. Another live session's objective is never taken; a stale owner is taken over only on the user's yes (`--steal`). An archived or abandoned one is restored with `/orca:archive --undo` first.
+`/orca:open [slug]` lists the objectives and offers the newest — or one this session already owns — never forcing the choice. Another live session's objective is never taken; one whose owner has ended is taken over without asking, and the session says so in a line. An archived or abandoned one is restored with `/orca:archive --undo` first.
 
 `orca:objective-open` runs `objective open`, which claims it and arrives in its worktree, re-adding it when it is gone; a worktree at the saved path on another branch, detached, or not this repository's is `WORKTREE_MISMATCH` (as in `phase-start`). The agent then checks the config and the reviewer in the worktree and returns one compact object. The session then reads `objective digest <dir>` — at most 40 lines, whatever the objective's size: title and outcome, state, worktree (clean, dirty, absent) and branch, decision counts with the open ones listed, one line per phase (the active one always, then the other unfinished ones), the active phase's last action, open follow-ups by count, and the last report entry's heading. The digest is the session's whole starting context; an entry is read only when the conversation turns to it. A route into the phase loop (`active`, or `ready` and run now) provisions nothing at open — the loop's phase start does it; every other route spawns `orca:provision` in the background as a warm-up.
 
@@ -319,8 +323,8 @@ The session that owns an objective shows it live above the prompt, in the slot t
 - **Header** by state: `discussing · <n> decided · <n> open`; `reviewing plan`, then `planning` once a review of the current pass is written; `P<n>/<total>` while a phase is active; `blocked on D<n>`; `ready · <n> pending`; `verify · <n> phases done`; `idle · <n> phases done`; open follow-ups appended when there are any.
 - **Rows** while discussing are the open decisions (deferred ones dimmed); otherwise one row per phase. The active phase's tail comes from its `action` file: `implement`, `review rN`, `fix rN (<n> gating)`, `fix minor`, `fix checks`, `waiting on you: dispute rN | stall rN | questions | infeasible`, `committing`.
 - **What it follows:** the objective whose `owner` names this session, found by walking up from the session's directory to `.orca/objectives/`. It looks on session start, on every prompt, and after an `objective open` call by the session or one of its agents, then reads that objective's files every 1.5 s. A live run this session launched takes the slot over.
-- **When it goes:** at session end; when the directory, or this session's claim on it, disappears; when it is archived or landed (asked once every phase is done); and when it has sat `idle` through three of your prompts. A new phase brings it back.
-- Collapse it with `[-]` or ctrl+x ctrl+a — the same collapse as the run band. It is read-only (`hooks/objective-band.tsx`, logic in `hooks/derive-objective.ts`).
+- **When it goes:** at session end (which also releases this session's claim — [Ownership](#ownership)); when the directory, or this session's claim on it, disappears; when it is archived or landed (asked once every phase is done); and when it has sat `idle` through three of your prompts. A new phase brings it back.
+- Collapse it with `[-]` or ctrl+x ctrl+a — the same collapse as the run band. It is read-only (`hooks/objective-band.tsx`, logic in `hooks/derive-objective.ts`); the release at session end is `hooks/claim-release.ts`, through the verb.
 
 ## Stage agents
 

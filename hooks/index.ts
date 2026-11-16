@@ -1,8 +1,9 @@
 // orca's hooks module: the run band (./run-band.tsx) and the objective band
 // (./objective-band.tsx), drawn above the prompt through their shared slot
-// (./bands.tsx), and the verb hook (./relay.ts), which answers the work loop's
-// orca.sh verb calls without a model. hooks.json names one module, so this one
-// registers all three parts.
+// (./bands.tsx), whose session.end hook also releases the ending session's
+// objective claims (./claim-release.ts), and the verb hook (./relay.ts), which
+// answers the work loop's orca.sh verb calls without a model. hooks.json names
+// one module, so this one registers all three parts.
 
 import type { Register } from 'claude-code'
 

@@ -19,7 +19,14 @@ setup() {
 
 teardown() {
   [ -z "${SPID:-}" ] || kill "$SPID" 2>/dev/null || true
+  [ -z "${SPID2:-}" ] || kill "$SPID2" 2>/dev/null || true
+  local p
+  for p in ${SPIDS:-}; do kill "$p" 2>/dev/null || true; done
 }
+
+# live_proc — prints the pid of a fresh live process outside this shell's
+# job table (no reaping noise on kill); the caller kills it in teardown.
+live_proc() { (sleep 60 >/dev/null 2>&1 & echo $!); }
 
 # frame_value <key> — the value of <key>= in $output's frame.
 frame_value() {
@@ -285,17 +292,14 @@ state_is() { # <state> — $D's derived state in `list --all`
   [ -d "$R/orca-alpha" ]
 }
 
-@test "open: a live other session's claim is OWNED_ELSEWHERE — nothing done, --steal refused too" {
+@test "open: a live other session's claim is OWNED_ELSEWHERE — nothing done" {
   new_objective alpha
-  # a live process outside this shell's job table (no reaping noise on kill)
-  SPID="$( (sleep 60 >/dev/null 2>&1 & echo $!) )"
+  SPID="$(live_proc)"
   write_owner "$D" sess-other "$SPID" "$(ps -o lstart= -p "$SPID")"
   cp "$D/owner" "$BATS_TEST_TMPDIR/owner.before"
   run orca objective open "$D"
   assert_fail_reason OWNED_ELSEWHERE
   [[ "$output" == *sess-other* ]] || return 1
-  run orca objective open "$D" --steal
-  assert_fail_reason OWNED_ELSEWHERE
   cmp "$D/owner" "$BATS_TEST_TMPDIR/owner.before"
   [ ! -e "$R/orca-alpha" ]
   run orca objective list "$R"
@@ -305,7 +309,7 @@ state_is() { # <state> — $D's derived state in `list --all`
 @test "open: another machine's claim reads unknown and is never taken" {
   new_objective alpha
   printf 'session=sess-other\nhost=%s\nmachine=elsewhere\npid=%s\npidstart=x\ntaken=t\n' "$(hostname)" "$$" >"$D/owner"
-  run orca objective open "$D" --steal
+  run orca objective open "$D"
   assert_fail_reason OWNED_ELSEWHERE
   grep -qx 'session=sess-other' "$D/owner"
   run orca objective list "$R"
@@ -315,7 +319,7 @@ state_is() { # <state> — $D's derived state in `list --all`
 @test "open: a legacy claim without machine= is judged by host= — another host unknown, this host live" {
   new_objective alpha
   printf 'session=sess-other\nhost=elsewhere.invalid\npid=1234\npidstart=x\ntaken=t\n' >"$D/owner"
-  run orca objective open "$D" --steal
+  run orca objective open "$D"
   assert_fail_reason OWNED_ELSEWHERE
   grep -qx 'session=sess-other' "$D/owner"
   SPID="$( (sleep 60 >/dev/null 2>&1 & echo $!) )"
@@ -332,29 +336,23 @@ state_is() { # <state> — $D's derived state in `list --all`
     "$ORCA_MACHINE_ID" "$SPID" "$(ps -o lstart= -p "$SPID")" >"$D/owner"
   run orca objective list "$R"
   has_line $'OBJECTIVE:\t'"$D"$'\talpha\tdiscussing\topen:0\tpending:0\tblocked:0\tfollowups:0\towner:live'
-  run orca objective open "$D" --steal
+  run orca objective open "$D"
   assert_fail_reason OWNED_ELSEWHERE
   printf 'session=sess-other\nhost=elsewhere.invalid\nmachine=%s\npid=%s\npidstart=%s\ntaken=t\n' \
     "$ORCA_MACHINE_ID" "$SPID" "not the real lstart" >"$D/owner"
   run orca objective open "$D"
-  assert_fail_reason OWNER_STALE
-  run orca objective open "$D" --steal
   [ "$status" -eq 0 ]
   [ "$(frame_value claim)" = stolen ]
   grep -qx 'session=sess-mine' "$D/owner"
 }
 
-@test "open: a stale claim needs --steal, which takes it over" {
+@test "open: a stale claim is taken over without asking, and the frame says so" {
   new_objective alpha
   # stale: a live pid whose recorded start time does not match (pid reuse shape)
   write_owner "$D" sess-other "$$" "not the real lstart"
-  run orca objective open "$D"
-  assert_fail_reason OWNER_STALE
-  grep -qx 'session=sess-other' "$D/owner"
-  [ ! -e "$R/orca-alpha" ]
   run orca objective list "$R"
   has_line $'OBJECTIVE:\t'"$D"$'\talpha\tdiscussing\topen:0\tpending:0\tblocked:0\tfollowups:0\towner:stale'
-  run orca objective open "$D" --steal
+  run orca objective open "$D"
   [ "$status" -eq 0 ]
   [ "$(frame_value claim)" = stolen ]
   [ "$(frame_value arrival)" = branch_resumed ]
@@ -368,6 +366,36 @@ state_is() { # <state> — $D's derived state in `list --all`
   [ "$status" -eq 0 ]
   [ "$(frame_value claim)" = claimed ]
   ! grep -q 'not the real lstart' "$D/owner"
+}
+
+@test "open: a claim this session's own process holds under another session id (a /clear) reads stale and is taken over" {
+  new_objective alpha
+  SPID="$(live_proc)"
+  write_owner "$D" sess-cleared "$SPID" "$(ps -o lstart= -p "$SPID")"
+  # from any other process it is a live session's claim
+  run orca objective list "$R"
+  has_line $'OBJECTIVE:\t'"$D"$'\talpha\tdiscussing\topen:0\tpending:0\tblocked:0\tfollowups:0\towner:live'
+  run orca objective open "$D"
+  assert_fail_reason OWNED_ELSEWHERE
+  # from that process, under the id it goes on with, the claiming session is gone
+  export ORCA_SESSION_PID="$SPID"
+  run orca objective list "$R"
+  has_line $'OBJECTIVE:\t'"$D"$'\talpha\tdiscussing\topen:0\tpending:0\tblocked:0\tfollowups:0\towner:stale'
+  run orca objective current "$R"
+  [ "$(frame_value dir)" = none ]
+  run orca objective idle "$D"
+  assert_fail_reason NOT_OWNER
+  [[ "$output" == *'owner: stale'* ]] || return 1
+  # with no session id to compare against, nothing is judged gone
+  CLAUDE_CODE_SESSION_ID='' run orca objective list "$R"
+  has_line $'OBJECTIVE:\t'"$D"$'\talpha\tdiscussing\topen:0\tpending:0\tblocked:0\tfollowups:0\towner:live'
+  run orca objective open "$D"
+  [ "$status" -eq 0 ]
+  [ "$(frame_value claim)" = stolen ]
+  grep -qx 'session=sess-mine' "$D/owner"
+  grep -qx "pid=$SPID" "$D/owner"
+  run orca objective list "$R"
+  has_line $'OBJECTIVE:\t'"$D"$'\talpha\tdiscussing\topen:0\tpending:0\tblocked:0\tfollowups:0\towner:mine'
 }
 
 @test "open: no session id, an archived objective, a bad dir fail typed with nothing written" {
@@ -389,6 +417,8 @@ state_is() { # <state> — $D's derived state in `list --all`
   assert_fail_reason BAD_DIR
   run orca objective open "$D" --force
   assert_fail_reason BAD_ARGS
+  run orca objective open "$D" --steal
+  assert_fail_reason BAD_ARGS
 }
 
 # lock_ref — the objective's claim lock ref; lock_by <pid> <lstart> — a
@@ -407,11 +437,13 @@ lock_held() { git -C "$R/main" rev-parse -q --verify "$(lock_ref)" >/dev/null; }
 @test "open: two sessions opening at once — exactly one claims, the other is OWNED_ELSEWHERE" {
   new_objective alpha
   local n
+  # each session in a process of its own
+  SPID="$(live_proc)" SPID2="$(live_proc)"
   for n in 1 2 3; do
     rm -f "$D/owner" "$BATS_TEST_TMPDIR"/[ab].rc
-    ( rc=0; CLAUDE_CODE_SESSION_ID=sess-a bash "$SCRIPTS/orca.sh" objective open "$D" >"$BATS_TEST_TMPDIR/a.out" 2>&1 || rc=$?; echo "$rc" >"$BATS_TEST_TMPDIR/a.rc" ) &
+    ( rc=0; ORCA_SESSION_PID=$SPID CLAUDE_CODE_SESSION_ID=sess-a bash "$SCRIPTS/orca.sh" objective open "$D" >"$BATS_TEST_TMPDIR/a.out" 2>&1 || rc=$?; echo "$rc" >"$BATS_TEST_TMPDIR/a.rc" ) &
     local pa=$!
-    ( rc=0; CLAUDE_CODE_SESSION_ID=sess-b bash "$SCRIPTS/orca.sh" objective open "$D" >"$BATS_TEST_TMPDIR/b.out" 2>&1 || rc=$?; echo "$rc" >"$BATS_TEST_TMPDIR/b.rc" ) &
+    ( rc=0; ORCA_SESSION_PID=$SPID2 CLAUDE_CODE_SESSION_ID=sess-b bash "$SCRIPTS/orca.sh" objective open "$D" >"$BATS_TEST_TMPDIR/b.out" 2>&1 || rc=$?; echo "$rc" >"$BATS_TEST_TMPDIR/b.rc" ) &
     local pb=$!
     wait "$pa" "$pb" || true
     local winner loser
@@ -523,15 +555,19 @@ release_lock() { git -C "$R/main" update-ref -d "$(lock_ref)"; wait "$BPID" || t
 @test "open: contenders recovering one stale lock at once — exactly one claims" {
   new_objective alpha
   local n x pids
+  # each session in a process of its own
+  for x in a b c d; do SPIDS="${SPIDS:-} $(live_proc)"; done
   for n in 1 2; do
     rm -f "$D/owner" "$BATS_TEST_TMPDIR"/[abcd].rc
     lock_by "$$" "not the real lstart"
     pids=""
+    set -- $SPIDS
     for x in a b c d; do
-      ( rc=0; CLAUDE_CODE_SESSION_ID=sess-$x bash "$SCRIPTS/orca.sh" objective open "$D" \
+      ( rc=0; ORCA_SESSION_PID=$1 CLAUDE_CODE_SESSION_ID=sess-$x bash "$SCRIPTS/orca.sh" objective open "$D" \
           >"$BATS_TEST_TMPDIR/$x.out" 2>&1 || rc=$?
         echo "$rc" >"$BATS_TEST_TMPDIR/$x.rc" ) &
       pids="$pids $!"
+      shift
     done
     # shellcheck disable=SC2086
     wait $pids || true
@@ -620,6 +656,77 @@ release_lock() { git -C "$R/main" update-ref -d "$(lock_ref)"; wait "$BPID" || t
   [ "$(frame_value dir)" = none ]
   CLAUDE_CODE_SESSION_ID='' run orca objective current "$R"
   assert_fail_reason NO_SESSION_ID
+}
+
+# ---- release ----------------------------------------------------------
+
+@test "release: removes only the owner files naming the session, archived ones included; nothing left is a no-op" {
+  new_objective alpha
+  local a="$D"
+  new_objective beta
+  local b="$D"
+  new_objective gamma
+  local c="$D"
+  write_owner "$a" sess-gone 1 x
+  write_owner "$b" sess-other 1 x
+  write_owner "$c" sess-gone 1 x
+  printf 'state=abandoned\n' >"$c/archived"
+  run orca objective release "$R" --session sess-gone
+  [ "$status" -eq 0 ]
+  [ "$(frame_value released)" = 2 ]
+  [ ! -e "$a/owner" ] && [ ! -e "$c/owner" ]
+  grep -qx 'session=sess-other' "$b/owner"
+  D="$a"; ! lock_held
+  run orca objective release "$R" --session sess-gone
+  [ "$status" -eq 0 ]
+  [ "$(frame_value released)" = 0 ]
+  # without --session: this session's own claims
+  write_owner "$a" sess-mine 1 x
+  run orca objective release "$R/main"
+  [ "$status" -eq 0 ]
+  [ "$(frame_value released)" = 1 ]
+  [ ! -e "$a/owner" ]
+  grep -qx 'session=sess-other' "$b/owner"
+  CLAUDE_CODE_SESSION_ID='' run orca objective release "$R"
+  assert_fail_reason NO_SESSION_ID
+  CLAUDE_CODE_SESSION_ID='' run orca objective release "$R" --session sess-other
+  [ "$status" -eq 0 ]
+  [ "$(frame_value released)" = 1 ]
+  [ ! -e "$b/owner" ]
+  run orca objective release "$R" --session
+  assert_fail_reason BAD_ARGS
+  run orca objective release "$R" --session ''
+  assert_fail_reason BAD_ARGS
+  run orca objective release "$R" --steal x
+  assert_fail_reason BAD_ARGS
+}
+
+@test "release: waits on the claim lock, then keeps a claim another session took meanwhile" {
+  new_objective alpha
+  write_owner "$D" sess-gone 1 x
+  behind_lock objective release "$R" --session sess-gone
+  write_owner "$D" sess-other 1 x
+  release_lock
+  [ "$status" -eq 0 ]
+  [ "$(frame_value released)" = 0 ]
+  grep -qx 'session=sess-other' "$D/owner"
+  # unchallenged, it removes the claim
+  write_owner "$D" sess-gone 1 x
+  behind_lock objective release "$R" --session sess-gone
+  release_lock
+  [ "$status" -eq 0 ]
+  [ "$(frame_value released)" = 1 ]
+  [ ! -e "$D/owner" ]
+}
+
+@test "release: a claim lock held past the wait is CLAIM_BUSY, the claim kept" {
+  new_objective alpha
+  write_owner "$D" sess-gone 1 x
+  SPID="$(live_proc)"
+  lock_by "$SPID" "$(ps -o lstart= -p "$SPID")"
+  ORCA_OBJ_LOCK_TRIES=2 run orca objective release "$R" --session sess-gone
+  assert_fail_reason CLAIM_BUSY
+  grep -qx 'session=sess-gone' "$D/owner"
 }
 
 # ---- list: derived states ---------------------------------------------
@@ -2241,6 +2348,23 @@ commit_in() { # <worktree> <file> — one commit adding <file>
   run orca objective unarchive "$D"
   assert_fail_reason NO_ARCHIVE
   [ -f "$D/archived" ]
+}
+
+@test "archive: a claim this session's own process holds under another session id passes" {
+  opened alpha
+  decision D1 decided 'Per key?'
+  phase P1 done 'Bucket'
+  commit_in "$W" work.txt
+  git -C "$R/main" merge -q --no-ff -m 'land alpha' feature/alpha
+  state_is landed
+  SPID="$(live_proc)"
+  write_owner "$D" sess-cleared "$SPID" "$(ps -o lstart= -p "$SPID")"
+  run orca objective archive "$D"
+  assert_fail_reason OWNED_ELSEWHERE
+  ORCA_SESSION_PID="$SPID" run orca objective archive "$D"
+  [ "$status" -eq 0 ]
+  [ "$(frame_value state)" = landed ]
+  [ ! -e "$D/owner" ]
 }
 
 @test "archive: refused while another live session owns it, inside the worktree, or on bad arguments; a stale owner passes" {

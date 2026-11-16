@@ -11,10 +11,9 @@ Mode: open
 Plugin root: ${CLAUDE_PLUGIN_ROOT}
 Repository: <the session's working directory>
 Objective: <dir>
-Steal: no
 ```
 
-(the plugin root substituted, absolute: nothing in a subagent's shell carries it; `Steal: yes` only when the skill says so). The agent claims the objective for this session, arrives in its worktree (creating it off the base commit the first time, re-adding it when it is gone), and runs the reviewer check there. It returns one object. For the rest of the session, hold its `worktree`, `branch`, and `arrival` (planning and the loop need the first two, `orca:provision` the first and last) and the reviewer values below.
+(the plugin root substituted, absolute: nothing in a subagent's shell carries it). The agent claims the objective for this session, arrives in its worktree (creating it off the base commit the first time, re-adding it when it is gone), and runs the reviewer check there. It returns one object. For the rest of the session, hold its `worktree`, `branch`, and `arrival` (planning and the loop need the first two, `orca:provision` the first and last) and the reviewer values below.
 
 `status: open_failed`: the skill names the causes (`reason`) that stop it first. Any other reason (`WORKTREE_FAILED`, `WORKTREE_MISMATCH`, `BRANCH_FOREIGN`, `CLAIM_BUSY`, …) means the worktree is not there. Relay the reason and detail in one line. The claim stands. The discussion still runs, since it needs only the objective's files. Planning and the loop need the worktree, though: before either runs, re-open (it continues where it stopped). A second failure goes to the user.
 

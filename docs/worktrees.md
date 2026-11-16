@@ -43,21 +43,36 @@ What a repository looks like mid-run. `/orca:init` creates the top three entries
 .orca/secrets/config/local.json  →  <worktree>/config/local.json
 ```
 
-- Each file is placed as a **relative symlink** to the one canonical copy: rotate a token once and every worktree sees it; removing a worktree removes only links.
+- Each entry is placed as a **relative symlink** to it: rotate a token once and every worktree sees it; removing a worktree removes only links.
 - A destination git would track is skipped (`UNIGNORED:` in the run's logs) — keep the paths in `.gitignore`. An existing real file is never overwritten.
 - Secrets are linked in for implement, fix, and integrate, and stripped before every review (with codex, that keeps them away from a second model provider).
 - Stage agents can read placed secrets: keep **development** credentials here, never production ones, and only what runs actually need.
 
-Populating the tree is manual — one `mv` per secret. After an `/orca:init` conversion, move the preserved files from your worktree:
+### Link the store to your own files
+
+An entry can be the file itself or **a link to your real copy in the default worktree**. A link is the recommended setup: runs read your `.env` as it is right now, and there is no second copy to fall behind when you add a variable or re-pull your environment. Populating the store is manual, one link per file, run from `<repo-root>`:
 
 ```bash
-mkdir -p .orca/secrets/apps/api && mv main/apps/api/.env .orca/secrets/apps/api/.env
+ln -s ../../main/.env .orca/secrets/.env
+mkdir -p .orca/secrets/apps/api && ln -s ../../../../main/apps/api/.env .orca/secrets/apps/api/.env
 ```
 
-Runs never write into your own worktree. Link it yourself, by hand (`ln -s ../.orca/secrets/.env main/.env`) or with:
+Each link has to go back up through `.orca/secrets/` and the entry's own directories to reach `<repo-root>`, then down into `main/`. `/orca:doctor` prints the exact target for each file. Placement links point at the entry, never past it, so a tool that rewrites your `.env` by replacing the file (most do) keeps every run worktree current. Placing into the worktree that holds the real file reports it as `SOURCE` and writes nothing. If the linked file is gone, the entry is skipped (`SKIPPED_DANGLING`) and its links in run worktrees are removed.
+
+A plain file in the store still works. Use one for a file no worktree of yours holds, such as dev-only credentials kept apart from what your own environment uses. Keep in mind that whatever an entry links to is what stage agents read: if you point `main/.env` at staging while debugging, runs get staging too.
+
+To see where the store stands, `/orca:doctor` runs the read-only:
 
 ```bash
-bash <plugin-root>/scripts/orca.sh secrets place <repo-root>/main
+bash <plugin-root>/scripts/orca.sh secrets status
+```
+
+It lists every entry; a store copy of a file the default worktree also holds (`COPY`, `SAME` or `DIFFERS`, the drift case); ignored `.env`, `.env.*`, and `.envrc` files in the default worktree with no entry (`UNLINKED`); and entries whose linked file is gone (`DANGLING`). Each comes with the `ln -s` target to use.
+
+If you followed the older setup, with the real file in the store and `main/.env` linking to it, flip it once:
+
+```bash
+rm main/.env && mv .orca/secrets/.env main/.env && ln -s ../../main/.env .orca/secrets/.env
 ```
 
 ## Provisioning

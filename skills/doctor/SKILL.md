@@ -36,7 +36,22 @@ Read-only, milliseconds, creates nothing. Render its `SETUP:` verdict in plain l
 - `drifted <fp>` plus `CHANGED:` lines → name the paths that moved ("a `pnpm-lock.yaml` appeared since this was derived") and offer Step 4 to re-derive.
 - `unstamped` → the script was written by hand or edited past `setup install`, so its drift check is dead. Say that, and offer Step 4 to verify and re-stamp it.
 
-Second, one glance at the secrets tree — `ls <repo-root>/.orca/secrets/` — reported as a fact, not a judgment: absent, empty, or N files. Orca cannot know which untracked files this repo's build needs; the number is context for the user, and the deep pass's report says what the install actually reached for.
+Second, the secrets store against the default worktree, where the user's real files live:
+
+```bash
+cd <repo-root> && bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh secrets status
+```
+
+Read-only. Report the `ENTRIES:` count as a fact, then the lines that call for action. Orca cannot know which untracked files this repo's build needs, so these are observations with a prescribed command, never writes. The user runs each command, from `<repo-root>`, with `mkdir -p` on the parent first for a nested path:
+
+- `COPY: <rel> SAME <target>` → the store holds a second copy of a file the default worktree also has. It will drift the next time the user edits theirs. Prescribe replacing the copy with a link: `rm .orca/secrets/<rel> && ln -s <target> .orca/secrets/<rel>`.
+- `COPY: <rel> DIFFERS <target>` → the two copies have already drifted, and runs get the store's version. Show `diff .orca/secrets/<rel> <default-worktree>/<rel>` first and let the user decide which one is current. Prescribe the link only once the default worktree's file holds what they want, because the `rm` deletes the store's copy.
+- `UNLINKED: <rel> <target>` → an ignored env file in the default worktree that runs don't get. Prescribe `ln -s <target> .orca/secrets/<rel>` *if* runs need it. The user decides, since everything linked is readable by stage agents. Say: development credentials only.
+- `ENTRY: <rel> DANGLING <target>` → the file the entry links to is gone, and runs skip it. Either the user restores the file, or `rm .orca/secrets/<rel>` drops the entry.
+- `ENTRY: <rel> IRREGULAR` → not a file or a link to one. Placement skips it.
+- `DEFAULT_WORKTREE: -` → the default branch isn't checked out anywhere, so nothing was compared. Say so.
+
+`ENTRY: … LINK` and `ENTRY: … FILE` without a `COPY:` are healthy; don't list them one by one. The deep pass's report adds what the install actually reached for.
 
 There is no session-only codex probe to add. The reviewer was reached over MCP through orca 0.32.0, which meant a registration only the live session could see; it is now reached by running the binary through `orca.sh codex`, so the pre-flight's `CODEX:` line is the whole answer and nothing here needs a fresh session to become true.
 

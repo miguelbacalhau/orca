@@ -79,13 +79,168 @@ make_secrets_layout() { # <dir>
   [ "$(cat "$BATS_TEST_TMPDIR/r/main/.env")" = "mine" ]
 }
 
-@test "a symlink inside secrets/ is skipped as irregular" {
+@test "a secrets entry linking to a directory is skipped as irregular" {
   make_secrets_layout "$BATS_TEST_TMPDIR/r"
-  ln -s /etc/hostname "$BATS_TEST_TMPDIR/r/.orca/secrets/.env"
+  mkdir "$BATS_TEST_TMPDIR/somedir"
+  ln -s "$BATS_TEST_TMPDIR/somedir" "$BATS_TEST_TMPDIR/r/.orca/secrets/.env"
   run secrets place "$BATS_TEST_TMPDIR/r/main"
   [ "$status" -eq 0 ]
   has_line $'SKIPPED_IRREGULAR:\t.env'
   [ ! -e "$BATS_TEST_TMPDIR/r/main/.env" ]
+}
+
+# ---- entries that link into the default worktree ----
+
+# make_linked_layout <dir> — the user's real .env in main/, the store's
+# entry a relative link to it, and a run worktree beside main.
+make_linked_layout() {
+  make_secrets_layout "$1"
+  echo 'LIVE=1' >"$1/main/.env"
+  ln -s ../../main/.env "$1/.orca/secrets/.env"
+  git -C "$1/main" worktree add -q -b feature/x ../orca-x >/dev/null 2>&1
+}
+
+@test "a linked entry is placed as a link to the entry, not past it" {
+  make_linked_layout "$BATS_TEST_TMPDIR/r"
+  run secrets place "$BATS_TEST_TMPDIR/r/orca-x"
+  [ "$status" -eq 0 ]
+  has_line $'LINKED:\t.env'
+  [ "$(readlink "$BATS_TEST_TMPDIR/r/orca-x/.env")" = "../.orca/secrets/.env" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/r/orca-x/.env")" = "LIVE=1" ]
+  # a re-run recognizes its own chained link
+  run secrets place "$BATS_TEST_TMPDIR/r/orca-x"
+  has_line $'OK:\t.env'
+  refute_line 'RELINKED:'
+}
+
+@test "a run worktree follows the user's file through a write-then-rename" {
+  make_linked_layout "$BATS_TEST_TMPDIR/r"
+  secrets place "$BATS_TEST_TMPDIR/r/orca-x" >/dev/null
+  echo 'LIVE=2' >"$BATS_TEST_TMPDIR/r/main/.env.tmp"
+  mv "$BATS_TEST_TMPDIR/r/main/.env.tmp" "$BATS_TEST_TMPDIR/r/main/.env"
+  [ "$(cat "$BATS_TEST_TMPDIR/r/orca-x/.env")" = "LIVE=2" ]
+}
+
+@test "the worktree holding a linked entry's file is its source, untouched" {
+  make_linked_layout "$BATS_TEST_TMPDIR/r"
+  run secrets place "$BATS_TEST_TMPDIR/r/main"
+  [ "$status" -eq 0 ]
+  has_line $'SOURCE:\t.env'
+  refute_line 'SKIPPED_EXISTS:'
+  [ ! -L "$BATS_TEST_TMPDIR/r/main/.env" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/r/main/.env")" = "LIVE=1" ]
+  # remove never strips the source either
+  run secrets remove "$BATS_TEST_TMPDIR/r/main"
+  has_line $'UNPLACED_TOTAL:\t0'
+  [ -f "$BATS_TEST_TMPDIR/r/main/.env" ]
+}
+
+@test "a nested linked entry places at the right depth" {
+  make_linked_layout "$BATS_TEST_TMPDIR/r"
+  ( cd "$BATS_TEST_TMPDIR/r/main" &&
+    mkdir -p apps/api && echo '.env' >apps/api/.gitignore &&
+    git add apps/api/.gitignore && git commit -qm nested &&
+    echo 'API=1' >apps/api/.env )
+  git -C "$BATS_TEST_TMPDIR/r/orca-x" merge -q main
+  mkdir -p "$BATS_TEST_TMPDIR/r/.orca/secrets/apps/api"
+  ln -s ../../../../main/apps/api/.env "$BATS_TEST_TMPDIR/r/.orca/secrets/apps/api/.env"
+  run secrets place "$BATS_TEST_TMPDIR/r/orca-x"
+  [ "$status" -eq 0 ]
+  has_line $'LINKED:\tapps/api/.env'
+  [ "$(cat "$BATS_TEST_TMPDIR/r/orca-x/apps/api/.env")" = "API=1" ]
+}
+
+@test "a dangling entry is never placed and its placement is removed" {
+  make_linked_layout "$BATS_TEST_TMPDIR/r"
+  secrets place "$BATS_TEST_TMPDIR/r/orca-x" >/dev/null
+  rm "$BATS_TEST_TMPDIR/r/main/.env"
+  run secrets place "$BATS_TEST_TMPDIR/r/orca-x"
+  [ "$status" -eq 0 ]
+  has_line $'SKIPPED_DANGLING:\t.env'
+  refute_line 'SKIPPED_GONE:'
+  [ ! -L "$BATS_TEST_TMPDIR/r/orca-x/.env" ]
+  # placing into the source worktree must not close a link loop
+  run secrets place "$BATS_TEST_TMPDIR/r/main"
+  has_line $'SKIPPED_DANGLING:\t.env'
+  [ ! -L "$BATS_TEST_TMPDIR/r/main/.env" ]
+  [ ! -e "$BATS_TEST_TMPDIR/r/main/.env" ]
+}
+
+@test "a link loop between the store and a worktree is reported dangling" {
+  make_secrets_layout "$BATS_TEST_TMPDIR/r"
+  ln -s ../.orca/secrets/.env "$BATS_TEST_TMPDIR/r/main/.env"
+  ln -s ../../main/.env "$BATS_TEST_TMPDIR/r/.orca/secrets/.env"
+  run secrets place "$BATS_TEST_TMPDIR/r/main"
+  [ "$status" -eq 0 ]
+  has_line $'SKIPPED_DANGLING:\t.env'
+}
+
+@test "remove strips a chained placement and leaves the user's file" {
+  make_linked_layout "$BATS_TEST_TMPDIR/r"
+  secrets place "$BATS_TEST_TMPDIR/r/orca-x" >/dev/null
+  run secrets remove "$BATS_TEST_TMPDIR/r/orca-x"
+  [ "$status" -eq 0 ]
+  has_line $'UNPLACED:\t.env'
+  [ ! -L "$BATS_TEST_TMPDIR/r/orca-x/.env" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/r/main/.env")" = "LIVE=1" ]
+}
+
+# ---- status ----
+
+@test "status reports entries, copies, and unlinked env files in the default worktree" {
+  make_secrets_layout "$BATS_TEST_TMPDIR/r"
+  r="$BATS_TEST_TMPDIR/r"
+  ( cd "$r/main" &&
+    printf '.env*\n!.env.example\nnode_modules/\n' >.gitignore &&
+    mkdir -p apps/api && echo 'ex' >.env.example &&
+    git add .gitignore .env.example && git commit -qm ignores )
+  echo 'A=1' >"$r/main/.env";              echo 'A=1' >"$r/.orca/secrets/.env"
+  echo 'B=new' >"$r/main/.env.local";      echo 'B=old' >"$r/.orca/secrets/.env.local"
+  echo 'C=1' >"$r/main/apps/api/.env"
+  echo 'D=1' >"$r/main/.env.test"
+  ln -s ../../main/.env.test "$r/.orca/secrets/.env.test"
+  ln -s ../../main/.env.gone "$r/.orca/secrets/.env.gone"
+  mkdir -p "$r/main/node_modules/pkg" && echo 'x' >"$r/main/node_modules/pkg/.env"
+  echo 'x' >"$r/main/.env.sample"
+  cd "$r"
+  run secrets status
+  [ "$status" -eq 0 ]
+  has_line "DEFAULT_WORKTREE:"$'\t'"$(cd "$r/main" && pwd -P)"
+  has_line $'ENTRY:\t.env\tFILE'
+  has_line $'COPY:\t.env\tSAME\t../../main/.env'
+  has_line $'COPY:\t.env.local\tDIFFERS\t../../main/.env.local'
+  has_line $'ENTRY:\t.env.test\tLINK\t../../main/.env.test'
+  has_line $'ENTRY:\t.env.gone\tDANGLING\t../../main/.env.gone'
+  has_line $'UNLINKED:\tapps/api/.env\t../../../../main/apps/api/.env'
+  refute_line $'UNLINKED:\t.env.test'
+  refute_line $'UNLINKED:\tnode_modules'
+  refute_line $'UNLINKED:\t.env.sample'
+  refute_line $'UNLINKED:\t.env.example'
+  has_line $'ENTRIES:\t4\tCOPIES:\t2\tUNLINKED:\t1'
+}
+
+@test "status in a conventional checkout links to the checkout root" {
+  make_repo "$BATS_TEST_TMPDIR/c"
+  ( cd "$BATS_TEST_TMPDIR/c" && echo '.env' >.gitignore &&
+    git add .gitignore && git commit -qm ignore && echo 'A=1' >.env )
+  cd "$BATS_TEST_TMPDIR/c"
+  run secrets status
+  [ "$status" -eq 0 ]
+  has_line $'UNLINKED:\t.env\t../../.env'
+  has_line $'ENTRIES:\t0\tCOPIES:\t0\tUNLINKED:\t1'
+  # read-only: no exclude written, no store created
+  [ ! -e "$BATS_TEST_TMPDIR/c/.orca" ]
+}
+
+@test "status with the default branch checked out nowhere reports -" {
+  make_secrets_layout "$BATS_TEST_TMPDIR/r"
+  git -C "$BATS_TEST_TMPDIR/r/main" checkout -q -b other
+  echo 'A=1' >"$BATS_TEST_TMPDIR/r/.orca/secrets/.env"
+  run secrets status "$BATS_TEST_TMPDIR/r"
+  [ "$status" -eq 0 ]
+  has_line $'DEFAULT_WORKTREE:\t-'
+  has_line $'ENTRY:\t.env\tFILE'
+  refute_line 'COPY:'
 }
 
 @test "dangling secrets link whose source is gone is swept" {
@@ -221,5 +376,9 @@ make_secrets_layout() { # <dir>
   assert_fail_reason BAD_ARGS
   mkdir "$BATS_TEST_TMPDIR/plain"
   run secrets place "$BATS_TEST_TMPDIR/plain"
+  assert_fail_reason NOT_GIT
+  run secrets status a b
+  assert_fail_reason BAD_ARGS
+  run secrets status "$BATS_TEST_TMPDIR/plain"
   assert_fail_reason NOT_GIT
 }

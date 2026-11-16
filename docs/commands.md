@@ -199,6 +199,8 @@ It reports the resolved reviewer. With codex absent it explains that runs use th
 
 Inside a repository it reads `orca.sh setup status`: `absent`, `current`, `drifted` (naming the manifests that changed), or `unstamped` (hand-written). Any but `current` earns an **offer** of the deep pass: the `orca:doctor` agent derives a `.orca/setup` script from the repo's own evidence and proves it in a throwaway worktree under `.orca/doctor/`; doctor re-runs the verification itself, shows you the script, and installs it only when you say so. See [Worktree provisioning](worktrees.md#provisioning).
 
+It also reads `orca.sh secrets status`, which compares `.orca/secrets/` with your default worktree. It flags a store copy of a file your worktree also has (and says whether the two have already drifted), an ignored `.env`-style file that runs don't get, and an entry whose linked file is gone. For each one it gives you the exact `ln -s` or `rm` to run. It never writes to `.orca/secrets/` itself. See [Secrets](worktrees.md#secrets).
+
 Also offered, never defaulted: writing `bypassPermissions` as the repo's default mode, and checking the editor companions — [orca.nvim](https://github.com/miguelbacalhau/orca.nvim) when Neovim is on PATH, [orca.vscode](https://github.com/miguelbacalhau/orca.vscode) when `code` is. `BARE_REPO: FAIL` is routed to `/orca:init`.
 
 ## `/orca:config [assignments | reset]`

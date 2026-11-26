@@ -94,9 +94,10 @@ Every file is line-oriented: the verbs read only `## ` headings and `**Key:**` l
 **Options:** <A> · <B>
 **Decision:** <the chosen option>      (decided only)
 **Why:** <the reason>
+**Extends:** <what it adds beyond the idea>      (only when it does)
 ```
 
-Ids continue the sequence and are never reused. A state that is neither `decided` nor `deferred` counts as open. A `deferred` decision is left out of the current pass: no phase realizes it.
+Ids continue the sequence and are never reused. `**Extends:**` marks a decided entry that takes on work the objective's idea does not ask for; the verbs ignore it. A state that is neither `decided` nor `deferred` counts as open. A `deferred` decision is left out of the current pass: no phase realizes it.
 
 ### `phases.md`
 
@@ -159,8 +160,8 @@ The check and the write run under a lock — the ref `refs/orca/claim/<dir name>
 1. **Create.** The slug comes from the idea — a provisional `objective-<h4>` when the idea is too vague to name. Before anything else happens, the session spawns `orca:objective-open`, which runs `objective new <repo> <slug> <base> --idea -` with the idea on stdin: that writes the files, the idea verbatim under `## Idea`, and creates `feature/<slug>` at the base commit — the one point where a slug can collide. The base is the branch the user names, else the trunk. It refuses a conventional checkout (`NOT_BARE` → `/orca:init`), an existing branch (`BRANCH_EXISTS`), objective (`OBJECTIVE_EXISTS`), or worktree path (`WORKTREE_EXISTS`). A slug a branch or worktree already holds is retried once with a `-<h4>` suffix; an existing objective with the slug is offered to the user to continue instead.
 2. **Open and check the reviewer.** The same agent runs `objective open <dir>`: it claims the objective for the session and creates the worktree off the base commit, provisioning nothing, so it returns at once. In the worktree it then runs `config validate` and the preflight's `REVIEWER:`/`CODEX:` lines, and returns one compact object: the objective, its worktree, and the reviewer. None of the verbs' output, and none of the files they write, enter the session. The session holds the reviewer for planning and the loop. Re-checking after `/orca:doctor` or `/orca:config` is another `Mode: open` spawn of the agent.
 3. **Provision and research, in the background.** `orca:provision` runs `orca.sh provision` on the worktree (secrets, then `.orca/setup`) as a warm-up, so a cold install overlaps the discussion, and returns one compact object — the setup output never enters the session. `orca:research` explores the code at the base: the current checkout when it is clean at the base commit, else the objective's worktree, which already exists. A setup or Codex problem is reported in a line when it lands — with an offer of `/orca:doctor` — and never pauses the discussion.
-4. **Discuss.** Once research returns, the session opens with a reflection of the idea against the code and asks two or three questions at a time. It writes `objective.md`'s sections and one `decisions.md` entry per question as each is raised (`open`) or settled (`decided`), never one document at the end. The research report is never written into the files.
-5. **Hand off.** Once no decision is open, the session offers to start. When the user says go, planning runs in the same turn, with no recap and no second question. A user who stops leaves the objective `discussing`; `/orca:open` picks it up.
+4. **Discuss.** Once research returns, the session opens with a reflection of the idea against the code and asks two or three questions at a time. It writes `objective.md`'s sections and one `decisions.md` entry per question as each is raised (`open`) or settled (`decided`), never one document at the end. The research report is never written into the files. The idea is the scope. Something the research notices beside it becomes a non-goal, not a question, unless the outcome needs it. When an answer would widen the outcome, the session says so and offers it as a separate `/orca:new` first. A widening you take in is recorded with an `**Extends:**` line.
+5. **Hand off.** Once no decision is open, the session offers to start, listing the decisions that extend the idea (or saying there are none). When the user says go, planning runs in the same turn, with no recap and no second question. A user who stops leaves the objective `discussing`; `/orca:open` picks it up.
 
 ## Planning and plan review
 

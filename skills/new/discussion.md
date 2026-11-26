@@ -25,12 +25,14 @@ Rewrite a section whenever the discussion changes it; the file is small.
 **Options:** <A> · <B>
 **Decision:** <the chosen option>
 **Why:** <the reason>
+**Extends:** <what this adds beyond the idea, one line>
 ```
 
 - **Ids** continue the sequence — one past the highest `## D<n>` in the file — and are never reused or renumbered.
 - **State.** `open` — raised, not settled; planning cannot start while one remains. `decided` — settled; `**Decision:**` and `**Why:**` are filled. `deferred` — the user chose to leave it out of this pass: `**Why:**` says why, and the planner plans nothing that depends on it. A decision a blocked phase waits on is never deferred: while a phase is blocked no phase runs, so deferring it stops the objective. Settle it — dropping or undoing that phase's work is a decision too. `**Decision:**` is written only on a decided entry.
 - **Source** is `discussion` for anything raised here. A decision that takes up a follow-up from the report cites it instead — `**Source:** F4` — and that is what marks the follow-up taken; never edit the report's list.
 - **Options** are the real shapes the question had, on one line, separated by ` · `.
+- **Extends** goes only on a decided entry whose decision takes on work the idea does not ask for (Scope, below), naming that work. A decision that keeps the scope, narrows it, or splits work out gets no `**Extends:**` line.
 - **One line per key**, nothing else between them but the entry's own lines: the verbs read only headings and `**Key:**` lines, and only each key's first line.
 
 Write an entry the moment its question is raised (`open`) or settled (`decided`) — not in a batch after the round. Append new entries with a heredoc; to settle or change one, read only that entry (`sed -n '/^## D3 — /,/^## D/p'` on its heading — never the whole file, which grows with the objective) and edit it in place. A decided entry that a done phase realizes is history: a change of mind about it is a new entry whose `**Why:**` names the one it overturns.
@@ -39,17 +41,29 @@ Write an entry the moment its question is raised (`open`) or settled (`decided`)
 
 **What never lands in the files:** the research report, or anything quoted from it, and anything about *how* — phases, work items, interfaces, file lists. Whatever mattered in the research lands as the user's answer to a question it raised.
 
+## Scope
+
+**The idea is the scope.** `## Idea` is what the user asked for. The discussion sharpens it; it does not grow it. Weigh everything the discussion touches against the idea:
+
+- **Inside the idea** — a direction, an unknown, or a tension the idea meets on the way to its outcome. Discuss it.
+- **Beside the idea** — something the research noticed nearby: a pre-existing bug, an inconsistent neighbour, stale docs, a cleanup the change would make easy. That is not a question. Write it into `## Non-goals` (`not fixed here: <it> — outside the idea`) and name it in one line, so the user can pull it in. It becomes a D-entry only when the outcome cannot be delivered without it; then it is inside, and the entry's `**Why:**` says why the outcome needs it.
+- **Beyond the idea** — an answer, the user's or one you are about to recommend, that widens the outcome: a pivot, another surface, a second problem, an item an earlier answer left out. Before recording it, say so in one line — what the idea asked for, what this adds — and offer the split first: its own `/orca:new`, with this objective kept to the idea. The user decides. A widening the user takes in is a decided entry with an `**Extends:**` line, and the outcome is rewritten to include it.
+
+**Lean narrow.** Recommend the option that delivers the idea with the least new work, unless the idea itself needs more. "We are touching it anyway", "polishing what will be replaced is wasted", and "so the docs ship with it" are reasons to name an extension, not to recommend one. Never offer back what the user already left out: a `deferred` entry, a non-goal, a follow-up they passed on.
+
+**A widening's own questions** come only once the user has taken it in. Even then, ask only what the user must choose. What the planner can settle from the code (naming, wiring, which component carries it) is not a question.
+
 ## Opening
 
 **From `/orca:new`, open with an informed reflection, not a batch of questions.** The first message reflects the idea back against the research:
 
 - what the system does *today* in the touched area, stated explicitly — the correctability valve: if the research got it wrong, the user sees it here and fixes it in one reply;
 - the two or three shapes the idea could take against that reality, and what each implies ("the current middleware has no user identity at that layer — extend it, or hang this elsewhere?");
-- the tensions the research found, named plainly.
+- the tensions the research found, named plainly — those beside the idea (Scope, above) in one line as what this objective leaves alone, not as questions.
 
 If the research shows the codebase fights the idea — an approach the architecture resists, an interface the code refuses — say so now, where changing course is cheap. Without a research report (it died, or there was nothing to explore), open with the intent-only version: the idea restated and its most load-bearing unknown.
 
-**From `/orca:open`,** open with what the digest says is unsettled: the open decisions first, each read from its own entry when the conversation reaches it. An open decision the loop raised (`**Source:** P2 …`) blocked a phase; once it is decided, the pending and blocked phases are replanned before the loop resumes, so say so when it settles.
+**From `/orca:open`,** open with what the digest says is unsettled: the open decisions first, each read from its own entry when the conversation reaches it. An open decision the loop raised (`**Source:** P2 …`) blocked a phase; once it is decided, the pending and blocked phases are replanned before the loop resumes, so say so when it settles. New work brought to an objective whose phases are all done is beyond the idea unless it finishes what the idea asked for, so offer the split first.
 
 Then ask about the single most load-bearing unknown. The research is the question generator, and it yields three kinds of questions — each one a D-entry, `open` the moment it is asked:
 
@@ -72,22 +86,28 @@ Coverage to reach by the end — through conversation, not as a checklist:
 - Inputs and outputs: what data, events, or actions go in; what results, side effects, or artifacts come out.
 - Constraints: existing code it must integrate with, compatibility or performance expectations, bounds on scope.
 
-Push back throughout. Play devil's advocate on scope, hunt for unstated non-goals, and use the research to make ambiguities concrete: a named tension the user must resolve beats a generic "any non-goals?" every time.
+Push back throughout. Play devil's advocate on scope (the user's own widenings included), hunt for unstated non-goals, and use the research to make ambiguities concrete: a named tension the user must resolve beats a generic "any non-goals?" every time.
 
 Stay at intent level in what you write down. If the conversation turns into walking the user through source at length, it has drifted from *what* into *how*; steer it back — the planner explores the code with fresh context.
 
 ## The quality bar
 
-The planner must be able to act on the files without guessing. Every tension and unknown the research surfaced appears either *settled* — a decided entry, a constraint, or a non-goal — or *explicitly left* — an `open` entry still to discuss, or a `deferred` one the user chose to leave out. Nothing is left silent. The files carry reasoning, not just conclusions: a non-goal with its why survives contact with an autonomous implementer; a bare bullet invites reinterpretation.
+The planner must be able to act on the files without guessing. Every tension and unknown the research surfaced inside the idea appears either *settled* — a decided entry, a constraint, or a non-goal — or *explicitly left* — an `open` entry still to discuss, or a `deferred` one the user chose to leave out. One beside the idea is a non-goal. Nothing is left silent. The files carry reasoning, not just conclusions: a non-goal with its why survives contact with an autonomous implementer; a bare bullet invites reinterpretation.
 
 ## Ending
 
 The discussion ends when the user says go, or when they stop. Either way, return to the skill that loaded this file — it checks that no decision is open before planning, and tells a user who stops how to pick the objective up again. Do not read the files back first: the planning gate shows the user the plan built from them, and that is the one confirmation.
 
-**Offer the start; don't wait to be told.** The moment the files meet the quality bar — no decision `open`, nothing the research raised left silent — say so in one line and ask once whether to start planning. Ask it in prose, never with AskUserQuestion. A yes is the go. A user who says go on their own is not asked again; a go given while a decision is still open stands once that decision is settled, so the session goes on to planning without asking again. Anything else they add reopens the discussion, and the offer comes again once the bar is met again.
+**Offer the start; don't wait to be told.** The moment the files meet the quality bar — no decision `open`, nothing the research raised left silent — say so in one line and ask once whether to start planning. Ask it in prose, never with AskUserQuestion. The offer carries the scope check. List the entries that extend the idea:
+
+```bash
+awk '/^## D/{h=$0} /^\*\*Extends:\*\*/{sub(/^\*\*Extends:\*\* */, ""); print h " — " $0}' <dir>/decisions.md
+```
+
+Name each in a few words, as what the objective has grown by beyond the idea. When the list is empty, say the objective stays within the idea. A yes is the go. A user who says go on their own is not asked again, but still gets the scope check, in one line; a go given while a decision is still open stands once that decision is settled, so the session goes on to planning without asking again. Anything else they add reopens the discussion, and the offer comes again once the bar is met again.
 
 ## Guidelines
 
-- One objective is one outcome. If the discussion uncovers two independent efforts, say so: the second is its own `/orca:new`.
+- One objective is one outcome: the idea's. If the discussion uncovers two independent efforts, say so: the second is its own `/orca:new`, and that is the option you recommend.
 - The files are written as the discussion goes. Never keep a settled answer only in the conversation — a session that ends loses it.
 - The research report is disposable: never persisted, never pasted to the user.

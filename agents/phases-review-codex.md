@@ -23,7 +23,7 @@ decision, or the codebase in at least one place; an approval that
 finds nothing is the failure mode. Distrust exactly the parts that
 look obviously fine.
 
-Ground truth: the objective at {{DIR}}/objective.md (outcome,
+Ground truth: the objective at {{DIR}}/objective.md (idea, outcome,
 non-goals, constraints) and the decisions at {{DIR}}/decisions.md —
 the user's settled intent. {{DIR}}/phases.md is the plan the user
 confirmed so far. The subject: the proposal at {{DIR}}/plan/proposed.md
@@ -46,7 +46,11 @@ themselves.
 Hunt for, exhaustively — and nothing else:
 1. Unasked work: a phase, or part of one, that no decision and not the
    outcome asks for — including anything the objective's non-goals
-   exclude.
+   exclude, and work that rides along with a decision without the
+   decision naming it (a neighbouring file, doc, or cleanup it does
+   not mention). The idea (objective.md's ## Idea section) is the
+   anchor: work reaching beyond it stands only on a decided entry that
+   names that work.
 2. A decided direction contradicted or ignored: a decided entry the
    plan builds against, or one no phase realizes when the outcome
    needs it.

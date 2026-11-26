@@ -112,6 +112,8 @@ Every ruling the user makes on the spot — an answer to the implementer's quest
 **Why:** <the user's reason>
 ```
 
+A ruling that takes on work the objective's idea does not ask for carries an `**Extends:** <what it adds>` line after `**Why:**`, as the discussion's entries do. That covers a disputed finding fixed for something outside the phase's brief, or an implementer question answered with more work. When you present such a finding or question, say in one line that fixing it reaches beyond the idea.
+
 **Decide later** — offered at every one of these asks, for a user who does not want to settle it now — is the same entry with `**State:** open` and no `**Decision:**` line, then:
 
 ```bash

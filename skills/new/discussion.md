@@ -84,6 +84,8 @@ The planner must be able to act on the files without guessing. Every tension and
 
 The discussion ends when the user says go, or when they stop. Either way, return to the skill that loaded this file — it checks that no decision is open before planning, and tells a user who stops how to pick the objective up again. Do not read the files back first: the planning gate shows the user the plan built from them, and that is the one confirmation.
 
+**Offer the start; don't wait to be told.** The moment the files meet the quality bar — no decision `open`, nothing the research raised left silent — say so in one line and ask once whether to start planning. Ask it in prose, never with AskUserQuestion. A yes is the go. A user who says go on their own is not asked again; a go given while a decision is still open stands once that decision is settled, so the session goes on to planning without asking again. Anything else they add reopens the discussion, and the offer comes again once the bar is met again.
+
 ## Guidelines
 
 - One objective is one outcome. If the discussion uncovers two independent efforts, say so: the second is its own `/orca:new`.

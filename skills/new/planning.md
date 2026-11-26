@@ -38,6 +38,8 @@ On success its frame lists the proposed phases: `phases`, and for each `i`, `pha
 
 ## Step 2: Review
 
+**One provisioning at a time in a worktree:** when the open's warm-up `orca:provision` is still in flight, wait for its result before step 1, since provisioning places the secrets that step removes. The planner never waits for it.
+
 1. `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh secrets remove <worktree>` — the reviewer reads adversarial content and needs no credentials.
 2. Spawn a fresh `orca:phases-review-<reviewer>`. Its task message: the worktree, the objective directory `<dir>`, the artifact path `<dir>/plan/review-<n>.json`, and — for codex — the plugin root, `${CLAUDE_PLUGIN_ROOT}` substituted.
 3. `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh secrets place <worktree>` — on every path out of the review, the reviewer's failure included.

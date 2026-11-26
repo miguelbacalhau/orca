@@ -23,7 +23,7 @@ Worktree: <worktree>
 Output path: <dir>/plan/proposed.md
 ```
 
-It returns `{written, phases, reason}`. Hold `reason` for the confirmation. `written: false` → relay the reason: one that names an open decision, or a decided direction the code cannot support, goes back to the discussion — the user settles it, and this file runs again. Any other cause: spawn it once more; a second failure goes to the user.
+Beside the proposal it writes `<dir>/plan/notes/P<n>.md` — exploration notes for the phases' implementers, which `phase-start` hands on; you never read them. It returns `{written, phases, reason}`. Hold `reason` for the confirmation. `written: false` → relay the reason: one that names an open decision, or a decided direction the code cannot support, goes back to the discussion — the user settles it, and this file runs again. Any other cause: spawn it once more; a second failure goes to the user.
 
 **The check.** Validate the proposal without installing it:
 

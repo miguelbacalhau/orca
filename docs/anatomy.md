@@ -140,7 +140,7 @@ Twenty-four agents ship in `agents/<stage>.md`, loaded as `orca:<stage>`. Each r
 | `council` | One Claude seat of `/orca:council`; the model is the seat's | per seat | high | ✓ (`council` roster) |
 | `council-codex` | Courier driving `/orca:council`'s Codex seat via `orca.sh codex` | sonnet | medium | |
 | `provision` | Provisions an objective's worktree after the session opens it (a warm-up) or starts a phase | sonnet | low | |
-| `phases` | Read-only planner: proposes an objective's sequential phases | fable | high | |
+| `phases` | Read-only planner: proposes an objective's sequential phases, with exploration notes per phase | fable | high | |
 | `phases-review-codex` | Courier driving the Codex review of a proposed phase plan via `orca.sh codex` | sonnet | medium | |
 | `phases-review-claude` | Performs the phase-plan review itself | opus | high | |
 | `objective-implement` | Implements, fixes, and commits one objective phase, kept alive across its rounds | opus | high | |

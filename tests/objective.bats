@@ -1161,6 +1161,7 @@ blocked_section() { # the lines under report.md's ## Blocked, blanks dropped
   printf 'continue\t2\tgo\n' >"$pd/overrides"
   printf 'old notes\n' >"$pd/notes.md"
   printf '# P2 — Store\n' >"$pd/brief.md"
+  printf '# Exploration: P2 — Store\n' >"$pd/exploration.md"
   printf '@@ORCA@@\nrc=0\naction=infeasible\nround=0\ngating=0\nminor=0\nout_of_scope=0\n@@ORCA_END@@\n' >"$pd/action"
   run orca rounds next "$pd"
   has_line 'action=infeasible'
@@ -1178,7 +1179,7 @@ blocked_section() { # the lines under report.md's ## Blocked, blanks dropped
   [ "$(frame_value restarted)" = P2 ]
   [ "$(cat "$pd/base")" = abc123 ]
   local k
-  for k in responses reviews overrides notes.md brief.md action; do
+  for k in responses reviews overrides notes.md brief.md exploration.md action; do
     [ ! -e "$pd/$k" ] || { echo "$k left behind" >&2; return 1; }
     [ -e "$pd/superseded/1/$k" ] || { echo "$k not moved" >&2; return 1; }
   done
@@ -1517,6 +1518,140 @@ blocked_section() { # the lines under report.md's ## Blocked, blanks dropped
   [ "$(frame_value base)" = "$base" ]
   [ "$(cat "$D/phases/P1/base")" = "$base" ]
   [ "$(grep -c '^\*\*State:\*\*' "$D/phases.md")" = 1 ]
+}
+
+# no_exploration — the last frame's exploration key is there and empty.
+no_exploration() {
+  printf '%s\n' "$output" | grep -qx 'exploration=' || { echo "expected an empty exploration key" >&2; return 1; }
+}
+
+@test "phase-start: the planner's matching notes are copied to exploration.md; absent or another title's are not" {
+  new_objective alpha
+  decision D1 decided 'Per key?'
+  phase P1 pending 'Bucket'
+  # no notes at all: an empty key, no file
+  run orca objective phase-start "$D" P1
+  [ "$status" -eq 0 ]
+  no_exploration
+  [ ! -e "$D/phases/P1/exploration.md" ]
+  # notes written while the phase is active never reach it
+  mkdir -p "$D/plan/notes"
+  printf '# Exploration: P1 — Bucket\n## Gotchas\n- late\n' >"$D/plan/notes/P1.md"
+  run orca objective phase-start "$D" P1
+  [ "$status" -eq 0 ]
+  [ "$(frame_value started)" = no ]
+  no_exploration
+  [ ! -e "$D/phases/P1/exploration.md" ]
+}
+
+@test "phase-start: exploration.md is the note whose first line is the phase's heading; a resumed phase keeps its copy" {
+  new_objective alpha
+  decision D1 decided 'Per key?'
+  phase P1 pending 'Bucket'
+  phase P2 pending 'Store'
+  mkdir -p "$D/plan/notes"
+  printf '# Exploration: P1 — Bucket\n**Explored at:** abc\n## Gotchas\n- GOTCHA-one' >"$D/plan/notes/P1.md"
+  # a note left by a dropped phase that held the id under another title
+  printf '# Exploration: P2 — Something else\n## Gotchas\n- stale\n' >"$D/plan/notes/P2.md"
+  run orca objective phase-start "$D" P1
+  [ "$status" -eq 0 ]
+  [ "$(frame_value exploration)" = "$D/phases/P1/exploration.md" ]
+  cmp "$D/plan/notes/P1.md" "$D/phases/P1/exploration.md"
+  # the brief carries none of it
+  ! grep -q 'GOTCHA-one\|Exploration' "$D/phases/P1/brief.md" || return 1
+  # resumed: the copy stays as it was, whatever the note says now
+  printf '# Exploration: P1 — Bucket\n## Gotchas\n- GOTCHA-two\n' >"$D/plan/notes/P1.md"
+  run orca objective phase-start "$D" P1
+  [ "$status" -eq 0 ]
+  [ "$(frame_value started)" = no ]
+  [ "$(frame_value exploration)" = "$D/phases/P1/exploration.md" ]
+  grep -q 'GOTCHA-one' "$D/phases/P1/exploration.md"
+  ! grep -q 'GOTCHA-two' "$D/phases/P1/exploration.md" || return 1
+  # another title: not copied, and a copy an interrupted start left goes
+  awk '/^\*\*State:\*\* active$/ { print "**State:** done"; print "**Commit:** 0123456789abcdef0123456789abcdef01234567"; next } { print }' \
+    "$D/phases.md" >"$D/phases.tmp"
+  mv "$D/phases.tmp" "$D/phases.md"
+  mkdir -p "$D/phases/P2"
+  printf 'left over\n' >"$D/phases/P2/exploration.md"
+  run orca objective phase-start "$D" P2
+  [ "$status" -eq 0 ]
+  [ "$(frame_value started)" = yes ]
+  no_exploration
+  [ ! -e "$D/phases/P2/exploration.md" ]
+}
+
+@test "phase-start: notes with a near-miss first line, or reached through a symlink, are not copied" {
+  new_objective alpha
+  decision D1 decided 'Per key?'
+  phase P1 pending 'Bucket'
+  mkdir -p "$D/plan/notes"
+  local first
+  for first in '# Exploration: P1 — Bucket list' '# Exploration: P1 - Bucket' '## Exploration: P1 — Bucket' \
+    '# Exploration: P1 — Bucket ' '# Exploration: P10 — Bucket' ''; do
+    printf '%s\n## Gotchas\n- x\n' "$first" >"$D/plan/notes/P1.md"
+    run orca objective phase-start "$D" P1
+    [ "$status" -eq 0 ] || return 1
+    no_exploration || { echo "copied for: $first" >&2; return 1; }
+    [ ! -e "$D/phases/P1/exploration.md" ] || return 1
+    awk '/^\*\*State:\*\* active$/ { print "**State:** pending"; next } { print }' "$D/phases.md" >"$D/phases.tmp"
+    mv "$D/phases.tmp" "$D/phases.md"
+  done
+  printf '# Exploration: P1 — Bucket\n- SECRET-elsewhere\n' >"$BATS_TEST_TMPDIR/elsewhere.md"
+  rm "$D/plan/notes/P1.md"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere.md" "$D/plan/notes/P1.md"
+  run orca objective phase-start "$D" P1
+  [ "$status" -eq 0 ]
+  no_exploration
+  [ ! -e "$D/phases/P1/exploration.md" ]
+}
+
+@test "phase-start: a restarted phase's old exploration.md is superseded with its rounds, and the fresh notes are copied" {
+  new_objective alpha
+  decision D1 decided 'Per key?'
+  phase P1 pending 'Store'
+  mkdir -p "$D/plan/notes"
+  printf '# Exploration: P1 — Store\n- NOTE-old\n' >"$D/plan/notes/P1.md"
+  run orca objective phase-start "$D" P1
+  [ "$status" -eq 0 ]
+  local pd="$D/phases/P1" base
+  base="$(frame_value base)"
+  grep -q 'NOTE-old' "$pd/exploration.md"
+  decision D2 open 'Which store?'
+  run orca objective phase-block "$D" P1 D2
+  [ "$status" -eq 0 ]
+  # the decision is made and the phase replanned under its id
+  awk '/^## D2 — /{f=1} f && /^\*\*State:\*\*/{print "**State:** decided"; f=0; next} {print}' "$D/decisions.md" >"$D/decisions.tmp"
+  mv "$D/decisions.tmp" "$D/decisions.md"
+  P="$D/plan/proposed.md"
+  printf '# Phases\n' >"$P"
+  block "$P" P1 pending 'Store, on the decided backend' 'D1, D2'
+  printf '# Exploration: P1 — Store, on the decided backend\n- NOTE-new\n' >"$D/plan/notes/P1.md"
+  run orca objective plan-accept "$D"
+  [ "$status" -eq 0 ]
+  [ "$(frame_value restarted)" = P1 ]
+  [ ! -e "$pd/exploration.md" ]
+  grep -q 'NOTE-old' "$pd/superseded/1/exploration.md"
+  run orca objective phase-start "$D" P1
+  [ "$status" -eq 0 ]
+  [ "$(frame_value started)" = yes ]
+  [ "$(frame_value base)" = "$base" ]
+  [ "$(frame_value exploration)" = "$pd/exploration.md" ]
+  grep -q 'NOTE-new' "$pd/exploration.md"
+  grep -q 'NOTE-old' "$pd/superseded/1/exploration.md"
+}
+
+@test "phase-start: an exploration.md it cannot write fails WRITE_ERROR and the phase stays pending" {
+  new_objective alpha
+  decision D1 decided 'Per key?'
+  phase P1 pending 'Bucket'
+  mkdir -p "$D/plan/notes" "$D/phases/P1"
+  printf '# Exploration: P1 — Bucket\n' >"$D/plan/notes/P1.md"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere.md" "$D/phases/P1/exploration.md"
+  run orca objective phase-start "$D" P1
+  assert_fail_reason WRITE_ERROR
+  refute_line 'rc=0'
+  grep -qx '\*\*State:\*\* pending' "$D/phases.md"
+  [ ! -e "$BATS_TEST_TMPDIR/elsewhere.md" ]
 }
 
 @test "phase-start: a brief or base it cannot write fails WRITE_ERROR and the phase stays pending" {

@@ -50,9 +50,13 @@
 #                  per id ever given: F<n><TAB>P<n><TAB><kind><TAB>
 #                  <title><TAB><file><TAB><detail>
 #   plan/proposed.md   a planner proposal not yet accepted
-#   phases/P<n>/   brief.md, base, worktree, and the round engine's files
-#                  (reviews/, responses/, declines.md, overrides, action,
-#                  trees, snapshot)
+#   plan/notes/P<n>.md  the planner's exploration notes for a phase:
+#                  `# Exploration: P<n> — <title>` first, the phase's
+#                  heading text; never validated beyond that line
+#   phases/P<n>/   brief.md, exploration.md (phase-start's copy of the
+#                  phase's notes, when they match), base, worktree, and
+#                  the round engine's files (reviews/, responses/,
+#                  declines.md, overrides, action, trees, snapshot)
 #   phases/P<n>/action the round engine's last frame for that phase
 #   owner          the claim: session=, host=, machine=, pid=, pidstart=,
 #                  taken= (host= for display; machine= judges sameness)
@@ -223,8 +227,8 @@
 #   be rewritten (same id, pending, no Blocked on line), reordered, or
 #   dropped. On install, every unblocked phase the proposal keeps starts
 #   over: its earlier attempt's round state (reviews/, responses/,
-#   declines.md, overrides, action, notes.md, brief.md) moves to the first
-#   free phases/P<n>/superseded/<k>/, base staying, so `rounds next`
+#   declines.md, overrides, action, notes.md, brief.md, exploration.md)
+#   moves to the first free phases/P<n>/superseded/<k>/, base staying, so `rounds next`
 #   answers `implement 0` against the replanned brief. Then report.md's
 #   `## Blocked` (when there is a report) is rewritten from the new
 #   phases.md — the phases still blocked, or `None`. Frame: rc, accepted
@@ -263,10 +267,16 @@
 #   phases/P<n>/brief.md (the block without its State, Source, Commit,
 #   and Blocked on lines, then every referenced decision's entry) and
 #   phases/P<n>/worktree (the work tree the round engine guards), and
-#   only then marks the phase active. Frame: rc, dir (the phase
-#   directory), phase, started (yes when it was pending, no when already
-#   active), base, base_kept (yes|no), brief, worktree, branch, arrival,
-#   head.
+#   only then marks the phase active. A pending phase's
+#   plan/notes/P<n>.md is copied to phases/P<n>/exploration.md when its
+#   first line is exactly `# Exploration: ` plus the phase's heading text
+#   (`P<n> — <title>`); with no such note — absent, a symlink, another
+#   title — nothing is copied and an exploration.md already there is
+#   removed. An active phase keeps the copy it has, or none. Frame: rc,
+#   dir (the phase directory), phase, started (yes when it was pending,
+#   no when already active), base, base_kept (yes|no), brief, exploration
+#   (the copy's path, empty when there is none), worktree, branch,
+#   arrival, head.
 #
 # phase-done — active -> done with `**Commit:** <sha>` (any name of a
 #   commit, recorded in full; else BAD_REF; not active is PHASE_STATE).
@@ -1732,8 +1742,9 @@ obj_join() { # <id...> — comma-separated, `-` when none
 }
 
 # The round state of a phase's earlier attempt: everything the round
-# engine, the implementer, and the brief left in phases/P<n>/, but base.
-obj_round_state="reviews responses declines.md overrides action notes.md brief.md snapshot trees"
+# engine, the implementer, the brief, and the exploration notes left in
+# phases/P<n>/, but base.
+obj_round_state="reviews responses declines.md overrides action notes.md brief.md exploration.md snapshot trees"
 
 # obj_supersede_rounds <P> — a blocked phase replanned under its id starts
 # over: its earlier attempt's round state moves to the first free
@@ -1797,6 +1808,42 @@ obj_phase_add() { # <dir> <block-file>
   emit_frame rc=0 "phase=$want" "acceptance=$(printf '%s' "$facts" | cut -f6)"
 }
 
+# obj_exploration_note <P> — the path of the planner's notes for the
+# phase on stdout, when they are this phase's: plan/notes/P<n>.md a
+# regular file, reached through no symlink, whose first line is
+# `# Exploration: ` plus the phase's heading text. Else nothing — a note
+# left by a dropped phase never reaches the one that took a title after
+# it.
+obj_exploration_note() {
+  local note="$obj_dir/plan/notes/$1.md" heading first=""
+  [ ! -L "$obj_dir/plan" ] && [ ! -L "$obj_dir/plan/notes" ] && [ ! -L "$note" ] && [ -f "$note" ] || return 0
+  heading="$(obj_block "$obj_dir/phases.md" "$1" | sed -n 1p)"
+  IFS= read -r first <"$note" 2>/dev/null || [ -n "$first" ] || return 0
+  [ "$first" = "# Exploration: ${heading#"## "}" ] && printf '%s' "$note"
+  return 0
+}
+
+# obj_place_exploration <P> <pdir> <started> — phases/P<n>/exploration.md
+# for the phase being started; sets obj_exploration to its path, or
+# empty. A pending phase gets the current matching note or none (a copy
+# an interrupted start left is replaced or removed); an active one keeps
+# what its start gave it.
+obj_place_exploration() {
+  local target="$2/exploration.md" note
+  obj_exploration=""
+  if [ "$3" = yes ]; then
+    note="$(obj_exploration_note "$1")"
+    if [ -n "$note" ]; then
+      obj_write "$target" <"$note" || exit 1
+    elif [ -e "$target" ] || [ -L "$target" ]; then
+      rm -f "$target" 2>/dev/null || fail WRITE_ERROR "could not remove $target"
+    fi
+  fi
+  if [ -f "$target" ] && [ ! -L "$target" ]; then
+    obj_exploration="$target"
+  fi
+}
+
 obj_phase_start() { # <dir> <P>
   local p="$2" pdir started=no base base_kept=yes brief restarted
   obj_require_dir "$1"
@@ -1837,11 +1884,12 @@ obj_phase_start() { # <dir> <P>
   fi
   brief="$(obj_render_brief "$p")"
   printf '%s\n' "$brief" | obj_write "$pdir/brief.md" || exit 1
+  obj_place_exploration "$p" "$pdir" "$started"
   # The round engine guards this work tree's tree (rounds.sh, the tree guard).
   printf '%s\n' "$obj_worktree" | obj_write "$pdir/worktree" || exit 1
   [ "$started" = yes ] && obj_set_phase "$p" active
   emit_frame rc=0 "dir=$pdir" "phase=$p" "started=$started" "base=$base" "base_kept=$base_kept" \
-    "brief=$pdir/brief.md" "worktree=$obj_worktree" "branch=$obj_branch" "${obj_arrival_keys[@]}"
+    "brief=$pdir/brief.md" "exploration=$obj_exploration" "worktree=$obj_worktree" "branch=$obj_branch" "${obj_arrival_keys[@]}"
 }
 
 obj_phase_done() { # <dir> <P> <sha>

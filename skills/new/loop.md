@@ -28,7 +28,7 @@ Run it yourself — it is fast and quiet, and provisions nothing:
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh objective phase-start <dir> <P>
 ```
 
-It arrives in the worktree, keeps or records the phase's base, renders `<phase-dir>/brief.md` from the phase and the decisions it realizes, and marks the phase active. From its frame hold `base` — the commit check's base for the whole phase (a resumed phase keeps its original one) — and take `worktree` and `arrival`.
+It arrives in the worktree, keeps or records the phase's base, renders `<phase-dir>/brief.md` from the phase and the decisions it realizes, copies the planner's exploration notes for the phase to `<phase-dir>/exploration.md` when there are any, and marks the phase active. From its frame hold `base` — the commit check's base for the whole phase (a resumed phase keeps its original one) — and `exploration`, the notes' path or empty, and take `worktree` and `arrival`.
 
 A typed `FAIL:` → relay its reason and detail in one line and stop the pass. `PHASE_ACTIVE` means another phase is mid-loop; `RESTART_PENDING` names a restarted phase that must run first — take that one instead; `PHASE_BLOCKED` / `DECISION_OPEN` mean the pass is stopped behind a decision — back to the discussion; `PHASE_STATE` / `NO_PHASE` mean the phase is not startable — the files changed under the pass. Anything else (`WORKTREE_FAILED`, `WORKTREE_MISMATCH`, …) is the worktree's.
 
@@ -52,6 +52,8 @@ Plugin root: ${CLAUDE_PLUGIN_ROOT}
 ```
 
 (the plugin root substituted, absolute: the implementer records each response's checked tree through `orca.sh rounds tree`.)
+
+When phase-start's `exploration` is not empty, the task message carries one more line, `Exploration: <exploration>` — on every implementer spawn of the phase, fresh, resumed, or restarted. An empty one (a phase `/orca:loop` or the final verification added, or one the planner left no notes for) adds nothing. **The notes are the implementer's only**: never pass the path to a reviewer, and never read the file yourself.
 
 Every turn it writes `<phase-dir>/responses/round-<N>.json` and keeps `notes.md` current, and returns `{status, questions, response}`. Never reuse a previous phase's implementer: the phase boundary is the context reset.
 
@@ -121,7 +123,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh objective phase-block <dir> <P> D<n>
 ## Step 5: Review round N
 
 1. `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh secrets remove <worktree>` — the reviewer reads adversarial content and needs no credentials.
-2. Spawn a fresh `orca:objective-review-<reviewer>`. Its task message: the worktree, the brief path `<phase-dir>/brief.md`, the artifact path `<phase-dir>/reviews/round-<N>.json`, the declines path `<phase-dir>/declines.md` (whether or not it exists yet), the rounds directory `<phase-dir>`, the base `<base>` — the review covers everything since it, committed or not — and, for codex, the plugin root, `${CLAUDE_PLUGIN_ROOT}` substituted.
+2. Spawn a fresh `orca:objective-review-<reviewer>`. Its task message: the worktree, the brief path `<phase-dir>/brief.md`, the artifact path `<phase-dir>/reviews/round-<N>.json`, the declines path `<phase-dir>/declines.md` (whether or not it exists yet), the rounds directory `<phase-dir>`, the base `<base>` — the review covers everything since it, committed or not — and, for codex, the plugin root, `${CLAUDE_PLUGIN_ROOT}` substituted. Never the exploration path: the reviewer judges the change against the brief alone.
 3. `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh secrets place <worktree>` — on every path out of the round, the reviewer's failure included.
 
 `secrets` failing `OUTSIDE_ROOT` means orca never placed secrets in that checkout — carry on. Any other typed `FAIL:` from `secrets remove` stops the round before the reviewer spawns: tell the user, and stop the pass.

@@ -99,6 +99,9 @@ root_in_settings() { # <settings-file> <base-dir>
   root_canon="$(canonicalize "$repo_root")"
   while IFS= read -r entry; do
     [[ -n "$entry" ]] || continue
+    # An entry spelled with a literal tilde is matched as text and
+    # expanded by hand, so the quoted "~/" is intended.
+    # shellcheck disable=SC2088
     case "$entry" in
       /*) dir="$entry" ;;
       "~") dir="$HOME" ;;

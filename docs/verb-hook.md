@@ -42,4 +42,4 @@ Hook answers, including refusals and errors, are journaled like any agent result
 
 Tests: `tests/relay.test.ts` (`claude plugin test .`) for the hook, `tests/work-loop.bats` for the work loop's side.
 
-The same hooks module holds [the pin hook](pin-hook.md), which starts each stage agent in its worktree.
+The same hooks module holds [the pin hook](pin-hook.md), which starts each stage agent in its worktree, and [the switch hook](switch-hook.md), which approves a session's move into its objective's worktree.

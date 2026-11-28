@@ -23,6 +23,9 @@ setup() {
     >"$BATS_TEST_TMPDIR/envelope-bin/python3"
   chmod +x "$BATS_TEST_TMPDIR/envelope-bin/python3"
   export PATH="$BATS_TEST_TMPDIR/envelope-bin:$PATH"
+  # The preflight takes the Bash-tool timeout from the environment when no
+  # settings file carries it: a developer's own value must not decide a test.
+  unset BASH_MAX_TIMEOUT_MS
   export GIT_CONFIG_GLOBAL=/dev/null
   export GIT_CONFIG_SYSTEM=/dev/null
   # Leases and claims judge "same machine?" by this ID (lib.sh

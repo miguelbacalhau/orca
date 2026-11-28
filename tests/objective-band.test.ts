@@ -326,6 +326,32 @@ describe('the band in a session', () => {
     }
   })
 
+  for (const cwd of ['/repo/orca-rate-limit-public-api', '/repo/orca-rate-limit-public-api/src/lib']) {
+    test(`the claim is found from the objective's own worktree: ${cwd}`, async ($, on) => {
+      mock.clock(on, { now: 10_000 })
+      serveFiles(on, objectiveDisk())
+      session(on, { id: SESSION, cwd })
+      await start($, cwd)
+      expect(await shows($, 'rate-limit-public-api')).toBe(true)
+      expect(await shows($, '1 decided · 1 open')).toBe(true)
+    })
+  }
+
+  test('a session that moves into the objective\'s worktree keeps its band: the cwd follows, the root is the same', async ($, on) => {
+    const clock = mock.clock(on, { now: 10_000 })
+    const disk = objectiveDisk()
+    serveFiles(on, disk)
+    const where = { id: SESSION, cwd: '/repo/main' }
+    session(on, where)
+    await start($, '/repo/main')
+    expect(await shows($, 'rate-limit-public-api')).toBe(true)
+    // The move raises no session.start and no session.end; only the cwd changes.
+    where.cwd = '/repo/orca-rate-limit-public-api'
+    disk.set(`${DIR}/decisions.md`, { text: decisions(['D1', 'Token bucket?', 'decided'], ['D2', 'Per-key?', 'decided']), mtimeMs: 12_000 })
+    await clock.advance(1500)
+    expect(await shows($, '2 decided · 0 open')).toBe(true)
+  })
+
   test('the walk up is bounded: a cwd too deep below the repository finds nothing', async ($, on) => {
     mock.clock(on, { now: 10_000 })
     serveFiles(on, objectiveDisk())
@@ -570,6 +596,19 @@ describe('the claim\'s release on session end', () => {
       expect(calls[0]?.argv[1]).toMatch(/\/scripts\/orca\.sh$/)
       expect(calls[0]?.argv.slice(2)).toEqual(['objective', 'release', '/repo', '--session', SESSION])
       expect(calls[0]?.env).toEqual({ ORCA_OBJ_LOCK_TRIES: '4' })
+    })
+  }
+
+  for (const cwd of ['/repo/orca-rate-limit-public-api', '/repo/orca-rate-limit-public-api/src/lib']) {
+    test(`a session that ends standing in the objective's worktree releases its claim: ${cwd}`, async ($, on) => {
+      mock.clock(on, { now: 10_000 })
+      const ran: Ran[] = []
+      serveFiles(on, objectiveDisk())
+      serveRelease(on, ran)
+      session(on, { id: SESSION, cwd })
+      await start($, cwd)
+      expect(await end($, 'prompt_input_exit')).toEqual({ sessionId: SESSION })
+      expect(releaseCalls(ran).map(r => r.argv.slice(2))).toEqual([['objective', 'release', '/repo', '--session', SESSION]])
     })
   }
 

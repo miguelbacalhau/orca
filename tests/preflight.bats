@@ -187,55 +187,96 @@ where() { run bash "$SCRIPTS/orca.sh" preflight where "$@"; }
   cd "$r"
   preflight_with_codex 0.1.0 ok
   has_line $'SESSION:\troot'
-  has_line $'ROOT_IN_SCOPE:\tn/a'
+  has_line $'ORCA_IN_SCOPE:\tn/a'
   has_line $'DEFAULT_WORKTREE:\t'"$r/main"
   cd "$r/main/packages/x"
   preflight_with_codex 0.1.0 ok
   has_line $'SESSION:\tworktree '"$r/main"
-  has_line $'ROOT_IN_SCOPE:\tno'
+  has_line $'ORCA_IN_SCOPE:\tno'
   make_repo "$BATS_TEST_TMPDIR/c"
   cd "$BATS_TEST_TMPDIR/c"
   preflight_with_codex 0.1.0 ok
   has_line $'SESSION:\tconventional'
-  has_line $'ROOT_IN_SCOPE:\tn/a'
+  has_line $'ORCA_IN_SCOPE:\tn/a'
   has_line $'DEFAULT_WORKTREE:\t'"$BATS_TEST_TMPDIR/c"
 }
 
-@test "ROOT_IN_SCOPE reads the worktree's settings and the user's" {
+@test "ORCA_IN_SCOPE reads the worktree's settings and the user's" {
   r="$BATS_TEST_TMPDIR/r"
   make_bare_layout "$r"
   mkdir -p "$r/main/.claude" "$HOME/.claude"
   cd "$r/main"
   # neither
-  where; has_line $'ROOT_IN_SCOPE:\tno'
-  # an unrelated directory is not the root
+  where; has_line $'ORCA_IN_SCOPE:\tno'
+  # an unrelated directory is not above .orca
   printf '{"permissions":{"additionalDirectories":["/somewhere/else","../main"]}}\n' >.claude/settings.local.json
-  where; has_line $'ROOT_IN_SCOPE:\tno'
+  where; has_line $'ORCA_IN_SCOPE:\tno'
   # the root, absolute, in the worktree's local settings — pretty-printed
   printf '{\n  "env": {"X": "1"},\n  "permissions": {\n    "allow": ["Bash(ls:*)"],\n    "additionalDirectories": [\n      "/somewhere/else",\n      "%s"\n    ]\n  }\n}\n' "$r" >.claude/settings.local.json
-  where; has_line $'ROOT_IN_SCOPE:\tyes'
+  where; has_line $'ORCA_IN_SCOPE:\tyes'
   # relative, as the worktree's own settings resolve it
   printf '{"permissions":{"additionalDirectories":[".."]}}\n' >.claude/settings.local.json
-  where; has_line $'ROOT_IN_SCOPE:\tyes'
+  where; has_line $'ORCA_IN_SCOPE:\tyes'
   rm .claude/settings.local.json
   # the worktree's shared settings file
   printf '{"permissions":{"additionalDirectories":["%s/"]}}\n' "$r" >.claude/settings.json
-  where; has_line $'ROOT_IN_SCOPE:\tyes'
+  where; has_line $'ORCA_IN_SCOPE:\tyes'
   rm .claude/settings.json
   # the user's: the root itself, or a directory above it
   printf '{"permissions":{"additionalDirectories":["%s"]}}\n' "$r" >"$HOME/.claude/settings.json"
-  where; has_line $'ROOT_IN_SCOPE:\tyes'
+  where; has_line $'ORCA_IN_SCOPE:\tyes'
   printf '{"permissions":{"additionalDirectories":["%s"]}}\n' "$BATS_TEST_TMPDIR" >"$HOME/.claude/settings.json"
-  where; has_line $'ROOT_IN_SCOPE:\tyes'
+  where; has_line $'ORCA_IN_SCOPE:\tyes'
   # a relative entry in the user's settings names nothing here
   printf '{"permissions":{"additionalDirectories":[".."]}}\n' >"$HOME/.claude/settings.json"
-  where; has_line $'ROOT_IN_SCOPE:\tno'
+  where; has_line $'ORCA_IN_SCOPE:\tno'
   # a root session needs none
   cd "$r"
-  where; has_line $'ROOT_IN_SCOPE:\tn/a'
+  where; has_line $'ORCA_IN_SCOPE:\tn/a'
 }
 
-@test "the scope setting and the codex timeout in main/'s settings are found from main/, missed from an objective worktree" {
+@test "ORCA_IN_SCOPE is yes for the repository's .orca or a directory above it, no for one below or beside it" {
+  r="$HOME/proj"
+  make_bare_layout "$r"
+  mkdir -p "$r/main/.claude" "$r/.orca/objectives" "$r/.orca-other"
+  cd "$r/main"
+  scope_with() { # <entry> — the worktree's local settings hold only it
+    printf '{"permissions":{"additionalDirectories":["%s"]}}\n' "$1" >"$r/main/.claude/settings.local.json"
+    where
+  }
+  # .orca itself: absolute, with a trailing slash, relative, ~-spelled
+  scope_with "$r/.orca";   has_line $'ORCA_IN_SCOPE:\tyes'
+  scope_with "$r/.orca/";  has_line $'ORCA_IN_SCOPE:\tyes'
+  scope_with "../.orca";   has_line $'ORCA_IN_SCOPE:\tyes'
+  scope_with "~/proj/.orca"; has_line $'ORCA_IN_SCOPE:\tyes'
+  # anything above it: the root (an install from before), .., the home directory
+  scope_with "$r";         has_line $'ORCA_IN_SCOPE:\tyes'
+  scope_with "$r/";        has_line $'ORCA_IN_SCOPE:\tyes'
+  scope_with "..";         has_line $'ORCA_IN_SCOPE:\tyes'
+  scope_with "~/proj";     has_line $'ORCA_IN_SCOPE:\tyes'
+  scope_with "~";          has_line $'ORCA_IN_SCOPE:\tyes'
+  # below it, or beside it
+  scope_with "$r/.orca/objectives"; has_line $'ORCA_IN_SCOPE:\tno'
+  scope_with "../.orca/objectives"; has_line $'ORCA_IN_SCOPE:\tno'
+  scope_with "$r/.orca-other";      has_line $'ORCA_IN_SCOPE:\tno'
+  scope_with "$r/.bare";            has_line $'ORCA_IN_SCOPE:\tno'
+  scope_with "$r/orca-obj";         has_line $'ORCA_IN_SCOPE:\tno'
+  scope_with "$r/main";             has_line $'ORCA_IN_SCOPE:\tno'
+  # the user's settings: .orca by absolute path
+  rm "$r/main/.claude/settings.local.json"
+  mkdir -p "$HOME/.claude"
+  printf '{"permissions":{"additionalDirectories":["%s/.orca"]}}\n' "$r" >"$HOME/.claude/settings.json"
+  where; has_line $'ORCA_IN_SCOPE:\tyes'
+  rm "$HOME/.claude/settings.json"
+  # a .orca that is a link is matched where it is named and where it leads
+  mv "$r/.orca" "$BATS_TEST_TMPDIR/orca-store"
+  ln -s "$BATS_TEST_TMPDIR/orca-store" "$r/.orca"
+  scope_with "$r/.orca";                    has_line $'ORCA_IN_SCOPE:\tyes'
+  scope_with "$BATS_TEST_TMPDIR/orca-store"; has_line $'ORCA_IN_SCOPE:\tyes'
+  scope_with "$r";                          has_line $'ORCA_IN_SCOPE:\tyes'
+}
+
+@test "from an objective's worktree the scope is unknown, never no, and the codex timeout is taken from the environment" {
   r="$BATS_TEST_TMPDIR/r"
   make_bare_layout "$r"
   printf 'reviewer=codex\n' >"$r/.orca/config"
@@ -243,18 +284,104 @@ where() { run bash "$SCRIPTS/orca.sh" preflight where "$@"; }
   printf '{"env":{"BASH_MAX_TIMEOUT_MS":"1200000"},"permissions":{"additionalDirectories":["%s"]}}\n' "$r" \
     >"$r/main/.claude/settings.local.json"
   git -C "$r/main" worktree add -q "$r/orca-obj" -b feature/obj
-  # the session's directory: where objective-open runs the preflight
+  mkdir -p "$r/orca-obj/src"
+  # the directory the session was started in
   cd "$r/main"
   preflight_with_codex 999.0.0 ok
   [ "$status" -eq 0 ]
   has_line 'CODEX: PASS'
-  has_line $'ROOT_IN_SCOPE:\tyes'
-  # the objective's worktree has no settings.local.json: both are missed
-  cd "$r/orca-obj"
+  has_line $'ORCA_IN_SCOPE:\tyes'
+  # the objective's worktree has no settings of its own: the scope is
+  # unknown, and with nothing in the environment the timeout is missed
+  cd "$r/orca-obj/src"
   preflight_with_codex 999.0.0 ok
   [ "$status" -eq 1 ]
+  has_line $'SESSION:\tworktree '"$r/orca-obj"
+  has_line $'ORCA_IN_SCOPE:\t-'
   has_line 'CODEX: FAIL: BASH_MAX_TIMEOUT_MS not set'
-  has_line $'ROOT_IN_SCOPE:\tno'
+  # a session that moved here carries main/'s settings env block in its shell
+  BASH_MAX_TIMEOUT_MS=1200000 preflight_with_codex 999.0.0 ok
+  [ "$status" -eq 0 ]
+  has_line $'ORCA_IN_SCOPE:\t-'
+  has_line 'CODEX: PASS'
+  # a low value in the environment fails like a low value in a file
+  BASH_MAX_TIMEOUT_MS=1000 preflight_with_codex 999.0.0 ok
+  [ "$status" -eq 1 ]
+  has_line 'CODEX: FAIL: BASH_MAX_TIMEOUT_MS is 1000, below the 1200000'
+  # a file that carries the key still decides, whatever the environment says
+  mkdir -p "$r/orca-obj/.claude"
+  printf '{"env":{"BASH_MAX_TIMEOUT_MS":"1000"}}\n' >"$r/orca-obj/.claude/settings.json"
+  BASH_MAX_TIMEOUT_MS=1200000 preflight_with_codex 999.0.0 ok
+  [ "$status" -eq 1 ]
+  has_line 'CODEX: FAIL: BASH_MAX_TIMEOUT_MS is 1000, below the 1200000'
+}
+
+@test "the environment's timeout counts with no settings file at all" {
+  make_bare_layout "$BATS_TEST_TMPDIR/r"
+  cd "$BATS_TEST_TMPDIR/r"
+  printf 'reviewer=codex\n' >.orca/config
+  BASH_MAX_TIMEOUT_MS=1200000 preflight_with_codex 999.0.0 ok
+  [ "$status" -eq 0 ]
+  has_line 'CODEX: PASS'
+}
+
+@test "ORCA_IN_SCOPE from an orca-* worktree is yes when its own or the user's settings say so; a user's own worktree still reads no" {
+  r="$BATS_TEST_TMPDIR/r"
+  make_bare_layout "$r"
+  git -C "$r/main" worktree add -q "$r/orca-obj" -b feature/obj
+  git -C "$r/main" worktree add -q "$r/second" -b second
+  mkdir -p "$r/orca-obj/.claude" "$HOME/.claude"
+  cd "$r/orca-obj"
+  where; has_line $'ORCA_IN_SCOPE:\t-'
+  printf '{"permissions":{"additionalDirectories":[".."]}}\n' >.claude/settings.local.json
+  where; has_line $'ORCA_IN_SCOPE:\tyes'
+  rm .claude/settings.local.json
+  printf '{"permissions":{"additionalDirectories":["%s"]}}\n' "$r" >"$HOME/.claude/settings.json"
+  where; has_line $'ORCA_IN_SCOPE:\tyes'
+  rm "$HOME/.claude/settings.json"
+  # a worktree of the user's own is not one orca moves a session into
+  cd "$r/second"
+  where; has_line $'ORCA_IN_SCOPE:\tno'
+  # nor is an orca-* directory that is not directly under the root
+  git -C "$r/main" worktree add -q "$r/second/orca-nested" -b nested
+  cd "$r/second/orca-nested"
+  where; has_line $'ORCA_IN_SCOPE:\tno'
+}
+
+@test "where explores the session's own worktree before the default one, never an orca-* worktree" {
+  r="$BATS_TEST_TMPDIR/r"
+  make_bare_layout "$r"
+  git -C "$r/main" worktree add -q "$r/second" -b second
+  git -C "$r/main" worktree add -q "$r/orca-obj" -b feature/obj
+  mkdir -p "$r/second/src" "$r/orca-obj/src"
+  # a user's second worktree is explored as it stands
+  cd "$r/second/src"
+  where
+  has_line $'EXPLORE:\t'"$r/second"$'\tsession'
+  has_line $'AT_BASE:\tyes'
+  # one of orca's is another unit's unfinished branch: the default worktree
+  cd "$r/orca-obj/src"
+  where
+  has_line $'EXPLORE:\t'"$r/main"$'\tdefault'
+  # a root session has no worktree of its own
+  cd "$r"
+  where
+  has_line $'EXPLORE:\t'"$r/main"$'\tdefault'
+  # the default worktree is the session's own when it stands there
+  cd "$r/main"
+  where
+  has_line $'EXPLORE:\t'"$r/main"$'\tsession'
+  # --base still wins, from anywhere
+  cd "$r/second"
+  where --base feature/obj
+  has_line $'EXPLORE:\t'"$r/orca-obj"$'\tbase'
+  where --base main
+  has_line $'EXPLORE:\t'"$r/main"$'\tbase'
+  # an orca-* session with the default branch checked out nowhere: the root
+  git -C "$r/main" checkout -q --detach
+  cd "$r/orca-obj"
+  where
+  has_line $'EXPLORE:\t'"$r"$'\troot'
 }
 
 @test "the default worktree is where the default branch is checked out, whatever the directory is called" {
@@ -321,11 +448,11 @@ where() { run bash "$SCRIPTS/orca.sh" preflight where "$@"; }
   has_line $'AT_BASE:\tyes'
   has_line $'UNCOMMITTED_TOTAL:\t0'
   # the base branch checked out nowhere: the build base is still the branch's
-  # tip, the default worktree is explored, and the mismatch is stated
+  # tip, the session's own worktree is explored, and the mismatch is stated
   git -C "$r/main" worktree remove "$r/orca-feat"
   where --base feature/feat
   [ "$status" -eq 0 ]
-  has_line $'EXPLORE:\t'"$r/main"$'\tdefault'
+  has_line $'EXPLORE:\t'"$r/main"$'\tsession'
   has_line $'BUILD_BASE:\t'"$feat_tip"$'\tfeature/feat'
   has_line $'AT_BASE:\tno'
   # a confirmed trunk that is not the bare HEAD's branch: its tip, not HEAD's

@@ -77,7 +77,9 @@
 #   existing objective with the slug (OBJECTIVE_EXISTS), or an existing
 #   <repo-root>/orca-<slug> (WORKTREE_EXISTS); the slug is lowercase
 #   kebab-case (BAD_SLUG) and the base must name a commit (BAD_REF),
-#   recorded as both the ref and its commit. --idea names a file (`-`:
+#   recorded as both the ref and its commit. An empty <base-ref> ('') is
+#   the bare repository's default branch — the branch its HEAD names;
+#   a detached or unset HEAD is BAD_REF. --idea names a file (`-`:
 #   stdin) whose text, trailing newlines dropped, is written verbatim
 #   under objective.md's `## Idea`; an unreadable one is BAD_ARGS,
 #   before anything is written. Writes objective.md,
@@ -845,6 +847,12 @@ obj_new() { # <repo> <slug> <base-ref> [--idea <file>|-]
   obj_resolve_repo "$1"
   [ "$is_bare" = true ] \
     || fail NOT_BARE "conventional checkout at $repo_root — objectives need the bare-with-worktrees layout; run /orca:init to convert"
+  if [ -z "$base" ]; then
+    # No base named: the bare repository's default branch, resolved here
+    # so no caller has to point git at the bare directory itself.
+    base="$(git --git-dir="$common_dir" symbolic-ref -q --short HEAD 2>/dev/null)" && [ -n "$base" ] \
+      || fail BAD_REF "no base named and the repository's HEAD names no branch — name the branch the objective builds on"
+  fi
   base_commit="$(git --git-dir="$common_dir" rev-parse -q --verify "$base^{commit}" 2>/dev/null)" \
     || fail BAD_REF "'$base' does not name a commit in this repository"
   branch="feature/$slug"

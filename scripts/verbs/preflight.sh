@@ -20,14 +20,18 @@
 #   SESSION:<TAB>root | worktree <path> | conventional
 #       the bare layout's root, a worktree of it (its top level), or a
 #       conventional checkout
-#   ROOT_IN_SCOPE:<TAB>yes | no | n/a
-#       whether the repository root — the orca-* worktrees and .orca/ — is
-#       inside what a session started here may touch: n/a when the session
-#       stands at the root itself (or in a conventional checkout, which is
-#       the root); otherwise yes when a permissions.additionalDirectories
+#   ORCA_IN_SCOPE:<TAB>yes | no | n/a | -
+#       whether <root>/.orca/ — the objective's own files — is inside what
+#       a session started here may touch: n/a when the session stands at
+#       the root itself (or in a conventional checkout, which is the
+#       root); otherwise yes when a permissions.additionalDirectories
 #       entry of this worktree's .claude/settings.local.json or
-#       settings.json, or of the user's ~/.claude/settings.json, names the
-#       root or a directory above it
+#       settings.json, or of the user's ~/.claude/settings.json, names
+#       <root>/.orca or a directory above it (the root itself included);
+#       an entry below .orca or beside it does not count. From one of
+#       orca's own worktrees (<root>/orca-*) with no such entry the answer
+#       is -, unknown: a session that moved there still reads the settings
+#       of the directory it was started in, which a shell cannot name
 #   DEFAULT_WORKTREE:<TAB><path> | -
 #       where the default branch is checked out (lib.sh default_worktree)
 #
@@ -37,11 +41,13 @@
 #                                     the location lines only, then where a
 #                                     run's spec and research explore and
 #                                     what the run builds on:
-#     EXPLORE:<TAB><dir><TAB>base | default | session | root
+#     EXPLORE:<TAB><dir><TAB>base | session | default | root
 #         with --base, the worktree that has <branch> checked out (base).
-#         Otherwise, or when <branch> is checked out nowhere: the default
-#         worktree; when the default branch is checked out nowhere either,
-#         the session's own worktree, else the root
+#         Otherwise, or when <branch> is checked out nowhere: the session's
+#         own worktree (session), unless it is one of orca's (<root>/orca-*,
+#         another unit's unfinished branch); then the default worktree
+#         (default); when the default branch is checked out nowhere either,
+#         the root
 #     BUILD_BASE:<TAB><sha><TAB><branch>
 #         the commit a run builds on, resolved from the branch alone and
 #         never from the directory explored: <branch>'s tip with --base (the
@@ -91,12 +97,16 @@ additional_dirs() { # <settings-file>
   return 0
 }
 
-# yes when an entry of <settings-file> is the repository root or a
-# directory above it. A relative entry is read against <base-dir>, the
-# directory the settings file belongs to; an empty <base-dir> skips it.
-root_in_settings() { # <settings-file> <base-dir>
-  local entry dir root_canon
-  root_canon="$(canonicalize "$repo_root")"
+# yes when an entry of <settings-file> is the repository's .orca
+# directory or a directory above it — the root included. A relative entry
+# is read against <base-dir>, the directory the settings file belongs to;
+# an empty <base-dir> skips it.
+orca_in_settings() { # <settings-file> <base-dir>
+  local entry dir orca_canon orca_real
+  # Both spellings of the directory: under the canonical root, and where
+  # a linked .orca really is.
+  orca_canon="$(canonicalize "$repo_root")/.orca"
+  orca_real="$(canonicalize "$repo_root/.orca")"
   while IFS= read -r entry; do
     [[ -n "$entry" ]] || continue
     # An entry spelled with a literal tilde is matched as text and
@@ -109,11 +119,23 @@ root_in_settings() { # <settings-file> <base-dir>
       *) [[ -n "$2" ]] || continue; dir="$2/$entry" ;;
     esac
     dir="$(canonicalize "$dir")"
-    if [[ "$dir" == "/" || "$root_canon" == "$dir" || "$root_canon" == "$dir"/* ]]; then
+    if [[ "$dir" == "/" || "$orca_canon" == "$dir" || "$orca_canon" == "$dir"/* \
+      || "$orca_real" == "$dir" || "$orca_real" == "$dir"/* ]]; then
       return 0
     fi
   done < <(additional_dirs "$1")
   return 1
+}
+
+# Whether the shell stands in one of orca's own worktrees: a worktree
+# directly under the repository root whose name starts orca-.
+in_orca_worktree() {
+  [[ -n "$worktree_root" ]] || return 1
+  case "$(basename "$worktree_root")" in
+    orca-*) ;;
+    *) return 1 ;;
+  esac
+  [[ "$(canonicalize "$(dirname "$worktree_root")")" == "$(canonicalize "$repo_root")" ]]
 }
 
 location_lines() {
@@ -127,14 +149,16 @@ location_lines() {
   fi
   if [[ -z "$worktree_root" || "$(canonicalize "$worktree_root")" == "$(canonicalize "$repo_root")" ]]; then
     scope="n/a"
-  elif root_in_settings "$worktree_root/.claude/settings.local.json" "$worktree_root" \
-    || root_in_settings "$worktree_root/.claude/settings.json" "$worktree_root" \
-    || root_in_settings "$HOME/.claude/settings.json" ""; then
+  elif orca_in_settings "$worktree_root/.claude/settings.local.json" "$worktree_root" \
+    || orca_in_settings "$worktree_root/.claude/settings.json" "$worktree_root" \
+    || orca_in_settings "$HOME/.claude/settings.json" ""; then
     scope="yes"
+  elif in_orca_worktree; then
+    scope="-"
   else
     scope="no"
   fi
-  printf 'ROOT_IN_SCOPE:\t%s\n' "$scope"
+  printf 'ORCA_IN_SCOPE:\t%s\n' "$scope"
   default_wt="$(default_worktree)"
   printf 'DEFAULT_WORKTREE:\t%s\n' "${default_wt:--}"
 }
@@ -172,10 +196,10 @@ if [[ "${1:-}" == "where" ]]; then
     done < <(git --git-dir="$common_dir" worktree list --porcelain 2>/dev/null)
   fi
   if [[ -z "$explore" ]]; then
-    if [[ -n "$default_wt" ]]; then
-      explore="$default_wt" explore_why=default
-    elif [[ -n "$worktree_root" ]]; then
+    if [[ -n "$worktree_root" ]] && ! in_orca_worktree; then
       explore="$worktree_root" explore_why=session
+    elif [[ -n "$default_wt" ]]; then
+      explore="$default_wt" explore_why=default
     else
       explore="$repo_root" explore_why=root
     fi
@@ -342,7 +366,11 @@ fi
 # through the Bash tool, whose default cap is well under a cold review, and
 # only a settings env block can raise it. orca:doctor writes it.
 # Project settings can live in the worktree the session runs in or beside
-# the bare repo at the root; both are checked, then the user scope.
+# the bare repo at the root; both are checked, then the user scope. A
+# settings env block also reaches the shell, so when no file carries the
+# key the environment's own value is taken as the key's: a session that
+# moved into another worktree still runs under the settings of the
+# directory it was started in, which are not among these files.
 settings_files=(
   "${worktree_root:-.}/.claude/settings.local.json" "${worktree_root:-.}/.claude/settings.json"
   "${repo_root:-.}/.claude/settings.local.json" "${repo_root:-.}/.claude/settings.json"
@@ -387,6 +415,10 @@ else
       | grep -oE '[0-9]+$' | head -1)"
     break
   done
+  if [[ "$timeout_set" -eq 0 && -n "${BASH_MAX_TIMEOUT_MS:-}" ]]; then
+    timeout_set=1
+    timeout_value="$(printf '%s' "$BASH_MAX_TIMEOUT_MS" | grep -oE '^[0-9]+$' || true)"
+  fi
   if [[ -n "$missing_flags" ]]; then
     codex_fail "codex ${codex_version:-unknown} has no 'codex exec' $missing_flags — this codex cannot be driven by orca.sh codex; upgrade the Codex CLI, or pin reviewer=claude via orca:config (orca:doctor walks this through)"
   elif [[ "$timeout_set" -eq 0 ]]; then

@@ -426,6 +426,27 @@ describe('the band in a session', () => {
     expect(await ui.find({ type: 'Text', text: '● implement' })).toBeDefined()
   })
 
+  test('from a session in an orca-* worktree the journal is found under that worktree\'s project folder', async ($, on) => {
+    expect(projectDirName('/repo/orca-feat')).toBe('-repo-orca-feat')
+    const clock = mock.clock(on, { now: 10_000 })
+    const journalFile = '/home/.claude/projects/-repo-orca-feat/sess-wt/subagents/workflows/wf_4/journal.jsonl'
+    serveFiles(on, new Map<string, Node>([
+      [`${RUN_DIR}/spec.md`, { text: 'spec', mtimeMs: 2 }],
+      [journalFile, { text: journal(['started', 'i1', 'implement:W1']), mtimeMs: 10_200 }],
+    ]))
+    on('tool.call', { tool: 'Workflow' }, () => ({
+      result: { status: 'async_launched', taskId: 'task4', taskType: 'local_workflow', runId: 'wf_4' },
+    }))
+    on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home' : undefined }))
+    on('session.cwd', () => ({ value: '/repo/orca-feat' }))
+    on('session.id', () => ({ value: 'sess-wt' }))
+    engineBand(on)
+    await $.tool.call({ tool: 'Workflow', scriptPath: WORK_LOOP, args: { runDir: RUN_DIR, items: [{ id: 'W1', title: 'a', deps: [], files: [] }] } })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'orca', surface: 'terminal', ...BAND })
+    expect(await ui.find({ type: 'Text', text: '● implement' })).toBeDefined()
+  })
+
   test('the work loop\'s task notification takes the band down', async ($, on) => {
     const clock = mock.clock(on, { now: 10_000 })
     serveFiles(on, new Map([[`${RUN_DIR}/spec.md`, { text: 'spec', mtimeMs: 2 }]]))

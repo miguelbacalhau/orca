@@ -548,6 +548,25 @@ MERGED_ITEM="$BUILT,$MP_FRAME,$MERGED,$MF_FRAME"
   done
 }
 
+@test "the switch hook's tool name and input are the ones the skills spell" {
+  # hooks/switch.ts approves EnterWorktree by its `path` input.
+  grep -q "^export const ENTER_TOOL = 'EnterWorktree'$" "$ORCA_ROOT/hooks/switch.ts"
+  grep -q '(toolInput as { path?: unknown }).path' "$ORCA_ROOT/hooks/switch.ts"
+  # The one place the move is written out, and the skills that move on their own.
+  local f
+  for f in skills/new/provision.md skills/review/SKILL.md; do
+    grep -qF 'EnterWorktree({path: "<worktree>"})' "$ORCA_ROOT/$f"
+    grep -qF 'ExitWorktree({action: "keep"})' "$ORCA_ROOT/$f"
+  done
+  # Leaving is always a keep: a worktree is never removed through the tool.
+  for f in skills/archive/SKILL.md skills/doctor/SKILL.md skills/run/SKILL.md skills/retry/SKILL.md skills/followup/SKILL.md; do
+    grep -qF 'ExitWorktree({action: "keep"})' "$ORCA_ROOT/$f"
+  done
+  ! grep -rnE 'ExitWorktree\(\{action: "remove"' "$ORCA_ROOT/skills" "$ORCA_ROOT/agents"
+  # Both are deferred tools, loaded by name.
+  grep -qF 'select:EnterWorktree,ExitWorktree' "$ORCA_ROOT/skills/new/provision.md"
+}
+
 @test "the hook's allow-list is exactly the verbs the work loop calls" {
   local called allowed
   called="$(grep -oE "orca\('[a-z-]+'" "$SCRIPTS/work-loop.workflow.js" | sed "s/orca('//; s/'//" | sort -u)"

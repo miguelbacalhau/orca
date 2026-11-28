@@ -29,7 +29,7 @@ What a repository looks like mid-run. `/orca:init` creates the top three entries
         └── reviews/                   # raw findings JSON per review round
 ```
 
-- `main/` (the default worktree) is where you work **and** where Claude Code sessions start: it loads the repository's own `CLAUDE.md` and `.claude/`, and orca's [pin hook](pin-hook.md) starts each stage agent in its own `orca-*` worktree. A session started there reaches the `orca-*` worktrees and `.orca/` once the repository root is in `permissions.additionalDirectories` — `/orca:doctor` writes it. Starting sessions at `<repo-root>` still works and needs no setting.
+- `main/` (the default worktree) is where you work **and** where Claude Code sessions start: it loads the repository's own `CLAUDE.md` and `.claude/`, and orca's [pin hook](pin-hook.md) starts each stage agent in its own `orca-*` worktree. A session started there reaches `.orca/` once `<repo-root>/.orca` is in `permissions.additionalDirectories` — `/orca:doctor` writes it — and reaches an objective's worktree by [moving into it](objectives.md#where-the-session-stands) for as long as it drives the objective. Starting sessions at `<repo-root>` still works, needs no setting, and never moves.
 - `orca-*` **directory** names are local and never enter git. **Branch** names (`feature/<slug>[-<ID>]`) carry no orca trace.
 - `.orca/` sits outside every worktree, so nothing in it can be committed by accident. It is machine-local.
 - Everything in `.orca/` is safe to delete **except `secrets/`**, which holds your only copy of those files, and `review-notes/`, which holds your unaddressed comments.

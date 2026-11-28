@@ -102,6 +102,22 @@ export function ownerSession(text: string | null): string | null {
   return line ? line.slice('session='.length).trim() || null : null
 }
 
+// The worktree objective.md's header names: the first `**Worktree:**` line
+// above the first `## ` heading, as `objective new` writes it (the path in
+// backticks). null when the header has no such line or it names nothing; a
+// line quoted further down, under `## Idea`, is never read.
+export function objectiveWorktree(text: string | null): string | null {
+  for (const raw of (text ?? '').split('\n')) {
+    const line = raw.replace(/\r$/, '')
+    if (line.startsWith('## ')) return null
+    const match = /^\*\*Worktree:\*\* ?(.*)$/.exec(line)
+    if (!match) continue
+    const value = (match[1] as string).trim().replace(/^`(.*)`$/, '$1').trim()
+    return value === '' ? null : value
+  }
+  return null
+}
+
 // Whether report.md's `**Final verification:** <pass|fail> after <P> (…)`
 // line covers the last phase: a phase added since makes it stale.
 export function finalVerified(report: string | null, phases: Entry[]): boolean {

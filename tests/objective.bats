@@ -161,6 +161,31 @@ state_is() { # <state> — $D's derived state in `list --all`
   assert_fail_reason BAD_ARGS
 }
 
+@test "new: an empty base is the default branch, recorded by name; a detached bare HEAD is BAD_REF" {
+  git -C "$R/main" branch develop
+  ( cd "$R/main" && echo more >more.txt && git add more.txt && git commit -qm more )
+  tip="$(git -C "$R/main" rev-parse HEAD)"
+  run orca objective new "$R" alpha ''
+  [ "$status" -eq 0 ]
+  [ "$(frame_value base)" = "$tip" ]
+  D="$(frame_value dir)"
+  grep -qxF '**Base:** `main`' "$D/objective.md"
+  grep -qxF "**Base commit:** \`$tip\`" "$D/objective.md"
+  [ "$(git -C "$R/main" rev-parse feature/alpha)" = "$tip" ]
+  # the bare HEAD names the default branch, wherever the shell stands
+  git --git-dir="$R/.bare" symbolic-ref HEAD refs/heads/develop
+  run orca objective new "$R/main" beta ''
+  [ "$status" -eq 0 ]
+  [ "$(frame_value base)" = "$(git -C "$R/main" rev-parse develop)" ]
+  grep -qxF '**Base:** `develop`' "$(frame_value dir)/objective.md"
+  # detached: nothing to build on, nothing written
+  git --git-dir="$R/.bare" update-ref --no-deref HEAD "$tip"
+  run orca objective new "$R" gamma ''
+  assert_fail_reason BAD_REF
+  [ -z "$(ls -d "$R"/.orca/objectives/*-gamma 2>/dev/null)" ]
+  ! git -C "$R/main" rev-parse -q --verify refs/heads/feature/gamma
+}
+
 @test "new: --idea writes the idea verbatim under ## Idea, from a file or stdin" {
   printf 'add `dark mode` to $HOME\n\nsecond paragraph\n\n\n' >"$BATS_TEST_TMPDIR/idea"
   run orca objective new "$R" alpha main --idea "$BATS_TEST_TMPDIR/idea"
@@ -2558,4 +2583,51 @@ commit_in() { # <worktree> <file> — one commit adding <file>
   [ "$(frame_value worktree)" = removed ]
   [ ! -e "$W" ]
   [ -d "$R/main/packages/x" ]
+}
+
+# ---- a session standing in the objective's worktree -----------------------
+
+@test "from a shell in the objective's worktree, top and subdirectory: current, list, digest, open, idle, and phase-start answer for the repository" {
+  opened alpha
+  decision D1 decided 'Per key?'
+  phase P1 pending 'Bucket'
+  mkdir -p "$W/src/deep"
+  for here in "$W" "$W/src/deep"; do
+    cd "$here"
+    run orca objective current "$PWD"
+    [ "$status" -eq 0 ]
+    [ "$(frame_value dir)" = "$D" ]
+    run orca objective list "$PWD"
+    [ "$status" -eq 0 ]
+    has_line $'OBJECTIVE:\t'"$D"$'\talpha'
+    run orca objective digest "$D"
+    [ "$status" -eq 0 ]
+    run orca objective open "$D"
+    [ "$status" -eq 0 ]
+    [ "$(frame_value claim)" = kept ]
+    [ "$(frame_value worktree)" = "$W" ]
+    run orca objective idle "$D"
+    [ "$status" -eq 0 ]
+  done
+  run orca objective phase-start "$D" P1
+  [ "$status" -eq 0 ]
+  [ "$(frame_value started)" = yes ]
+  [ "$(cat "$D/phases/P1/worktree")" = "$W" ]
+}
+
+@test "archive: refused from a shell inside the objective's worktree or a subdirectory of it, done from main/" {
+  opened alpha
+  mkdir -p "$W/src"
+  cd "$W"
+  run orca objective archive "$D" --abandon
+  assert_fail_reason WORKTREE_IN_USE
+  cd "$W/src"
+  run orca objective archive "$D" --abandon
+  assert_fail_reason WORKTREE_IN_USE
+  [ -d "$W" ] && [ ! -e "$D/archived" ]
+  cd "$R/main"
+  run orca objective archive "$D" --abandon
+  [ "$status" -eq 0 ]
+  [ "$(frame_value state)" = abandoned ]
+  [ ! -e "$W" ]
 }

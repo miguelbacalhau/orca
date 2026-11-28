@@ -39,9 +39,9 @@ What `/orca:run` does between your confirmation and the report.
 | `PLUGIN_ROOT` | The plugin's `scripts/orca.sh` is where the install put it. |
 | `CONFIG` | Informational, only when a legacy `.orca/config.json` lingers (`OBSOLETE`). |
 | `REVIEWER` | `codex\|claude (pinned\|detected)` — which reviewer this run uses; `FAIL` on an invalid key. |
-| `CODEX` | Binary ≥ 0.142.5, authenticated, `codex exec` still has the flags orca drives, `BASH_MAX_TIMEOUT_MS` set to a usable value. `SKIPPED` when the reviewer is claude. |
+| `CODEX` | Binary ≥ 0.142.5, authenticated, `codex exec` still has the flags orca drives, `BASH_MAX_TIMEOUT_MS` set to a usable value in a settings file, or, when no file carries it, in the environment. `SKIPPED` when the reviewer is claude. |
 | `SESSION` | Informational: `root`, `worktree <path>`, or `conventional` — where the session was started. |
-| `ROOT_IN_SCOPE` | Informational: `yes`, `no`, or `n/a` (a root session) — whether the repository root is one of the session's `permissions.additionalDirectories`. Objectives need `yes` outside bypass mode. |
+| `ORCA_IN_SCOPE` | Informational: `yes`, `no`, `n/a` (a root session), or `-` (unknown: asked from inside an `orca-*` worktree, whose session reads the settings of the directory it was started in) — whether `<repo-root>/.orca`, or a directory above it, is one of the session's `permissions.additionalDirectories`. Objectives need `yes` outside bypass mode. |
 | `DEFAULT_WORKTREE` | Informational: where the default branch is checked out, or `-`. |
 | `RESULT` | Overall, mirrored by the exit code. |
 
@@ -49,7 +49,7 @@ On any `FAIL` the run does not start. Layout failures go to `/orca:init`, machin
 
 ## Spec and spec review
 
-The `orca:spec` agent writes `spec.md` once, read-only, from the confirmed brief. It explores **one checkout**: the worktree that has the build branch checked out — your default worktree for the trunk, as it stands, or, for a follow-up on an unlanded branch, that branch's `orca-<slug>` worktree. The interview's research explores the default worktree. Both are told the commit the run builds on — the confirmed trunk's tip, or the follow-up's base branch's — and which paths in the checkout are uncommitted (`orca.sh preflight where`), so work in progress is not mistaken for the base. When the build branch is checked out in no worktree they explore the default worktree, or failing that the session's own checkout, and are told it is not at the build base. The spec review's throwaway checkout is created at that same commit.
+The `orca:spec` agent writes `spec.md` once, read-only, from the confirmed brief. It explores **one checkout**: the worktree that has the build branch checked out — your default worktree for the trunk, as it stands, or, for a follow-up on an unlanded branch, that branch's `orca-<slug>` worktree. The interview's research explores the worktree the session stands in, or the default worktree when the session stands at the root or in an `orca-*` worktree. Both are told the commit the run builds on — the confirmed trunk's tip, or the follow-up's base branch's — and which paths in the checkout are uncommitted (`orca.sh preflight where`), so work in progress is not mistaken for the base. When the build branch is checked out in no worktree they explore the session's own worktree, or the default worktree from the root or an `orca-*` worktree, and are told it is not at the build base. The spec review's throwaway checkout is created at that same commit.
 
 Its two load-bearing sections:
 

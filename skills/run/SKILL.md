@@ -15,6 +15,8 @@ The brief is where the user sets intent — written in this skill's interview or
 
 ## Step 0: Triage
 
+**Leave an entered worktree first.** When this session stands in an `orca-*` worktree it moved into to drive an objective, call `ExitWorktree({action: "keep"})` before anything else (a deferred tool: `ToolSearch`, `select:ExitWorktree`; a `No-op` answer is fine): a run belongs to the directory the session was started in. The objective's claim is untouched.
+
 This skill is a dispatcher over `.orca` state: what is on disk decides whether this invocation resumes, runs, or interviews. Work the ordered checks below against the repository root, from whichever directory this session was started in — resolve `<repo-root>` as the parent of `git rev-parse --path-format=absolute --git-common-dir`, and name every path under it absolutely — discovering by listing, never by reading files to decide. Present the first hit, but never force it: every offer includes starting something new instead.
 
 **The argument gate — an argument is the intent.** Invoked with an `<idea>` argument, skip checks 2 and 3 and go straight to the interview (check 3's `interview.md`), seeded with it. Do not offer queued briefs, do not ask which to run, no picker — the user just typed the answer. Run the triage call below anyway (it is one cheap read), because two kinds of state still surface as **one-line mentions that never block**:
@@ -196,7 +198,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh preflight where --base <build-branch>
 A typed `FAIL: BAD_REF` means the branch does not exist: a hard stop, as Step 3 says of a missing base branch. From its TAB-separated lines:
 
 - `BUILD_BASE:` — the sha and the branch. **Hold the sha as `<build-base-sha>`**: it is the commit the spec is told the run builds on, the commit the spec-review worktree below is created at — every time it is created — and the branch Step 3 creates the integration worktree from.
-- `EXPLORE:` — the one checkout the spec agent explores, never `<repo-root>` itself (the root holds the default worktree plus every `orca-*` checkout, so a search there returns each hit several times and reads other runs' half-built code). It is the worktree that has the build branch checked out — the default worktree for the trunk, `<repo-root>/orca-<slug>` for an unlanded follow-up — and, when that branch is checked out nowhere, the default worktree, then this session's own checkout, then the root.
+- `EXPLORE:` — the one checkout the spec agent explores, never `<repo-root>` itself (the root holds the default worktree plus every `orca-*` checkout, so a search there returns each hit several times and reads other runs' half-built code). It is the worktree that has the build branch checked out — the default worktree for the trunk, `<repo-root>/orca-<slug>` for an unlanded follow-up — and, when that branch is checked out nowhere, this session's own worktree (unless that is an `orca-*` one), then the default worktree, then the root.
 - `AT_BASE: no` — the directory explored is not at the build base (the branch has no checkout, or its checkout sits on another commit): say so once, in one line, and add to the task message, after the block below, `The directory explored is not at the build base: <sha> is what the run builds on.`
 
 Put this block in the task message — the `UNCOMMITTED:` lines give the paths (`UNCOMMITTED_TOTAL: 0` → `none`; `-` → it could not be read: write `unknown`, never `none`):

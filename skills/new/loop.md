@@ -4,9 +4,11 @@ This file is read by `/orca:new` and `/orca:open` once a plan is installed, and 
 
 You sequence it; you never edit code, and you never apply the gate yourself. After every implementer turn and every review, **`rounds next` reads the phase directory and prints the one next action** — you execute it. Counts come from its frame and finding titles from `rounds summary`, so you never read a review or response file whole. The one exception is a dispute: the disputed entries of that round's response, and each disputed finding's own entry in the review, read by its title.
 
-You hold, from the skill that loaded this file: the objective directory `<dir>`, the `worktree`, the `reviewer` (with `codex`, `codex_fix`), and `root_in_scope` from this session's open, the `orca:objective-open` result (`${CLAUDE_PLUGIN_ROOT}/skills/new/provision.md`). When you no longer hold them (the open happened before a compaction, say), re-open as that file's Re-checking says. **One provisioning at a time in a worktree:** when an earlier `orca:provision` spawn — the open's warm-up — is still in flight, wait for its result before Step 2; when none was spawned, or it has landed, go on. Either way the phase start provisions again, cheap on a warm tree and needed, since phases change dependencies. Every spawn runs in the background: wait for its notification, and never fabricate a result. Shell calls go through `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh` with your own Bash tool. Later turns go to the implementer by `SendMessage` (a deferred tool: load it through ToolSearch when it appears only by name).
+You hold, from the skill that loaded this file: the objective directory `<dir>`, the `worktree`, the `session` value, the `reviewer` (with `codex`, `codex_fix`), and `orca_in_scope` from this session's open, the `orca:objective-open` result (`${CLAUDE_PLUGIN_ROOT}/skills/new/provision.md`). When you no longer hold them (the open happened before a compaction, say), re-open as that file's Re-checking says. **One provisioning at a time in a worktree:** when an earlier `orca:provision` spawn — the open's warm-up — is still in flight, wait for its result before Step 2; when none was spawned, or it has landed, go on. Either way the phase start provisions again, cheap on a warm tree and needed, since phases change dependencies. Every spawn runs in the background: wait for its notification, and never fabricate a result. Shell calls go through `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh` with your own Bash tool. Later turns go to the implementer by `SendMessage` (a deferred tool: load it through ToolSearch when it appears only by name).
 
-**The session's reach** is the held `root_in_scope`. When it is `no`, say so in one line before the first phase starts, as `${CLAUDE_PLUGIN_ROOT}/skills/new/provision.md` words it — the implementer would otherwise find out by being refused in its worktree — then go on.
+**Where the session stands.** Before every `phase-start` (Step 2) and before the final verification (Step 8), make sure the session stands where `${CLAUDE_PLUGIN_ROOT}/skills/new/provision.md`'s Standing in the worktree says: with `session: worktree` and a session directory that is not `<worktree>` — a `/orca:doctor` in between, a manual exit — move there first. A move that fails or is declined stops the pass, as that file says.
+
+**The session's reach** is the held `orca_in_scope`. When it is `no`, say so in one line before the first phase starts, as `${CLAUDE_PLUGIN_ROOT}/skills/new/provision.md` words it — the implementer and the reviewers would otherwise find out by being asked at every write under `.orca/` — then go on. `n/a` and `-` say nothing.
 
 **The reviewer** is the held `reviewer`. When it is `fail`, or `codex` with the result's `codex: fail`, no phase can be reviewed: relay `codex_fix` (`/orca:doctor` walks every remediation; `/orca:config` picks another reviewer) and stop before any phase starts. Never switch reviewers on the user's behalf.
 
@@ -24,7 +26,7 @@ Below, `<P>` is the phase id and `<phase-dir>` is `<dir>/phases/<P>`.
 
 ## Step 2: Start the phase
 
-Run it yourself — it is fast and quiet, and provisions nothing:
+First check where the session stands (above). Then run it yourself — it is fast and quiet, and provisions nothing:
 
 ```bash
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh objective phase-start <dir> <P>
@@ -188,7 +190,7 @@ The phase's implementer is done. Back to Step 1 for the next phase.
 
 Every phase is done, and the digest's `State:` reads `verify`: no final verification covers the last phase. Each phase ran the full checks before its commit, but nothing has re-checked an earlier phase's acceptance since later phases built on it, or asked whether the phases together deliver the outcome. `<P>` below is the last phase in the digest.
 
-Wait for an `orca:provision` still in flight (`/orca:open`'s warm-up), then spawn `orca:objective-verify`. Secrets stay placed, since it runs the checks as the implementer does:
+Check where the session stands (above). Wait for an `orca:provision` still in flight (`/orca:open`'s warm-up), then spawn `orca:objective-verify`. Secrets stay placed, since it runs the checks as the implementer does:
 
 ```text
 Worktree: <worktree>

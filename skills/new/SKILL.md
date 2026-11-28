@@ -1,5 +1,5 @@
 ---
-description: Start an orca objective — a long-lived, iterable unit of work under `.orca/objectives/` — from an idea. Creates the objective's files with the idea and its `feature/<slug>` branch at once (a provisional `objective-<h4>` slug when the idea is too vague to name), claims it and arrives in its worktree (`<repo-root>/orca-<slug>`), checks the config and the reviewer — all of it in a background `orca:objective-open` agent, so none of those verbs' output enters the session — then provisions the worktree (secrets, `.orca/setup`) in a background `orca:provision` agent, none of the setup output in the session's context either, while a background `orca:research` agent researches the touched code at the objective's base — the current checkout when it is clean at that base, else the new worktree. Once research returns, it discusses the idea with the user — informed reflection, scope pushback, the shapes the idea could take — writing the outcome, non-goals, and constraints into `objective.md` and every settled question into `decisions.md` as it goes, unsettled ones as open decisions. Once no decision is open it offers to start, and on the user's go it plans the work into reviewed sequential phases, runs them, and verifies the finished branch as a whole — a regression becoming one more phase; a user who stops first leaves the objective discussing, and `/orca:open` picks it up. Requires the bare-repo-with-worktrees layout; needs no bypass mode.
+description: Start an orca objective — a long-lived, iterable unit of work under `.orca/objectives/` — from an idea. Creates the objective's files with the idea and its `feature/<slug>` branch at once (a provisional `objective-<h4>` slug when the idea is too vague to name), claims it and arrives in its worktree (`<repo-root>/orca-<slug>`), checks the config and the reviewer — all of it in a background `orca:objective-open` agent, so none of those verbs' output enters the session — then provisions the worktree (secrets, `.orca/setup`) in a background `orca:provision` agent, none of the setup output in the session's context either, while a background `orca:research` agent researches the touched code at the objective's base, in that worktree. A session started in a worktree moves into the objective's worktree for as long as it drives the objective. Once research returns, it discusses the idea with the user — informed reflection, scope pushback, the shapes the idea could take — writing the outcome, non-goals, and constraints into `objective.md` and every settled question into `decisions.md` as it goes, unsettled ones as open decisions. Once no decision is open it offers to start, and on the user's go it plans the work into reviewed sequential phases, runs them, and verifies the finished branch as a whole — a regression becoming one more phase; a user who stops first leaves the objective discussing, and `/orca:open` picks it up. Requires the bare-repo-with-worktrees layout; needs no bypass mode.
 args: <idea>
 user-invocable: true
 disable-model-invocation: true
@@ -25,7 +25,7 @@ Nothing comes before this: no question, no research. The one exception is readin
 
 **The base** is the branch the user named as the starting point, else the trunk (the bare repository's default branch).
 
-Read `${CLAUDE_PLUGIN_ROOT}/skills/new/provision.md`. Creating the objective is its open, run with a `Mode: new` task. Spawn **`orca:objective-open`** in the background with this task message:
+Read `${CLAUDE_PLUGIN_ROOT}/skills/new/provision.md`. When this session stands in an `orca-*` worktree — it was driving another objective — leave it first, as that file's Standing in the worktree says (Leaving before another objective). Creating the objective is its open, run with a `Mode: new` task. Spawn **`orca:objective-open`** in the background with this task message:
 
 ```text
 Mode: new
@@ -39,7 +39,7 @@ Idea:
 ORCA_IDEA>>>
 ```
 
-(the plugin root substituted, absolute). The agent looks around, creates the objective (its files, with the idea verbatim under `## Idea`, and `feature/<slug>` at the base commit), opens it, and runs the reviewer check. None of those verbs' output or the files they write enter this session. Wait for its one object. Hold `dir` as `<dir>`, `slug`, and `base`, plus what that file's open says to hold. When `slug` differs from yours, a taken branch or worktree got it a `-<h4>` suffix: say which slug the objective got.
+(the plugin root substituted, absolute). The agent looks around, creates the objective (its files, with the idea verbatim under `## Idea`, and `feature/<slug>` at the base commit), opens it, and runs the reviewer check. None of those verbs' output or the files they write enter this session. Wait for its one object. Hold `dir` as `<dir>`, `slug`, and `base`, plus what that file's open says to hold. On `status: ok`, stand in the worktree as that file says, before anything else is spawned; a move that fails or is declined stops the skill there. When `slug` differs from yours, a taken branch or worktree got it a `-<h4>` suffix: say which slug the objective got.
 
 - `research_model` / `research_effort` are the research tuning. `config_fail: true` means the config is mangled, so research takes its defaults. Mention once that `/orca:config` repairs it.
 - `decisions_log` is the decision log's path when it exists. Never read it here.
@@ -53,14 +53,14 @@ ORCA_IDEA>>>
 
 **`status: open_failed`**: the objective exists, but the open failed. The objective is brand new, so of the causes that stop the skill only one can come: `NO_SESSION_ID` → this session has no id to claim with. Relay it (the objective exists, and `/orca:open <slug>` from another session picks it up) and stop. Any other reason follows that file's rule.
 
-**Where research explores** is the agent's `research_root`: the current checkout when it is clean at the base commit, else the objective's worktree. When it is empty (the open failed and there is no clean checkout at the base), research is skipped and the discussion runs intent-only.
+**Where research explores** is the open's `worktree`: it holds exactly the code at the base, and once the session has moved it is the session's own directory. When the open returned none (it failed), research is skipped and the discussion runs intent-only.
 
 ## Step 2: Provision and research
 
 With the open's object in hand, spawn both in the background, **in one message**:
 
 - **`orca:provision`**, as that file's Provisioning says, on the object's `worktree` and `arrival`. It is the warm-up, so a cold install overlaps the discussion. Skip it when the open failed.
-- **Research**: one `orca:research` agent through its bundled one-agent workflow. Use the Workflow tool with `scriptPath: "${CLAUDE_PLUGIN_ROOT}/scripts/research.workflow.js"` (the substituted, absolute value) and `args: { prompt, model?, effort? }`. Set `model` / `effort` from `research_model` / `research_effort`, each only when set. The `prompt` carries the repository to explore (`research_root`, which holds exactly the code at the base), the idea verbatim, and, when `decisions_log` is set, a `Project context:` line naming it (it is generated from trunk commit history). Research returns `{ report, died }`. The runId is throwaway: never persist or resume it.
+- **Research**, unless the open returned no worktree: one `orca:research` agent through its bundled one-agent workflow. Use the Workflow tool with `scriptPath: "${CLAUDE_PLUGIN_ROOT}/scripts/research.workflow.js"` (the substituted, absolute value) and `args: { prompt, model?, effort? }`. Set `model` / `effort` from `research_model` / `research_effort`, each only when set. The `prompt` carries the repository to explore (the open's `worktree`, which holds exactly the code at the base), the idea verbatim, and, when `decisions_log` is set, a `Project context:` line naming it (it is generated from trunk commit history). Research returns `{ report, died }`. The runId is throwaway: never persist or resume it.
 
 ### The provision result
 
@@ -85,5 +85,5 @@ The discussion ends one of two ways:
 
 - Creating the objective (the `orca:objective-open` spawn) is the first thing this skill does with an idea in hand. The objective exists before anything is asked or researched.
 - The research report is disposable: never persisted, never pasted to the user, never written into the objective's files. Whatever matters from it lands through the conversation.
-- You never edit code and never touch the worktree. The objective's files under `<dir>` are the only ones this skill writes, and only through the discussion (the verbs run in agents).
+- You never edit code and never touch the worktree: the session may stand in it, and still edits nothing there. The objective's files under `<dir>` are the only ones this skill writes, and only through the discussion (the verbs run in agents).
 - Never read `.orca/config`, `.orca/setup`, or a setup log into the conversation; the provision agent reports them, and `/orca:doctor` owns fixing them.

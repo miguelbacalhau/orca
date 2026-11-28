@@ -33,13 +33,15 @@ Then, by the chosen line's owner and state:
 
 ## Step 2: Open
 
-Read `${CLAUDE_PLUGIN_ROOT}/skills/new/provision.md` and run its open: spawn `orca:objective-open` with the `Mode: open` task on `<dir>`. It claims the objective for this session, arrives in the worktree (re-adding it when it is gone), and checks the reviewer. None of that output enters this session. On `status: open_failed`, these reasons stop first:
+Read `${CLAUDE_PLUGIN_ROOT}/skills/new/provision.md`. When the chosen line's owner is not `mine` and this session stands in an `orca-*` worktree — it was driving another objective — leave it first, as that file's Standing in the worktree says (Leaving before another objective). Then run its open: spawn `orca:objective-open` with the `Mode: open` task on `<dir>`. It claims the objective for this session, arrives in the worktree (re-adding it when it is gone), and checks the reviewer. None of that output enters this session. On `status: open_failed`, these reasons stop first:
 
 - `OWNED_ELSEWHERE` → another live session claimed it since the list: say which, and stop.
 - `ARCHIVED` → restore it first with `/orca:archive --undo <slug>`, and stop.
 - `NO_SESSION_ID` → this session has no id to claim with: relay it, and stop.
 
 Any other is a worktree failure: the claim stands, and that file's rule holds. On `status: ok` with `claim: stolen`, say in one line that the objective's earlier session had ended and this session took its claim over.
+
+On `status: ok`, stand in the worktree as that file says, before the digest and before anything else is spawned; a move that fails or is declined stops the skill there.
 
 Hold the reviewer values from the object, as that file says. Provisioning waits for the digest: whether it is worth spawning depends on the route (Step 4).
 
@@ -73,5 +75,5 @@ A user who stops anywhere needs nothing from you: the files already say where th
 
 - The digest is the starting context. Reading an objective's files whole — even "just to check" — is exactly what this skill exists to avoid; read the one entry the conversation needs.
 - Never take a live session's claim. A claim whose session has ended (`stale`) is free: the open takes it without asking.
-- You never edit code and never touch the worktree. `objective.md` and `decisions.md`, through the discussion and the loop's rulings, are the only files this skill writes.
+- You never edit code and never touch the worktree: the session may stand in it, and still edits nothing there. `objective.md` and `decisions.md`, through the discussion and the loop's rulings, are the only files this skill writes.
 - Never read `.orca/config`, `.orca/setup`, or a setup log into the conversation; the provision agent reports them, and `/orca:doctor` owns fixing them.

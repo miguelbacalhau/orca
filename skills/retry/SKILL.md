@@ -15,6 +15,8 @@ One boundary is principled, not arbitrary: the run's escalation agents already s
 
 ## Step 0: Pick the run
 
+**Leave an entered worktree first.** When this session stands in an `orca-*` worktree it moved into to drive an objective, call `ExitWorktree({action: "keep"})` before anything else (a deferred tool: `ToolSearch`, `select:ExitWorktree`; a `No-op` answer is fine): a run belongs to the directory the session was started in. The objective's claim is untouched.
+
 Discovery runs through the shared triage spine:
 
 ```bash

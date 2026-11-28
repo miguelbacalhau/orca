@@ -59,7 +59,7 @@ A run's deliverable is a `feature/<slug>` branch in its own worktree. You review
 | **Permission mode** | `bypassPermissions` for the session running the run; objectives don't need it. See [Permissions](#permissions). |
 | **git** | ≥ 2.31; ≥ 2.42 for `/orca:init` to create a brand-new repository. |
 | **Repository layout** | Bare repository with worktrees (`.bare/` plus peer worktrees). `/orca:init` sets it up, including converting an existing checkout. |
-| **Where to start sessions** | In your default worktree (`<repo-root>/main/`), where you edit and run git. `/orca:doctor` offers the one setting that needs: the repository root in `permissions.additionalDirectories`. Starting at `<repo-root>` works too and needs no setting. |
+| **Where to start sessions** | In your default worktree (`<repo-root>/main/`), where you edit and run git. `/orca:doctor` offers the one setting that needs: `<repo-root>/.orca` in `permissions.additionalDirectories`. A session driving an objective from there moves into the objective's worktree. Starting at `<repo-root>` works too and needs no setting. |
 | **Codex CLI** *(codex reviewer only)* | The global `codex` binary ≥ 0.142.5, authenticated with `codex login`. Install with `brew install codex` or the official release binaries — **never via npm**. Plus `BASH_MAX_TIMEOUT_MS=1200000` in a settings `env` block, which `/orca:doctor` writes for you. |
 
 The twenty-five agents and the CLI ship inside the plugin; nothing else is installed per repository.
@@ -215,7 +215,7 @@ agents.implement.model=opus
 
 **`BASH_MAX_TIMEOUT_MS`** (codex reviewer only) — Codex reviews run through the Bash tool, whose default timeout is too short. `/orca:doctor` writes `{ "env": { "BASH_MAX_TIMEOUT_MS": "1200000" } }` into `.claude/settings.local.json` — the one in the directory you start sessions in, your default worktree's own file — or `~/.claude/settings.json`; restart the session afterwards. orca itself stops a review at 18 minutes, inside that limit.
 
-**`permissions.additionalDirectories`** (sessions started in the default worktree) — the `orca-*` worktrees and `.orca/` sit beside your worktree, outside a session started in it. `/orca:doctor` reports this as `ROOT_IN_SCOPE` and, with your consent, adds the repository root to `permissions.additionalDirectories` in the default worktree's `.claude/settings.local.json`; restart the session afterwards. Objectives need it, since they run outside bypass mode; a bypass `/orca:run` works without it. It puts `.bare/` and `.orca/secrets/` within the session's reach too, as starting at the root always did.
+**`permissions.additionalDirectories`** (sessions started in the default worktree) — `.orca/`, where an objective's files live, sits beside your worktree, outside a session started in it. `/orca:doctor` reports this as `ORCA_IN_SCOPE` and, with your consent, adds `<repo-root>/.orca` to `permissions.additionalDirectories` in the default worktree's `.claude/settings.local.json`; restart the session afterwards. Objectives need it, since they run outside bypass mode: without it every write under `.orca/` is asked about. A bypass `/orca:run` works without it. It puts `.orca/secrets/` within the session's reach too. The objective's worktree needs no setting: the session [moves into it](docs/objectives.md#where-the-session-stands). An entry naming the repository root, written by an earlier version, keeps working; `/orca:doctor` offers to narrow it.
 
 orca runs whichever `codex` is first on your `PATH`, with the review's permissions — keep your `PATH` trustworthy.
 
@@ -268,6 +268,7 @@ Bypass mode applies to the **whole session**, not just the run, so a dedicated s
 - [Worktrees, secrets, and provisioning](docs/worktrees.md) — the repository layout, `.orca/secrets/`, and the `.orca/setup` contract.
 - [The verb hook](docs/verb-hook.md) — how the work loop runs shell steps, its guards, and its failure modes.
 - [The pin hook](docs/pin-hook.md) — how stage agents are started in their worktree, what they may not edit, and what it does not cover.
+- [The switch hook](docs/switch-hook.md) — which move into an objective's worktree is approved without asking, and what is left to you.
 - [The orca CLI](docs/cli.md) — the `orca.sh` verbs.
 
 ## Development

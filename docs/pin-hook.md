@@ -34,11 +34,11 @@ The Workflow host starts an agent again after a stall, a lost reply, or a rate-l
 
 ## Scope outside bypass mode
 
-Pinning sets where an agent works. It does not widen what the session may touch. In a session that is not in `bypassPermissions` — objectives — an agent can read and write its worktree only when the repository root is one of the session's `permissions.additionalDirectories`. `/orca:doctor` reports this as `ROOT_IN_SCOPE` and offers the settings write. A session started at the repository root needs nothing: every worktree is inside it.
+Pinning sets where an agent works. It does not widen what the session may touch. In a session that is not in `bypassPermissions` — objectives — an agent can read and write its worktree only when that worktree is inside what the session may touch. For an objective that is the session [standing in the objective's worktree](objectives.md#where-the-session-stands): the pin then sets the directory the agent already has. An agent pinned to a worktree other than the session's — `/orca:review`'s address agent on another deliverable — is why that skill moves the session there first. The objective's files under `.orca/` are reached through `permissions.additionalDirectories`, which `/orca:doctor` reports as `ORCA_IN_SCOPE` and offers to write. A session started at the repository root needs nothing: every worktree and `.orca/` are inside it.
 
 ## Conventions
 
-A pinned agent still starts with the session directory's `CLAUDE.md` in its context, and Claude Code does not load an `orca-*` worktree's `CLAUDE.md` or `.claude/rules/` for a session started elsewhere. The agents that edit code or run the checks read those files from their worktree themselves, and the worktree's win where they differ.
+A pinned agent still starts with the `CLAUDE.md` of the directory the session was started in, and Claude Code does not load an `orca-*` worktree's root `CLAUDE.md` for a session started elsewhere, even one that has moved into that worktree; the worktree's `.claude/rules/` load only for a session standing in it. The agents that edit code or run the checks read those files from their worktree themselves, and the worktree's win where they differ.
 
 ## What it does not cover
 

@@ -2,9 +2,11 @@
 // (./objective-band.tsx), drawn above the prompt through their shared slot
 // (./bands.tsx), whose session.end hook also releases the ending session's
 // objective claims (./claim-release.ts), the verb hook (./relay.ts), which
-// answers the work loop's orca.sh verb calls without a model, and the pin hook
+// answers the work loop's orca.sh verb calls without a model, the pin hook
 // (./pin.ts), which starts stage agents in the worktree their task message
-// names. hooks.json names one module, so this one registers all four parts.
+// names, and the switch hook (./switch.ts), which approves the session's move
+// into the worktree of the objective it has claimed. hooks.json names one
+// module, so this one registers all five parts.
 
 import type { Register } from 'claude-code'
 
@@ -13,6 +15,7 @@ import { register as objectiveBand } from './objective-band'
 import { register as pin } from './pin'
 import { register as relay } from './relay'
 import { register as runBand } from './run-band'
+import { register as switchHook } from './switch'
 
 export const register: Register = (on, options) => {
   runBand(on, options)
@@ -20,4 +23,5 @@ export const register: Register = (on, options) => {
   bands(on, options)
   relay(on, options)
   pin(on, options)
+  switchHook(on, options)
 }

@@ -1,5 +1,5 @@
 ---
-description: Set up a repository's layout for orca runs — the bare-repo-with-worktrees structure with a default-branch worktree that orca:run's pre-flight requires — plus optional final steps linking the default worktree's agent context (.claude, CLAUDE.md) to the repo root, so sessions started at the root auto-inject the repo's rules and conventions into every stage agent, and rendering the machine-local decision log (.orca/decisions.md) from commit history. Use when the user wants to prepare a new repository, an existing conventional checkout, or a fresh clone for orca runs, or when the pre-flight's layout gate (BARE_REPO) failed. Layout only: machine and session tooling (Codex CLI, review timeout, permissions) is orca:doctor's job. Interactive and consent-per-step — it restructures repositories, so every mutating action is confirmed first. Do not use to write a brief or run a feature.
+description: Set up a repository's layout for orca runs — the bare-repo-with-worktrees structure with a default-branch worktree that orca:run's pre-flight requires — plus the closing steps: linking the default worktree's env files into the secrets store, recommending where to start sessions (the default worktree, with the one scope setting orca:doctor writes; the root still works), and rendering the machine-local decision log (.orca/decisions.md) from commit history. Use when the user wants to prepare a new repository, an existing conventional checkout, or a fresh clone for orca runs, or when the pre-flight's layout gate (BARE_REPO) failed. Layout only: machine and session tooling (Codex CLI, review timeout, permissions) is orca:doctor's job. Interactive and consent-per-step — it restructures repositories, so every mutating action is confirmed first. Do not use to write a brief or run a feature.
 args: <path or clone URL, optional>
 user-invocable: true
 disable-model-invocation: true
@@ -21,7 +21,7 @@ If inside a git repository, run orca:run's pre-flight first — it is read-only:
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh preflight
 ```
 
-The layout gate — `BARE_REPO` — is this skill's work list; fix it with Step 2 below. The machine lines (`REVIEWER`, `CODEX` — `PASS | FAIL | SKIPPED`) are reported but not fixed here: on a machine-gate `FAIL`, point at **orca:doctor**. If `BARE_REPO` already passes, say so; one offer may remain — Step 4's root links, when the default worktree carries `.claude` or `CLAUDE.md` the root does not link yet — otherwise stop. Anything else the pre-flight flagged is doctor's, not this skill's.
+The layout gate — `BARE_REPO` — is this skill's work list; fix it with Step 2 below. The machine lines (`REVIEWER`, `CODEX` — `PASS | FAIL | SKIPPED`) are reported but not fixed here: on a machine-gate `FAIL`, point at **orca:doctor**. If `BARE_REPO` already passes, say so and stop: an existing layout's remaining setup — where sessions start, the scope setting, secrets, provisioning — is `/orca:doctor`'s. Anything else the pre-flight flagged is doctor's, not this skill's.
 
 If not inside a repository, ask which case applies: initialize a new repository here, convert an existing checkout elsewhere, or clone a remote URL into the layout. A URL or path argument answers this without asking.
 
@@ -97,25 +97,19 @@ Nothing in this touches history, refs, remotes, or config beyond `core.bare` —
 
 ## Step 3: Verify
 
-Re-run the pre-flight. `BARE_REPO` must now pass — that is this skill's deliverable. Report the machine lines too (`REVIEWER`, and `CODEX` as `PASS | FAIL | SKIPPED`): they cost nothing to relay, but a failing machine gate is fixed by **orca:doctor**, not here. Close by pointing at what comes next: `/orca:doctor` if a machine gate failed, then `/orca:run` to capture a feature's intent and run it — after the optional linking, decision-log render, and worktree provisioning below.
+Re-run the pre-flight. `BARE_REPO` must now pass — that is this skill's deliverable. Report the machine lines too (`REVIEWER`, and `CODEX` as `PASS | FAIL | SKIPPED`): they cost nothing to relay, but a failing machine gate is fixed by **orca:doctor**, not here. Close by pointing at what comes next: `/orca:doctor` if a machine gate failed, then `/orca:run` to capture a feature's intent and run it — after the steps below: the secrets links, where to start sessions, the decision-log render, and worktree provisioning.
 
-## Step 4: Link agent context to the root (optional, consented)
+### Link your env files into the store (optional, consented)
 
-The mechanics are the bundled script's — detection and the links alike; never author `ln` commands here. First the read-only state:
+A fresh worktree has tracked files only, so runs get the default worktree's `.env`s only through `<repo-root>/.orca/secrets/`. This is **orca:doctor's Step 1 secrets check**, run here rather than duplicated: read `${CLAUDE_PLUGIN_ROOT}/skills/doctor/SKILL.md` and apply its `secrets status` read and its one-list, one-consent `secrets link` offer by reference — the list of `UNLINKED:` and `LINKABLE:` lines, the "development credentials only — everything linked is readable by stage agents" sentence, and the verb call for exactly the paths the user names. Skip it silently when the status has nothing to offer. Never author `ln` commands for it.
 
-```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh init-link check
-```
+## Step 4: Where to start sessions
 
-One typed line per fact: `BRANCH:` and `WORKTREE:` (where the default branch is checked out), then one `LINK:` line per name (`.claude`, `CLAUDE.md`) with a state — `LINKABLE` (source exists, root slot empty), `LINKED` (already pointing at the worktree copy), `NO_SOURCE` (the worktree has no such file), or `CONFLICT` (the root slot is occupied by a real entry or a link pointing elsewhere — the script never overwrites, and an existing link is the user's to change, not orca's). With no `LINKABLE` line there is nothing to offer: skip silently when both are `NO_SOURCE`, report the state in a sentence otherwise. When something is linkable, offer it; on consent:
+Recommend starting Claude Code sessions in the **default worktree** — `<repo-root>/<default-branch>/`, the directory the user edits and runs git in. It loads the repository's own `CLAUDE.md`, `.claude` skills, hooks, and settings natively, and orca works from there: its pin hook starts each stage agent in its own `orca-*` worktree and refuses it edits to the user's checkout, and the agents read their worktree's conventions themselves.
 
-```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh init-link apply
-```
+One setting goes with it, and it is **orca:doctor's write**, never this skill's: the repository root in `permissions.additionalDirectories` of the default worktree's `.claude/settings.local.json`, so the `orca-*` worktrees and `.orca/` count as part of a session started there. Objectives need it outside `bypassPermissions`; a bypass `/orca:run` works without it. Read `${CLAUDE_PLUGIN_ROOT}/skills/doctor/SKILL.md` and apply its Step 3 item "The session's reach" by reference — the one-sentence explanation, the consent, the merged write, the fresh-session caveat — the way Step 6 reuses doctor's deep pass. When this session is not in the default worktree, the pre-flight's `ROOT_IN_SCOPE:` line does not speak for it: offer the write from the `DEFAULT_WORKTREE:` path's own settings file — skip the offer when that file already lists the root — and say the user can decline and take it up later through `/orca:doctor`.
 
-It creates a relative symlink per `LINKABLE` name (`LINKED:` lines) and reports everything else untouched (`SKIPPED:` lines) — relay both.
-
-State why it matters when offering: a session started at `<repo-root>` treats every worktree as inside its project directory, so the harness auto-injects the repo's conventions — path-matched `.claude/rules`, nested `CLAUDE.md`s, each at the worktree's own checked-out state — into every stage agent of a run, with no per-agent plumbing. The links supply what the bare root itself lacks: the session-start CLAUDE.md and the `.claude` skills, hooks, and settings. The effect requires starting orca sessions at `<repo-root>` rather than inside a worktree — recommend that alongside the offer, with two things worth knowing: the first root session prompts for trust and permissions fresh, and `.claude/settings.local.json` becomes shared with the linked worktree through the symlink.
+Starting sessions at `<repo-root>` still works and needs no setting: every worktree is inside the session's directory. For people who start there, one line: `orca.sh init-link check` and `init-link apply` link the default worktree's `.claude` and `CLAUDE.md` up to the root, so a root session loads them — run them only when the user asks for that setup, and relay their `LINK:`/`LINKED:`/`SKIPPED:` lines; never author `ln` commands here.
 
 ## Step 5: Render the decision log (optional)
 
@@ -139,6 +133,6 @@ It does not violate this skill's never-install-tooling guideline: the deep pass 
 
 - Every mutating action is announced and confirmed first; diagnosis is free.
 - Never touch history, refs, or remotes. The conversion changes layout, not content.
-- Layout only: never install tooling, write settings blocks, or change permission modes from here — that is orca:doctor's job, where each write has its own consent step.
+- Layout only: never install tooling, write settings blocks, or change permission modes from here — that is orca:doctor's job, where each write has its own consent step. The secrets links of Step 3 go through `orca.sh secrets link` and nothing else, and Step 4's scope setting is orca:doctor's own step, applied by reference with its consent.
 - Stop rather than improvise on: a dirty tree, existing worktrees, submodules, or a repo whose layout is already bare-with-worktrees but differs from the target shape (report the difference instead).
 - The default worktree is not optional: a bare store with no worktree strands the user, and orca:run's deliverable — a branch to land — assumes they have a working copy to land it from.

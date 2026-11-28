@@ -382,3 +382,237 @@ make_linked_layout() {
   run secrets status "$BATS_TEST_TMPDIR/plain"
   assert_fail_reason NOT_GIT
 }
+
+# ---- link: writing what status offers ----
+
+# make_link_layout <dir> — a bare layout whose main/ ignores env files
+# and node_modules, with a nested package directory.
+make_link_layout() {
+  make_secrets_layout "$1"
+  ( cd "$1/main" &&
+    printf '.env*\n!.env.example\nnode_modules/\nconfig/local.json\n' >.gitignore &&
+    mkdir -p apps/api config && echo '{}' >config/base.json &&
+    git add .gitignore config/base.json && git commit -qm ignores )
+}
+
+@test "link writes a nested UNLINKED entry, creating parents, as a resolving relative link" {
+  r="$BATS_TEST_TMPDIR/r"
+  make_link_layout "$r"
+  echo 'C=1' >"$r/main/apps/api/.env"
+  cd "$r"
+  run secrets link apps/api/.env
+  [ "$status" -eq 0 ]
+  has_line $'LINKED:\tapps/api/.env\t../../../../main/apps/api/.env'
+  has_line $'LINKED_TOTAL:\t1\tREFUSED:\t0'
+  [ -L "$r/.orca/secrets/apps/api/.env" ]
+  [ "$(readlink "$r/.orca/secrets/apps/api/.env")" = "../../../../main/apps/api/.env" ]
+  [ "$(cat "$r/.orca/secrets/apps/api/.env")" = "C=1" ]
+  # status now sees a LINK entry and offers nothing
+  run secrets status
+  has_line $'ENTRY:\tapps/api/.env\tLINK\t../../../../main/apps/api/.env'
+  refute_line 'UNLINKED:'
+}
+
+@test "link replaces an eligible SAME copy with the link" {
+  r="$BATS_TEST_TMPDIR/r"
+  make_link_layout "$r"
+  echo 'A=1' >"$r/main/.env"; echo 'A=1' >"$r/.orca/secrets/.env"
+  run secrets link .env --dir "$r"
+  [ "$status" -eq 0 ]
+  has_line $'RELINKED:\t.env\t../../main/.env'
+  [ -L "$r/.orca/secrets/.env" ]
+  [ "$(cat "$r/.orca/secrets/.env")" = "A=1" ]
+  # no temporary link left beside it
+  [ "$(ls -A "$r/.orca/secrets")" = ".env" ]
+}
+
+@test "link refuses a non-env SAME copy: it stays a copy" {
+  r="$BATS_TEST_TMPDIR/r"
+  make_link_layout "$r"
+  echo '{"k":1}' >"$r/main/config/local.json"
+  mkdir -p "$r/.orca/secrets/config"
+  echo '{"k":1}' >"$r/.orca/secrets/config/local.json"
+  run secrets status "$r"
+  has_line $'COPY:\tconfig/local.json\tSAME'
+  run secrets link config/local.json --dir "$r"
+  [ "$status" -eq 0 ]
+  has_line $'REFUSED:\tconfig/local.json\tNOT_OFFERED'
+  has_line $'LINKED_TOTAL:\t0\tREFUSED:\t1'
+  [ -f "$r/.orca/secrets/config/local.json" ]
+  [ ! -L "$r/.orca/secrets/config/local.json" ]
+}
+
+@test "link refuses a path below a symlinked store parent and writes nothing outside" {
+  r="$BATS_TEST_TMPDIR/r"
+  make_link_layout "$r"
+  echo 'C=1' >"$r/main/apps/api/.env"
+  mkdir -p "$BATS_TEST_TMPDIR/outside"
+  ln -s "$BATS_TEST_TMPDIR/outside" "$r/.orca/secrets/apps"
+  # status still offers it: its scan looks only at the final entry
+  run secrets status "$r"
+  has_line $'UNLINKED:\tapps/api/.env'
+  run secrets link apps/api/.env --dir "$r"
+  [ "$status" -eq 0 ]
+  has_line $'REFUSED:\tapps/api/.env\tIRREGULAR_PARENT'
+  [ -z "$(ls -A "$BATS_TEST_TMPDIR/outside")" ]
+}
+
+@test "link refuses by name, one path at a time, without stopping the rest" {
+  r="$BATS_TEST_TMPDIR/r"
+  make_link_layout "$r"
+  echo 'B=new' >"$r/main/.env.local"; echo 'B=old' >"$r/.orca/secrets/.env.local"
+  echo 'ex' >"$r/main/.env.example"
+  ( cd "$r/main" && git add .env.example && git commit -qm example )
+  echo 'x' >"$r/main/notes.txt"
+  echo '{"k":1}' >"$r/main/config/local.json"
+  mkdir -p "$r/main/node_modules/pkg" && echo 'x' >"$r/main/node_modules/pkg/.env"
+  echo 'T=1' >"$r/main/.env.test"
+  ln -s /somewhere/else "$r/.orca/secrets/.env.test"
+  echo 'only-store' >"$r/.orca/secrets/.env.store"
+  echo 'G=1' >"$r/main/.env.good"
+  run secrets link .env.local .env.example notes.txt config/local.json seed.txt \
+    node_modules/pkg/.env .env.test .env.store .env.missing .env.good --dir "$r"
+  [ "$status" -eq 0 ]
+  has_line $'REFUSED:\t.env.local\tCOPY_DIFFERS'
+  has_line $'REFUSED:\t.env.example\tNOT_OFFERED'             # tracked
+  has_line $'REFUSED:\tnotes.txt\tNOT_OFFERED'                # unignored
+  has_line $'REFUSED:\tconfig/local.json\tNOT_OFFERED'        # ignored, not an env name
+  has_line $'REFUSED:\tseed.txt\tNOT_OFFERED'                 # tracked, not an env name
+  has_line $'REFUSED:\tnode_modules/pkg/.env\tNOT_OFFERED'    # inside an ignored directory
+  has_line $'REFUSED:\t.env.test\tENTRY_EXISTS'
+  has_line $'REFUSED:\t.env.store\tENTRY_EXISTS'
+  has_line $'REFUSED:\t.env.missing\tSOURCE_GONE'
+  has_line $'LINKED:\t.env.good\t../../main/.env.good'
+  has_line $'LINKED_TOTAL:\t1\tREFUSED:\t9'
+  [ "$(cat "$r/.orca/secrets/.env.local")" = "B=old" ]
+  [ ! -e "$r/.orca/secrets/notes.txt" ]
+  [ ! -e "$r/.orca/secrets/node_modules" ]
+}
+
+@test "link misuse fails typed: no relpath, absolute, dot-dot, no default worktree" {
+  r="$BATS_TEST_TMPDIR/r"
+  make_link_layout "$r"
+  echo 'A=1' >"$r/main/.env"
+  run secrets link --dir "$r"
+  assert_fail_reason BAD_ARGS
+  run secrets link "$r/main/.env" --dir "$r"
+  assert_fail_reason BAD_ARGS
+  run secrets link ../main/.env --dir "$r"
+  assert_fail_reason BAD_ARGS
+  run secrets link apps/../.env --dir "$r"
+  assert_fail_reason BAD_ARGS
+  run secrets link .env --dir
+  assert_fail_reason BAD_ARGS
+  mkdir "$BATS_TEST_TMPDIR/plain"
+  run secrets link .env --dir "$BATS_TEST_TMPDIR/plain"
+  assert_fail_reason NOT_GIT
+  [ ! -e "$r/.orca/secrets/.env" ]
+  git -C "$r/main" checkout -q -b other
+  run secrets link .env --dir "$r"
+  assert_fail_reason NO_DEFAULT_WORKTREE
+  [ ! -e "$r/.orca/secrets/.env" ]
+}
+
+@test "link is idempotent: a re-run is all OK" {
+  r="$BATS_TEST_TMPDIR/r"
+  make_link_layout "$r"
+  echo 'A=1' >"$r/main/.env"; echo 'C=1' >"$r/main/apps/api/.env"
+  secrets link .env apps/api/.env --dir "$r" >/dev/null
+  run secrets link .env apps/api/.env --dir "$r"
+  [ "$status" -eq 0 ]
+  has_line $'OK:\t.env'
+  has_line $'OK:\tapps/api/.env'
+  refute_line 'LINKED:'
+  has_line $'LINKED_TOTAL:\t2\tREFUSED:\t0'
+}
+
+@test "link gives the same result from main/, the root, and a subdirectory" {
+  for from in main . main/apps/api; do
+    r="$BATS_TEST_TMPDIR/r-${from//\//-}"
+    make_link_layout "$r"
+    echo 'C=1' >"$r/main/apps/api/.env"
+    cd "$r/$from"
+    run secrets link apps/api/.env
+    [ "$status" -eq 0 ]
+    has_line $'LINKED:\tapps/api/.env\t../../../../main/apps/api/.env'
+    [ "$(cat "$r/.orca/secrets/apps/api/.env")" = "C=1" ]
+  done
+}
+
+@test "link in a conventional checkout creates and excludes the store" {
+  c="$BATS_TEST_TMPDIR/c"
+  make_repo "$c"
+  ( cd "$c" && echo '.env' >.gitignore &&
+    git add .gitignore && git commit -qm ignore && echo 'A=1' >.env )
+  cd "$c"
+  run secrets link .env
+  [ "$status" -eq 0 ]
+  has_line $'LINKED:\t.env\t../../.env'
+  [ "$(cat "$c/.orca/secrets/.env")" = "A=1" ]
+  git check-ignore -q .orca/secrets/.env
+}
+
+@test "place over linked entries links worktrees as before" {
+  r="$BATS_TEST_TMPDIR/r"
+  make_link_layout "$r"
+  echo 'A=1' >"$r/main/.env"; echo 'C=1' >"$r/main/apps/api/.env"
+  secrets link .env apps/api/.env --dir "$r" >/dev/null
+  git -C "$r/main" worktree add -q "$r/orca-x" -b orca/x
+  run secrets place "$r/orca-x"
+  [ "$status" -eq 0 ]
+  has_line $'LINKED:\t.env'
+  has_line $'LINKED:\tapps/api/.env'
+  [ "$(readlink "$r/orca-x/apps/api/.env")" = "../../../.orca/secrets/apps/api/.env" ]
+  [ "$(cat "$r/orca-x/apps/api/.env")" = "C=1" ]
+  # the default worktree is the entries' source: untouched
+  run secrets place "$r/main"
+  has_line $'SOURCE:\t.env'
+  [ ! -L "$r/main/.env" ]
+}
+
+@test "link: an existing link whose file is gone, or no longer offered, is not OK" {
+  r="$BATS_TEST_TMPDIR/r"
+  make_link_layout "$r"
+  echo 'A=1' >"$r/main/.env"; echo 'T=1' >"$r/main/.env.test"
+  run secrets link .env .env.test --dir "$r"
+  has_line $'LINKED_TOTAL:\t2\tREFUSED:\t0'
+  # the user's file goes away between two calls: status says DANGLING, link must not say OK
+  rm "$r/main/.env"
+  # and another becomes tracked: no longer something link would offer
+  ( cd "$r/main" && git add -f .env.test && git commit -qm track )
+  run secrets link .env .env.test --dir "$r"
+  [ "$status" -eq 0 ]
+  has_line $'REFUSED:\t.env\tSOURCE_GONE'
+  has_line $'REFUSED:\t.env.test\tNOT_OFFERED'
+  refute_line 'OK:'
+  has_line $'LINKED_TOTAL:\t0\tREFUSED:\t2'
+  run secrets status "$r"
+  has_line $'ENTRY:\t.env\tDANGLING'
+  # nothing was removed or rewritten
+  [ -L "$r/.orca/secrets/.env" ] && [ -L "$r/.orca/secrets/.env.test" ]
+}
+
+@test "status marks LINKABLE exactly the SAME copies link accepts: a tracked env-named copy is not one" {
+  r="$BATS_TEST_TMPDIR/r"
+  make_link_layout "$r"
+  echo 'A=1' >"$r/main/.env";        echo 'A=1' >"$r/.orca/secrets/.env"
+  echo 'T=1' >"$r/main/.env.test";   echo 'T=1' >"$r/.orca/secrets/.env.test"
+  echo 'B=new' >"$r/main/.env.local"; echo 'B=old' >"$r/.orca/secrets/.env.local"
+  echo '{"k":1}' >"$r/main/config/local.json"
+  mkdir -p "$r/.orca/secrets/config"; echo '{"k":1}' >"$r/.orca/secrets/config/local.json"
+  ( cd "$r/main" && git add -f .env.test && git commit -qm track )
+  run secrets status "$r"
+  [ "$status" -eq 0 ]
+  has_line $'COPY:\t.env\tSAME'
+  has_line $'COPY:\t.env.test\tSAME'
+  has_line $'COPY:\tconfig/local.json\tSAME'
+  has_line $'LINKABLE:\t.env\t../../main/.env'
+  refute_line $'LINKABLE:\t.env.test'      # env-named, but tracked
+  refute_line $'LINKABLE:\t.env.local'     # drifted
+  refute_line $'LINKABLE:\tconfig'         # not an env file
+  # the offer and the verb agree, path for path
+  run secrets link .env .env.test config/local.json --dir "$r"
+  has_line $'RELINKED:\t.env\t../../main/.env'
+  has_line $'REFUSED:\t.env.test\tNOT_OFFERED'
+  has_line $'REFUSED:\tconfig/local.json\tNOT_OFFERED'
+}

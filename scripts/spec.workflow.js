@@ -1,7 +1,7 @@
 // orca spec stage — the gated workflow that spawns orca:spec, then an
 // independent adversarial review of the spec it wrote.
 //
-// The run skill composes the complete task message (run dir, repo root,
+// The run skill composes the complete task message (run dir, the checkout to explore,
 // timestamp, brief, optional Project context line) and invokes this script
 // through the Workflow tool. Routing the spawn through a workflow instead of
 // the Agent tool is what makes spec.effort an ordinary override: the Agent
@@ -155,13 +155,23 @@ const artifact = `${runDir}/reviews/spec-${reviewer}.json`
 const review = async () => {
   let lastReason
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const r = await agent(
-      [`Review worktree: ${reviewWorktree}`, `Run directory: ${runDir}`, `Artifact path: ${artifact}`,
-       // Only the codex courier shells out; the claude reviewer's prompt
-       // stays byte-identical to what it has always been.
-       ...(reviewer === 'codex' ? [`Plugin root: ${pluginRoot}`] : [])].join('\n'),
-      { agentType: reviewAgentType, schema: REVIEW,
-        label: `spec-review${attempt > 1 ? '~retry' : ''}`, phase: 'Review' })
+    let r
+    // A reviewer call can throw as well as die: an agent that ends without
+    // its schema'd result (its StructuredOutput refused, say) is an error
+    // from agent(), not a null. It is an attempt that did not complete, like
+    // the others: its reason is kept and the retry and the fail-open stand.
+    try {
+      r = await agent(
+        [`Review worktree: ${reviewWorktree}`, `Run directory: ${runDir}`, `Artifact path: ${artifact}`,
+         // Only the codex courier shells out; the claude reviewer's prompt
+         // stays byte-identical to what it has always been.
+         ...(reviewer === 'codex' ? [`Plugin root: ${pluginRoot}`] : [])].join('\n'),
+        { agentType: reviewAgentType, schema: REVIEW,
+          label: `spec-review${attempt > 1 ? '~retry' : ''}`, phase: 'Review' })
+    } catch (err) {
+      lastReason = `review agent failed: ${String((err && err.message) || err)}`
+      continue
+    }
     if (r === null || r === undefined) { lastReason = 'review agent was skipped or died'; continue }
     if (!r.written) { lastReason = r.reason || 'review agent reported written=false with no reason'; continue }
     if (r.criticalHigh > r.total) {
@@ -190,7 +200,7 @@ if (r1.criticalHigh === 0)
 // and churns on fresh or re-raised findings instead of converging, and the
 // item reviews and integration verification still gate everything built
 // over the spec. The revise prompt reuses the original prompt verbatim so
-// the agent still holds the brief, the repo root, and the project context.
+// the agent still holds the brief, the checkout to explore, and the project context.
 log(`spec review: ${r1.total} finding(s), ${r1.criticalHigh} Critical/High — revising`)
 const reviseTarget = `${runDir}/spec.md`
 const revisePrompt = [

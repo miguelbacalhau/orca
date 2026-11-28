@@ -1,7 +1,7 @@
 // orca research step — the one-agent workflow that spawns orca:research.
 //
 // The orca:run interview (and orca:followup's new-scope research) composes the
-// complete task message (repository root, the idea verbatim, optional Project
+// complete task message (the checkout to explore, the idea verbatim, optional Project
 // context line) and invokes this script through the Workflow tool. Routing
 // the spawn through a workflow instead of the Agent tool is what makes
 // research.effort an ordinary override: the Agent tool has a model parameter

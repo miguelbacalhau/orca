@@ -1,6 +1,6 @@
 ---
 name: objective-open
-description: Orca objective-open stage — creates an objective (`objective new`, for orca:new), claims it and arrives in its worktree (`objective open`), and checks the config and the reviewer there, so none of those verbs' output or the files they write enter the session; returns one compact object. Spawned by orca:new, orca:open, and the planning gate and phase loop they share with orca:loop whenever the session needs the worktree and reviewer (again); not for standalone use.
+description: Orca objective-open stage — creates an objective (`objective new`, for orca:new), claims it and arrives in its worktree (`objective open`), and checks the config, the reviewer, and the session's reach from the session's directory, so none of those verbs' output or the files they write enter the session; returns one compact object. Spawned by orca:new, orca:open, and the planning gate and phase loop they share with orca:loop whenever the session needs the worktree and reviewer (again); not for standalone use.
 tools: Bash
 model: sonnet
 effort: low
@@ -77,10 +77,10 @@ The verb claims the objective for the session (your shell carries the session's 
 
 ## The reviewer check
 
-Run it only after an open that returned a frame. It is one Bash call, in the worktree:
+Run it only after an open that returned a frame. It is one Bash call, from the `Repository:` directory — the session's own, never the objective's worktree: the settings the preflight reads (the review timeout, the session's additional directories) belong to the directory the session was started in, and the worktree has none of them:
 
 ```bash
-cd "<worktree>" && { bash "<plugin-root>/scripts/orca.sh" config validate; bash "<plugin-root>/scripts/orca.sh" preflight | grep -E '^(REVIEWER|CODEX):'; }
+cd "<repository>" && { bash "<plugin-root>/scripts/orca.sh" config validate; bash "<plugin-root>/scripts/orca.sh" preflight | grep -E '^(REVIEWER|CODEX|ROOT_IN_SCOPE):'; }
 ```
 
 Ignore the preflight's exit status. Derive:
@@ -88,6 +88,7 @@ Ignore the preflight's exit status. Derive:
 - **`reviewer`**: `config validate`'s `reviewer` when its `VALID:` JSON carries one, else the `REVIEWER:` value (`codex` or `claude`, before the parenthesis). A typed `FAIL:` from `config validate`, or `REVIEWER: FAIL`, makes it `fail`.
 - **`codex`**: `CODEX: PASS` → `ok`, `CODEX: SKIPPED` → `skipped`, `CODEX: FAIL: <remediation>` → `fail`.
 - **`codex_fix`**: that remediation text when `codex` is `fail`, else `""`.
+- **`root_in_scope`**: the value after the TAB on the `ROOT_IN_SCOPE:` line — `yes`, `no`, or `n/a` — or `""` when the line is absent.
 
 ## Discipline
 
@@ -101,12 +102,12 @@ Your final message is exactly one JSON object and nothing else. Fields you never
 {"status": "ok|new_failed|open_failed",
  "reason": "", "detail": "",
  "dir": "", "slug": "", "base": "", "worktree": "", "branch": "", "arrival": "", "claim": "",
- "reviewer": "codex|claude|fail|", "codex": "ok|skipped|fail|", "codex_fix": "",
+ "reviewer": "codex|claude|fail|", "codex": "ok|skipped|fail|", "codex_fix": "", "root_in_scope": "yes|no|n/a|",
  "research_root": "", "decisions_log": "", "research_model": "", "research_effort": "", "config_fail": false}
 ```
 
 - `status`: `ok` when the open returned a frame. `new_failed` when `new` failed (nothing was created). `open_failed` when the open failed (in mode new, the objective exists).
 - `reason`, `detail`: the stopping `FAIL:` line's reason and detail, `""` on `ok`.
 - `dir`, `slug`: the objective, with the slug it actually got. `base` is the base commit, and `worktree`, `branch`, `arrival`, `claim` come from the open's frame.
-- `reviewer`, `codex`, `codex_fix`: the reviewer check, `""` when it did not run.
+- `reviewer`, `codex`, `codex_fix`, `root_in_scope`: the reviewer check, `""` when it did not run.
 - Mode new only: `research_root` as above, `decisions_log` as `<root>/.orca/decisions.md` when `decisions=yes` else `""`, `research_model` / `research_effort` from the overrides, and `config_fail`.

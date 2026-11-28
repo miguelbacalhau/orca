@@ -30,6 +30,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
+import { releasePin } from './pin'
+
 export const RELAY_VERSION = 1
 export const MODEL_PREFIX = 'orca:'
 // The longest `$.process.run` allows. setup's own cap (540 s, verbs/setup.sh)
@@ -147,8 +149,12 @@ export const register: Register = on => {
     try { await noteMode($, e) } catch { /* the gate stays as it was */ }
     return next(e)
   }).catch(($, e, next) => next(e))
+  // The module's one SubagentStop hook (an event takes one unmatched hook
+  // per module): it also lets the pin hook drop a stopped workflow agent's
+  // binding (./pin.ts).
   on('classic.SubagentStop', async ($, e, next) => {
     try { await noteMode($, e) } catch { /* the gate stays as it was */ }
+    try { await releasePin($, e.agent_id) } catch { /* the binding stays */ }
     return next(e)
   }).catch(($, e, next) => next(e))
   on('classic.Stop', async ($, e, next) => {

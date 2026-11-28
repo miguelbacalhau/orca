@@ -45,13 +45,13 @@ The audit is context for you, never shown raw to the user. If the agent fails, f
 
 Pacing follows the interview's rules: multi-round, at most 2–3 open questions per round, no topic-list batching, and **AskUserQuestion is banned for substantive discussion** — permitted only at the end for the doubt rule and breakdown checkpoint, and only if the user wants to change the inherited values. Depth is proportional to what is open: a short follow-up list needs one confirming round.
 
-**New scope stays exceptional.** If the user adds work beyond the recorded follow-ups, that is interview territory: spawn one `orca:research` agent for the touched area (as `/orca:run`'s interview does: through `${CLAUDE_PLUGIN_ROOT}/scripts/research.workflow.js`, with any `research` OVERRIDE lines from `orca.sh config show` passed as `model`/`effort`) and fold the findings into the discussion — or, when the new scope dwarfs the follow-ups, say so and suggest a separate `/orca:run` interview so the follow-up brief stays a follow-up.
+**New scope stays exceptional.** If the user adds work beyond the recorded follow-ups, that is interview territory: spawn one `orca:research` agent for the touched area (as `/orca:run`'s interview does: through `${CLAUDE_PLUGIN_ROOT}/scripts/research.workflow.js`, with any `research` OVERRIDE lines from `orca.sh config show` passed as `model`/`effort`, and its `Explore:` block from `orca.sh preflight where --base <branch>` — the deliverable's branch when it is unlanded, since that is the code the follow-up builds on, else the trunk) and fold the findings into the discussion — or, when the new scope dwarfs the follow-ups, say so and suggest a separate `/orca:run` interview so the follow-up brief stays a follow-up.
 
 **Nothing open at all** — no follow-ups worth a run, nothing selected: say exactly that, congratulate the run, and stop. No brief.
 
 ## Step 3: Early pre-flight (optional, never blocking)
 
-Same as the interview's: run `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh preflight` from the project root. A `FAIL` is something to fix before the run, at leisure — it never blocks writing the brief; point at `/orca:init` for the layout gate and `/orca:doctor` for machine gates, then continue. If the brief runs now, the run's own pre-flight reuses this output.
+Same as the interview's: run `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh preflight` from the directory this session was started in. A `FAIL` is something to fix before the run, at leisure — it never blocks writing the brief; point at `/orca:init` for the layout gate and `/orca:doctor` for machine gates, then continue. If the brief runs now, the run's own pre-flight reuses this output.
 
 ## Step 4: Write the brief
 

@@ -1035,3 +1035,26 @@ make_objective() {
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
+
+@test "snapshot from the default worktree and a subdirectory of it reads the repository root's .orca" {
+  r="$BATS_TEST_TMPDIR/r"
+  make_bare_layout "$r"
+  mkdir -p "$r/.orca/20250101-120000-feat-alpha" "$r/.orca/feat-briefs" "$r/main/src/lib"
+  echo '# spec' >"$r/.orca/20250101-120000-feat-alpha/spec.md"
+  echo brief >"$r/.orca/feat-briefs/idea.md"
+  git -C "$r/main" worktree add -q "$r/orca-alpha" -b feature/alpha
+  cd "$r"
+  run triage snapshot
+  [ "$status" -eq 0 ]
+  from_root="$output"
+  for from in main main/src/lib; do
+    cd "$r/$from"
+    run triage snapshot
+    [ "$status" -eq 0 ]
+    [ "$output" = "$from_root" ]
+  done
+  has_line $'RUN:\t'"$r/.orca/20250101-120000-feat-alpha"$'\tunlaunched'
+  has_line $'BRIEF:\t'"$r/.orca/feat-briefs/idea.md"
+  # nothing was written under the user's worktree
+  [ ! -e "$r/main/.orca" ]
+}

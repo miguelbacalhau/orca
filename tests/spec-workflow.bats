@@ -121,6 +121,21 @@ CLEAN='{"written":true,"total":0,"criticalHigh":0,"reason":""}'
   [[ "$output" == *'spec-review~retry'* ]]
 }
 
+@test "a reviewer call that throws is retried, then fails open with its reason" {
+  local thrown='{"throw":"agent({schema}): subagent completed without calling StructuredOutput (after in-conversation nudge)"}'
+  # thrown once: the retry's clean review stands
+  run_wf "$ARGS" '["s",'"$thrown"','"$CLEAN"']'
+  [[ "$output" == *'"ok":true'* ]]
+  [[ "$output" == *'"review":{"written":true,"total":0,"criticalHigh":0,"revised":false,"reason":""}'* ]]
+  [[ "$output" == *'spec-review~retry'* ]]
+  # thrown twice: written:false with the last reason, the spec summary intact
+  run_wf "$ARGS" '["s",'"$thrown"','"$thrown"']'
+  [[ "$output" == *'"ok":true'* ]]
+  [[ "$output" == *'"summary":"s","died":false'* ]]
+  [[ "$output" == *'"review":{"written":false,"total":0,"criticalHigh":0,"revised":false,"reason":"review agent failed: agent({schema}): subagent completed without calling StructuredOutput'* ]]
+  [ "$(grep -o '"agentType":"orca:spec-review-codex"' <<<"$output" | wc -l | tr -d ' ')" -eq 2 ]
+}
+
 @test "an impossible count (criticalHigh > total) is retried like written:false" {
   run_wf "$ARGS" \
     '["s",{"written":true,"total":0,"criticalHigh":2,"reason":""},'"$CLEAN"']'

@@ -14,7 +14,24 @@ Before asking the user anything substantive, build a picture of the part of the 
 
 First, pick up any per-repo tuning for the research agent: run `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh config show` and take only the `OVERRIDE:` lines whose stage is `research` — the rest of the output serves other skills; ignore it here. A typed `FAIL:` means the config file is mangled: proceed with the agent's own defaults, mention once that orca:config repairs it, and never author or fix the file here — a broken config must not block an interview.
 
-Compose the research task message: the repository root, the idea verbatim, and — when `<repo-root>/.orca/decisions.md` exists — a `Project context:` line naming it (the decision log, generated from trunk commit history; a possibly-stale render is fine here — the run's spec stage re-renders it fresh). Only check that the file exists; do not read it in the main context — the agent scopes its own exploration from the idea, and its definition owns the report's shape: current behavior, decisions touched, tensions, unknowns.
+Find where research explores — one checkout, never the repository root, which holds the default worktree plus every `orca-*` checkout:
+
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh preflight where
+```
+
+Its `EXPLORE:` line (TAB-separated: the directory, then why) names the default worktree, whatever its state; with reason `session` or `root` the default branch is checked out in no worktree, so it is this session's own checkout, or the root as a last resort — say that once, in one line. No trunk is confirmed yet, so `BUILD_BASE:` is the default branch's tip; when the user has already named another branch to build on, pass it (`preflight where --base <branch>`). `AT_BASE: no` → the directory explored is not at that commit: add `The directory explored is not at the build base.` after the block. A typed `FAIL:` (not a git repository) → there is nothing to explore: the intent-only interview below.
+
+Compose the research task message: this block, built from the same output (`BUILD_BASE:` gives the sha and branch, the `UNCOMMITTED:` lines the paths; `UNCOMMITTED_TOTAL: 0` → `none`, `-` → `unknown`, never `none`),
+
+```text
+Explore: <explore-dir>
+Build base: <sha> (<branch>)
+Uncommitted in <explore-dir>:
+<the UNCOMMITTED: lines' text, one per line — or the single word none>
+```
+
+then the idea verbatim, and — when `<repo-root>/.orca/decisions.md` exists — a `Project context:` line naming it (the decision log, generated from trunk commit history; a possibly-stale render is fine here — the run's spec stage re-renders it fresh). Only check that the file exists; do not read it in the main context — the agent scopes its own exploration from the idea, and its definition owns the report's shape: current behavior, decisions touched, tensions, unknowns.
 
 Spawn **one `orca:research` agent through its bundled one-agent workflow**: invoke the Workflow tool with `scriptPath: "${CLAUDE_PLUGIN_ROOT}/scripts/research.workflow.js"` — the substituted value is already absolute; never pass `~` or an unsubstituted variable — and `args: { prompt, model?, effort? }`, where `prompt` is the composed task message and `model`/`effort` come from the `research` OVERRIDE lines, each passed only when set. Routing the spawn through the workflow instead of the Agent tool is what makes both halves of an `agents.research` override apply — the Agent tool has no effort parameter. The workflow runs in the background: wait for its task notification, and never fabricate the result. It returns `{ report, died }`; the runId is throwaway — never persist or resume it.
 
@@ -63,7 +80,7 @@ Stay at intent level in what you *write down*: direction decisions with their ra
 
 ## Step 3: Early pre-flight (never blocking)
 
-Run the run's environment pre-flight now, from the project root — it ships in this plugin:
+Run the run's environment pre-flight now, from the directory this session was started in — it ships in this plugin:
 
 ```bash
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh preflight

@@ -55,10 +55,11 @@ A run's deliverable is a `feature/<slug>` branch in its own worktree. You review
 
 | | |
 |---|---|
-| **Claude Code** | With the Workflow tool and function hooks (mods) — 2.1.290 or later. Function hooks must be enabled (`CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` in a settings `env` block where they are off by default), the session not started with `--bare`, and no `disableAllHooks` in any settings file. |
+| **Claude Code** | With the Workflow tool and function hooks (mods) — 2.1.332 or later. Function hooks must be enabled (`CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` in a settings `env` block where they are off by default), the session not started with `--bare`, and no `disableAllHooks` in any settings file. |
 | **Permission mode** | `bypassPermissions` for the session running the run; objectives don't need it. See [Permissions](#permissions). |
 | **git** | ≥ 2.31; ≥ 2.42 for `/orca:init` to create a brand-new repository. |
 | **Repository layout** | Bare repository with worktrees (`.bare/` plus peer worktrees). `/orca:init` sets it up, including converting an existing checkout. |
+| **Where to start sessions** | In your default worktree (`<repo-root>/main/`), where you edit and run git. `/orca:doctor` offers the one setting that needs: the repository root in `permissions.additionalDirectories`. Starting at `<repo-root>` works too and needs no setting. |
 | **Codex CLI** *(codex reviewer only)* | The global `codex` binary ≥ 0.142.5, authenticated with `codex login`. Install with `brew install codex` or the official release binaries — **never via npm**. Plus `BASH_MAX_TIMEOUT_MS=1200000` in a settings `env` block, which `/orca:doctor` writes for you. |
 
 The twenty-five agents and the CLI ship inside the plugin; nothing else is installed per repository.
@@ -94,8 +95,10 @@ To work on the plugin itself, load a checkout for one session with `claude --plu
 #    Converting an existing checkout keeps untracked files but changes every path.
 /orca:init
 
-# 2. Once per machine, if the pre-flight complains: Codex install/auth and
-#    the review timeout. Skip if you'll use the Claude reviewer.
+# 2. Start Claude Code in your default worktree (<repo-root>/main) and check
+#    readiness: Codex install/auth and the review timeout (skip those if you'll
+#    use the Claude reviewer), the setting that lets a session started there
+#    reach the orca-* worktrees, and your .env files linked for runs.
 /orca:doctor
 
 # 3. Switch the session to bypass permissions (Shift+Tab), then describe the feature.
@@ -210,7 +213,9 @@ agents.implement.model=opus
 - **`council`** — the seats `/orca:council` convenes: 2 to 5 of `haiku`|`sonnet`|`opus`|`fable`|`astra` (Codex on `gpt-6-astra`), comma-separated, repeats allowed. Absent means `opus,fable,astra`, dropping `astra` when Codex isn't installed; a pinned `astra` with Codex missing fails instead.
 - **`agents.<stage>.model|effort`** — models `haiku`|`sonnet`|`opus`|`fable`, efforts `low` through `max`. `spec`, `research`, and `plan` default to `fable`; if your plan doesn't offer it, run `/orca:config spec.model=opus research.model=opus plan.model=opus`. Defaults are listed in [Stage agents](docs/anatomy.md#stage-agents).
 
-**`BASH_MAX_TIMEOUT_MS`** (codex reviewer only) — Codex reviews run through the Bash tool, whose default timeout is too short. `/orca:doctor` writes `{ "env": { "BASH_MAX_TIMEOUT_MS": "1200000" } }` into `.claude/settings.local.json` or `~/.claude/settings.json`; restart the session afterwards. orca itself stops a review at 18 minutes, inside that limit.
+**`BASH_MAX_TIMEOUT_MS`** (codex reviewer only) — Codex reviews run through the Bash tool, whose default timeout is too short. `/orca:doctor` writes `{ "env": { "BASH_MAX_TIMEOUT_MS": "1200000" } }` into `.claude/settings.local.json` — the one in the directory you start sessions in, your default worktree's own file — or `~/.claude/settings.json`; restart the session afterwards. orca itself stops a review at 18 minutes, inside that limit.
+
+**`permissions.additionalDirectories`** (sessions started in the default worktree) — the `orca-*` worktrees and `.orca/` sit beside your worktree, outside a session started in it. `/orca:doctor` reports this as `ROOT_IN_SCOPE` and, with your consent, adds the repository root to `permissions.additionalDirectories` in the default worktree's `.claude/settings.local.json`; restart the session afterwards. Objectives need it, since they run outside bypass mode; a bypass `/orca:run` works without it. It puts `.bare/` and `.orca/secrets/` within the session's reach too, as starting at the root always did.
 
 orca runs whichever `codex` is first on your `PATH`, with the review's permissions — keep your `PATH` trustworthy.
 
@@ -262,6 +267,7 @@ Bypass mode applies to the **whole session**, not just the run, so a dedicated s
 - [Objectives](docs/objectives.md) — the files and their formats, derived states, planning and plan review, the phase loop, follow-ups, archive, the objective band.
 - [Worktrees, secrets, and provisioning](docs/worktrees.md) — the repository layout, `.orca/secrets/`, and the `.orca/setup` contract.
 - [The verb hook](docs/verb-hook.md) — how the work loop runs shell steps, its guards, and its failure modes.
+- [The pin hook](docs/pin-hook.md) — how stage agents are started in their worktree, what they may not edit, and what it does not cover.
 - [The orca CLI](docs/cli.md) — the `orca.sh` verbs.
 
 ## Development

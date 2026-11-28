@@ -8,7 +8,7 @@ What a repository looks like mid-run. `/orca:init` creates the top three entries
 <repo-root>/
 ├── .bare/                        # the bare repository (shared object store)
 ├── .git                          # one line: gitdir: ./.bare
-├── main/                         # your worktree(s) — never touched by runs
+├── main/                         # your worktree(s) — never touched by runs; where you work and start sessions
 ├── orca-<slug>/                  # a run's integration worktree, or an objective's worktree (branch feature/<slug>)
 ├── orca-<slug>-W1/               # one worktree per in-flight item (branch feature/<slug>-W1)
 └── .orca/
@@ -29,6 +29,7 @@ What a repository looks like mid-run. `/orca:init` creates the top three entries
         └── reviews/                   # raw findings JSON per review round
 ```
 
+- `main/` (the default worktree) is where you work **and** where Claude Code sessions start: it loads the repository's own `CLAUDE.md` and `.claude/`, and orca's [pin hook](pin-hook.md) starts each stage agent in its own `orca-*` worktree. A session started there reaches the `orca-*` worktrees and `.orca/` once the repository root is in `permissions.additionalDirectories` — `/orca:doctor` writes it. Starting sessions at `<repo-root>` still works and needs no setting.
 - `orca-*` **directory** names are local and never enter git. **Branch** names (`feature/<slug>[-<ID>]`) carry no orca trace.
 - `.orca/` sits outside every worktree, so nothing in it can be committed by accident. It is machine-local.
 - Everything in `.orca/` is safe to delete **except `secrets/`**, which holds your only copy of those files, and `review-notes/`, which holds your unaddressed comments.
@@ -50,14 +51,17 @@ What a repository looks like mid-run. `/orca:init` creates the top three entries
 
 ### Link the store to your own files
 
-An entry can be the file itself or **a link to your real copy in the default worktree**. A link is the recommended setup: runs read your `.env` as it is right now, and there is no second copy to fall behind when you add a variable or re-pull your environment. Populating the store is manual, one link per file, run from `<repo-root>`:
+An entry can be the file itself or **a link to your real copy in the default worktree**. A link is the recommended setup: runs read your `.env` as it is right now, and there is no second copy to fall behind when you add a variable or re-pull your environment. `/orca:doctor` and `/orca:init` list the env files your default worktree has and the store doesn't link, ask once which of them runs should get, and link those:
 
 ```bash
-ln -s ../../main/.env .orca/secrets/.env
-mkdir -p .orca/secrets/apps/api && ln -s ../../../../main/apps/api/.env .orca/secrets/apps/api/.env
+bash <plugin-root>/scripts/orca.sh secrets link .env apps/api/.env
 ```
 
-Each link has to go back up through `.orca/secrets/` and the entry's own directories to reach `<repo-root>`, then down into `main/`. `/orca:doctor` prints the exact target for each file. Placement links point at the entry, never past it, so a tool that rewrites your `.env` by replacing the file (most do) keeps every run worktree current. Placing into the worktree that holds the real file reports it as `SOURCE` and writes nothing. If the linked file is gone, the entry is skipped (`SKIPPED_DANGLING`) and its links in run worktrees are removed.
+`secrets link` writes only what `secrets status` offers: an ignored, untracked `.env`, `.env.*`, or `.envrc` in the default worktree with no entry (`UNLINKED`), or a store copy of such a file whose bytes are identical (`LINKABLE`), which it replaces with the link. An entry already linked is reported `OK` only while its file is still there and still offered. Every other path is refused by name and left alone — a tracked or unignored file, any other file name, a copy that has drifted (`COPY_DIFFERS`), a path whose directory inside the store is itself a symlink (`IRREGULAR_PARENT`). It works from the default worktree, the repository root, or any directory inside the repository.
+
+Placement links point at the entry, never past it, so a tool that rewrites your `.env` by replacing the file (most do) keeps every run worktree current. Placing into the worktree that holds the real file reports it as `SOURCE` and writes nothing. If the linked file is gone, the entry is skipped (`SKIPPED_DANGLING`) and its links in run worktrees are removed.
+
+Because every worktree's placed file is a link that ends at your own file, an agent that **edits** a placed `.env` in its worktree edits your default worktree's file. That has always been so for a linked entry, and the [pin hook](pin-hook.md)'s edit guard does not change it: it judges the path an agent names, not where a link leads.
 
 A plain file in the store still works. Use one for a file no worktree of yours holds, such as dev-only credentials kept apart from what your own environment uses. Keep in mind that whatever an entry links to is what stage agents read: if you point `main/.env` at staging while debugging, runs get staging too.
 
@@ -67,7 +71,7 @@ To see where the store stands, `/orca:doctor` runs the read-only:
 bash <plugin-root>/scripts/orca.sh secrets status
 ```
 
-It lists every entry; a store copy of a file the default worktree also holds (`COPY`, `SAME` or `DIFFERS`, the drift case); ignored `.env`, `.env.*`, and `.envrc` files in the default worktree with no entry (`UNLINKED`); and entries whose linked file is gone (`DANGLING`). Each comes with the `ln -s` target to use.
+It lists every entry; a store copy of a file the default worktree also holds (`COPY`, `SAME` or `DIFFERS`, the drift case), followed by `LINKABLE` when `secrets link` accepts it; ignored `.env`, `.env.*`, and `.envrc` files in the default worktree with no entry (`UNLINKED`); and entries whose linked file is gone (`DANGLING`). `secrets link` takes the `UNLINKED` and `LINKABLE` files; a drifted copy or a dangling entry is yours to settle by hand, and each comes with the `ln -s` target to use.
 
 If you followed the older setup, with the real file in the store and `main/.env` linking to it, flip it once:
 

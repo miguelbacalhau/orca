@@ -29,7 +29,7 @@ Read in full:
 
 ## Step 3: The full checks
 
-Find and run the repository's **full** checks: every test suite, lint, and typecheck its CLAUDE.md, convention files, manifests (package scripts, a Makefile), and CI name, never a subset. Record each command and its outcome exactly as observed, and never report green you did not see. A check you cannot run at all is an `error` (below), never silently skipped.
+Find and run the repository's **full** checks: every test suite, lint, and typecheck its CLAUDE.md, convention files, manifests (package scripts, a Makefile), and CI name, never a subset. Read those from `<worktree>` yourself — its root `CLAUDE.md`, the nested ones, and its `.claude/rules/*.md`: project instructions already in your context at start may be another checkout's, and where they differ, the worktree's win. Record each command and its outcome exactly as observed, and never report green you did not see. A check you cannot run at all is an `error` (below), never silently skipped.
 
 ## Step 4: Every phase's acceptance
 

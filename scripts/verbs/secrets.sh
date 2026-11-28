@@ -25,6 +25,7 @@
 #   orca.sh secrets place <worktree>
 #   orca.sh secrets remove <worktree>
 #   orca.sh secrets status [<dir>]
+#   orca.sh secrets link <relpath>... [--dir <dir>]
 #
 # remove is place's inverse, for least-privilege staging: the loop strips
 # placement links from a worktree before stages that consume adversarial
@@ -54,7 +55,7 @@
 #   status (read-only; <dir> defaults to the working directory — any path
 #   inside the repository, the bare layout's root included). Doctor's view
 #   of the store against the default worktree, where the user's real files
-#   live; it prescribes, the user links:
+#   live; `link` writes what it offers:
 #     DEFAULT_WORKTREE:<TAB><path>|-        where the bare HEAD's default branch is checked
 #                                           out (a conventional checkout: its root); - when none
 #     ENTRY:<TAB><relpath><TAB>FILE         the store holds its own copy
@@ -64,6 +65,11 @@
 #     COPY:<TAB><relpath><TAB>SAME|DIFFERS<TAB><link-target>
 #                                           a FILE entry the default worktree also holds as a
 #                                           real file: two copies, DIFFERS once they have drifted
+#     LINKABLE:<TAB><relpath><TAB><link-target>
+#                                           a COPY … SAME entry that `link` accepts: the default
+#                                           worktree's file is itself an ignored, untracked env
+#                                           file. Follows its COPY line; any other SAME copy
+#                                           (a tracked file, another file name) has none
 #     UNLINKED:<TAB><relpath><TAB><link-target>
 #                                           an ignored env file (.env, .env.*, .envrc) in the
 #                                           default worktree with no store entry
@@ -72,10 +78,32 @@
 #   needs to link that entry to the default worktree's file — relative when
 #   the worktree sits under the repo root. Ignored directories (node_modules)
 #   are not descended into, so an env file inside one is never offered.
+#   What `link` accepts is exactly the UNLINKED and LINKABLE lines.
+#
+#   link (--dir as status's <dir>; idempotent). Writes store entries that
+#   link to the default worktree's files — exactly what status offers,
+#   recomputed at write time, and nothing else: an UNLINKED relpath, or a
+#   LINKABLE one (a COPY … SAME whose file is itself an ignored, untracked
+#   env file there; any other identical copy is a legitimate store entry
+#   and stays one). One relpath's refusal never stops the rest:
+#     LINKED:<TAB><relpath><TAB><link-target>      new entry
+#     RELINKED:<TAB><relpath><TAB><link-target>    a SAME copy replaced by the link
+#     OK:<TAB><relpath>                            already that link, its file still offered
+#     REFUSED:<TAB><relpath><TAB><why>
+#       NOT_OFFERED       status does not offer it: tracked, not ignored, not
+#                         an env-file name, or not a real file there
+#       COPY_DIFFERS      the store copy and the worktree's file have drifted
+#       ENTRY_EXISTS      the store holds some other entry at that path
+#       IRREGULAR_PARENT  a component between the store and the entry is not
+#                         a real directory (a symlink would write outside it)
+#       SOURCE_GONE       the default worktree has no such file — an entry
+#                         already linking there dangles
+#       WRITE_ERROR       the link could not be written (filesystem error)
+#     LINKED_TOTAL:<TAB><n><TAB>REFUSED:<TAB><m>   n counts LINKED, RELINKED and OK
 #
 #   any subcommand:
 #     FAIL:<TAB><reason><TAB><detail>    exit 1
-#       reasons: BAD_ARGS NOT_GIT OLD_GIT OUTSIDE_ROOT
+#       reasons: BAD_ARGS NOT_GIT OLD_GIT OUTSIDE_ROOT NO_DEFAULT_WORKTREE
 #
 # Ownership is by target, never substring: a symlink is ours to manage
 # (repair, replace, or sweep) only when it points at this repository's
@@ -96,19 +124,43 @@
 # Sourced by orca.sh with the verb arguments in place; lib.sh (fail()
 # and the symlink canonicalizer) is already loaded.
 
-secrets_usage="usage: secrets.sh place|remove <worktree> | status [<dir>]"
+secrets_usage="usage: secrets.sh place|remove <worktree> | status [<dir>] | link <relpath>... [--dir <dir>]"
 mode="${1:-}"
+probe="${2:-.}"
+link_rels=()
 case "$mode" in
   place|remove) [[ $# -eq 2 ]] || fail BAD_ARGS "$secrets_usage" ;;
   status) [[ $# -le 2 ]] || fail BAD_ARGS "$secrets_usage" ;;
+  link)
+    shift
+    probe="."
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --dir)
+          [[ $# -ge 2 ]] || fail BAD_ARGS "--dir needs a directory — $secrets_usage"
+          probe="$2"
+          shift 2
+          ;;
+        '') fail BAD_ARGS "empty relpath — $secrets_usage" ;;
+        /*) fail BAD_ARGS "absolute path: $1 — a relpath is relative to the default worktree" ;;
+        *)
+          case "/$1/" in
+            */../*|*/./*|*//*) fail BAD_ARGS "not a plain relative path: $1" ;;
+          esac
+          link_rels+=("$1")
+          shift
+          ;;
+      esac
+    done
+    [[ ${#link_rels[@]} -gt 0 ]] || fail BAD_ARGS "$secrets_usage"
+    ;;
   *) fail BAD_ARGS "$secrets_usage" ;;
 esac
-probe="${2:-.}"
 [[ -d "$probe" ]] || fail BAD_ARGS "not a directory: $probe"
 
-if [[ "$mode" == "status" ]]; then
-  # status reads the store, not a worktree: any directory in the repo
-  # will do, the bare layout's root included.
+if [[ "$mode" == "status" || "$mode" == "link" ]]; then
+  # status and link read the store, not a worktree: any directory in the
+  # repo will do, the bare layout's root included.
   worktree=""
 else
   # Normalize to the worktree's top level (a subdirectory argument would
@@ -145,7 +197,7 @@ ensure_exclude() {
   mkdir -p "$common_dir/info" 2>/dev/null || return 0
   grep -qxF '.orca/' "$exclude" 2>/dev/null || printf '.orca/\n' >>"$exclude" 2>/dev/null || true
 }
-[[ "$mode" == "status" ]] || ensure_exclude
+[[ "$mode" == "status" || "$mode" == "link" ]] || ensure_exclude
 
 # Canonical target of a symlink, existence NOT required (dangling links
 # must still resolve so the sweep can judge them). The lib's pure-bash
@@ -188,25 +240,11 @@ depth_of() {
   echo $(( ${#slashes} + 1 ))
 }
 
-# ---- status: the store against the default worktree (read-only) ----
-if [[ "$mode" == "status" ]]; then
-  # The default worktree: a conventional checkout is its own; in the bare
-  # layout, wherever the bare HEAD's branch is checked out (init-link's
-  # resolution). A user who checked out another branch there gets `-`.
-  dwt=""
-  if [[ "$is_bare" == "true" ]]; then
-    dbranch="$(git --git-dir="$common_dir" symbolic-ref --short HEAD 2>/dev/null || true)"
-    cur=""
-    while IFS= read -r line; do
-      case "$line" in
-        "worktree "*) cur="${line#worktree }" ;;
-        "branch refs/heads/$dbranch") [[ -n "$dbranch" ]] && dwt="$cur" ;;
-      esac
-    done < <(git --git-dir="$common_dir" worktree list --porcelain 2>/dev/null)
-  else
-    dwt="$repo_root"
-  fi
-  printf 'DEFAULT_WORKTREE:\t%s\n' "${dwt:--}"
+# ---- status and link: the store against the default worktree ----
+if [[ "$mode" == "status" || "$mode" == "link" ]]; then
+  # The default worktree (lib.sh): a user who checked out another branch
+  # there gets `-`.
+  dwt="$(default_worktree)"
 
   # The ln -s target linking .orca/secrets/<rel> to <dwt>/<rel>: relative
   # when the default worktree sits under the repo root, absolute otherwise.
@@ -224,6 +262,130 @@ if [[ "$mode" == "status" ]]; then
       printf '%s/%s\n' "$dwt" "$rel"
     fi
   }
+
+  # The offer: ignored, untracked env files that are real files in the
+  # default worktree, NUL-separated — status's UNLINKED scan, its LINKABLE
+  # lines, and link's gate are this one list. --directory lists an ignored
+  # directory once instead of descending (node_modules); directory rows end
+  # in / and are skipped.
+  env_candidates() {
+    local rel base
+    [[ -n "$dwt" && -d "$dwt" ]] || return 0
+    while IFS= read -r -d '' rel; do
+      case "$rel" in */) continue ;; esac
+      base="${rel##*/}"
+      case "$base" in
+        *.example|*.sample|*.template) continue ;;
+        .env|.env.*|.envrc) ;;
+        *) continue ;;
+      esac
+      [[ -f "$dwt/$rel" && ! -L "$dwt/$rel" ]] || continue
+      printf '%s\0' "$rel"
+    done < <(git -C "$dwt" ls-files -z --others --ignored --exclude-standard --directory 2>/dev/null | LC_ALL=C sort -z)
+  }
+  is_candidate() { # <relpath> — the offer holds this path
+    local c
+    while IFS= read -r -d '' c; do
+      [[ "$c" == "$1" ]] && return 0
+    done < <(env_candidates)
+    return 1
+  }
+fi
+
+# ---- link: write the entries status offers ----
+if [[ "$mode" == "link" ]]; then
+  [[ -n "$dwt" ]] || fail NO_DEFAULT_WORKTREE "the default branch is checked out in no worktree — there is no file to link to"
+
+  # Every existing component from the store down to the entry's parent
+  # must be a real directory: mkdir -p and ln -s would follow a symlinked
+  # one and write outside the store.
+  parents_regular() { # <relpath>
+    local dir="$secrets_dir" rest="$1" comp
+    while [[ "$rest" == */* ]]; do
+      comp="${rest%%/*}"
+      rest="${rest#*/}"
+      dir="$dir/$comp"
+      if [[ -L "$dir" ]]; then return 1; fi
+      if [[ -e "$dir" && ! -d "$dir" ]]; then return 1; fi
+    done
+    return 0
+  }
+
+  linked=0 refused=0
+  refuse() { # <relpath> <why>
+    printf 'REFUSED:\t%s\t%s\n' "$1" "$2"
+    refused=$((refused + 1))
+  }
+  for rel in "${link_rels[@]}"; do
+    entry="$secrets_dir/$rel"
+    source_file="$dwt/$rel"
+    target="$(link_target "$rel")"
+    if ! parents_regular "$rel"; then
+      refuse "$rel" IRREGULAR_PARENT
+      continue
+    fi
+    if [[ -L "$entry" ]]; then
+      # Already that link when one hop lands on the default worktree's file
+      # — and OK only while that file is still there and still one the
+      # offer holds: a link whose file is gone is DANGLING to status and
+      # skipped by place, so it is not a success to report.
+      if [[ "$(link_hop "$entry" 2>/dev/null || true)" != "$(canonicalize "$(dirname "$source_file")")/${rel##*/}" ]]; then
+        refuse "$rel" ENTRY_EXISTS
+      elif [[ ! -e "$source_file" && ! -L "$source_file" ]]; then
+        refuse "$rel" SOURCE_GONE
+      elif ! is_candidate "$rel"; then
+        refuse "$rel" NOT_OFFERED
+      else
+        printf 'OK:\t%s\n' "$rel"
+        linked=$((linked + 1))
+      fi
+      continue
+    fi
+    if [[ -e "$entry" ]]; then
+      # A copy is replaced only when nothing is lost (identical bytes) and
+      # the path is one status would have offered with no entry at all.
+      if [[ ! -f "$entry" || ! -f "$source_file" || -L "$source_file" ]]; then
+        refuse "$rel" ENTRY_EXISTS
+      elif ! cmp -s "$entry" "$source_file"; then
+        refuse "$rel" COPY_DIFFERS
+      elif ! is_candidate "$rel"; then
+        refuse "$rel" NOT_OFFERED
+      else
+        # Written beside the copy and renamed over it, so the entry is
+        # never missing.
+        tmp="$entry.orca-link.$$"
+        rm -f "$tmp" 2>/dev/null
+        if ln -s "$target" "$tmp" 2>/dev/null && mv -f "$tmp" "$entry" 2>/dev/null; then
+          printf 'RELINKED:\t%s\t%s\n' "$rel" "$target"
+          linked=$((linked + 1))
+        else
+          rm -f "$tmp" 2>/dev/null
+          refuse "$rel" WRITE_ERROR
+        fi
+      fi
+      continue
+    fi
+    if [[ ! -e "$source_file" && ! -L "$source_file" ]]; then
+      refuse "$rel" SOURCE_GONE
+    elif ! is_candidate "$rel"; then
+      refuse "$rel" NOT_OFFERED
+    elif mkdir -p "$(dirname "$entry")" 2>/dev/null && ln -s "$target" "$entry" 2>/dev/null; then
+      printf 'LINKED:\t%s\t%s\n' "$rel" "$target"
+      linked=$((linked + 1))
+    else
+      refuse "$rel" WRITE_ERROR
+    fi
+  done
+  # The store may have been created just now: a conventional checkout
+  # must exclude it before anything can `git add -A` it.
+  ensure_exclude
+  printf 'LINKED_TOTAL:\t%d\tREFUSED:\t%d\n' "$linked" "$refused"
+  exit 0
+fi
+
+# ---- status (read-only) ----
+if [[ "$mode" == "status" ]]; then
+  printf 'DEFAULT_WORKTREE:\t%s\n' "${dwt:--}"
 
   entries=0 copies=0 unlinked=0
   if [[ -d "$secrets_dir" ]]; then
@@ -244,6 +406,11 @@ if [[ "$mode" == "status" ]]; then
           if cmp -s "$src" "$dwt/$rel"; then same=SAME; else same=DIFFERS; fi
           printf 'COPY:\t%s\t%s\t%s\n' "$rel" "$same" "$(link_target "$rel")"
           copies=$((copies + 1))
+          # The SAME copies link accepts, by the offer's own list — never
+          # for a caller to guess from the file name.
+          if [[ "$same" == SAME ]] && is_candidate "$rel"; then
+            printf 'LINKABLE:\t%s\t%s\n' "$rel" "$(link_target "$rel")"
+          fi
         fi
       else
         printf 'ENTRY:\t%s\tIRREGULAR\n' "$rel"
@@ -251,24 +418,11 @@ if [[ "$mode" == "status" ]]; then
     done < <(find "$secrets_dir" -mindepth 1 ! -type d -print0 | LC_ALL=C sort -z)
   fi
 
-  # Candidates: ignored, untracked env files in the default worktree with
-  # no entry. --directory lists an ignored directory once instead of
-  # descending (node_modules); directory rows end in / and are skipped.
-  if [[ -n "$dwt" && -d "$dwt" ]]; then
-    while IFS= read -r -d '' rel; do
-      case "$rel" in */) continue ;; esac
-      base="${rel##*/}"
-      case "$base" in
-        *.example|*.sample|*.template) continue ;;
-        .env|.env.*|.envrc) ;;
-        *) continue ;;
-      esac
-      [[ -f "$dwt/$rel" && ! -L "$dwt/$rel" ]] || continue
-      [[ -e "$secrets_dir/$rel" || -L "$secrets_dir/$rel" ]] && continue
-      printf 'UNLINKED:\t%s\t%s\n' "$rel" "$(link_target "$rel")"
-      unlinked=$((unlinked + 1))
-    done < <(git -C "$dwt" ls-files -z --others --ignored --exclude-standard --directory 2>/dev/null | LC_ALL=C sort -z)
-  fi
+  while IFS= read -r -d '' rel; do
+    [[ -e "$secrets_dir/$rel" || -L "$secrets_dir/$rel" ]] && continue
+    printf 'UNLINKED:\t%s\t%s\n' "$rel" "$(link_target "$rel")"
+    unlinked=$((unlinked + 1))
+  done < <(env_candidates)
   printf 'ENTRIES:\t%d\tCOPIES:\t%d\tUNLINKED:\t%d\n' "$entries" "$copies" "$unlinked"
   exit 0
 fi

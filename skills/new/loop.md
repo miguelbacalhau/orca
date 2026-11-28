@@ -4,7 +4,9 @@ This file is read by `/orca:new` and `/orca:open` once a plan is installed, and 
 
 You sequence it; you never edit code, and you never apply the gate yourself. After every implementer turn and every review, **`rounds next` reads the phase directory and prints the one next action** — you execute it. Counts come from its frame and finding titles from `rounds summary`, so you never read a review or response file whole. The one exception is a dispute: the disputed entries of that round's response, and each disputed finding's own entry in the review, read by its title.
 
-You hold, from the skill that loaded this file: the objective directory `<dir>`, the `worktree` and the `reviewer` (with `codex`, `codex_fix`) from this session's open, the `orca:objective-open` result (`${CLAUDE_PLUGIN_ROOT}/skills/new/provision.md`). When you no longer hold them (the open happened before a compaction, say), re-open as that file's Re-checking says. **One provisioning at a time in a worktree:** when an earlier `orca:provision` spawn — the open's warm-up — is still in flight, wait for its result before Step 2; when none was spawned, or it has landed, go on. Either way the phase start provisions again, cheap on a warm tree and needed, since phases change dependencies. Every spawn runs in the background: wait for its notification, and never fabricate a result. Shell calls go through `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh` with your own Bash tool. Later turns go to the implementer by `SendMessage` (a deferred tool: load it through ToolSearch when it appears only by name).
+You hold, from the skill that loaded this file: the objective directory `<dir>`, the `worktree`, the `reviewer` (with `codex`, `codex_fix`), and `root_in_scope` from this session's open, the `orca:objective-open` result (`${CLAUDE_PLUGIN_ROOT}/skills/new/provision.md`). When you no longer hold them (the open happened before a compaction, say), re-open as that file's Re-checking says. **One provisioning at a time in a worktree:** when an earlier `orca:provision` spawn — the open's warm-up — is still in flight, wait for its result before Step 2; when none was spawned, or it has landed, go on. Either way the phase start provisions again, cheap on a warm tree and needed, since phases change dependencies. Every spawn runs in the background: wait for its notification, and never fabricate a result. Shell calls go through `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh` with your own Bash tool. Later turns go to the implementer by `SendMessage` (a deferred tool: load it through ToolSearch when it appears only by name).
+
+**The session's reach** is the held `root_in_scope`. When it is `no`, say so in one line before the first phase starts, as `${CLAUDE_PLUGIN_ROOT}/skills/new/provision.md` words it — the implementer would otherwise find out by being refused in its worktree — then go on.
 
 **The reviewer** is the held `reviewer`. When it is `fail`, or `codex` with the result's `codex: fail`, no phase can be reviewed: relay `codex_fix` (`/orca:doctor` walks every remediation; `/orca:config` picks another reviewer) and stop before any phase starts. Never switch reviewers on the user's behalf.
 
@@ -125,7 +127,19 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh objective phase-block <dir> <P> D<n>
 ## Step 5: Review round N
 
 1. `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh secrets remove <worktree>` — the reviewer reads adversarial content and needs no credentials.
-2. Spawn a fresh `orca:objective-review-<reviewer>`. Its task message: the worktree, the brief path `<phase-dir>/brief.md`, the artifact path `<phase-dir>/reviews/round-<N>.json`, the declines path `<phase-dir>/declines.md` (whether or not it exists yet), the rounds directory `<phase-dir>`, the base `<base>` — the review covers everything since it, committed or not — and, for codex, the plugin root, `${CLAUDE_PLUGIN_ROOT}` substituted. Never the exploration path: the reviewer judges the change against the brief alone.
+2. Spawn a fresh `orca:objective-review-<reviewer>`. Its task message, these lines in this order and nothing before them:
+
+   ```text
+   Worktree: <worktree>
+   Brief: <phase-dir>/brief.md
+   Artifact path: <phase-dir>/reviews/round-<N>.json
+   Declines: <phase-dir>/declines.md
+   Rounds directory: <phase-dir>
+   Base: <base>
+   Plugin root: ${CLAUDE_PLUGIN_ROOT}
+   ```
+
+   The declines path is given whether or not the file exists yet; the review covers everything since the base, committed or not; the `Plugin root:` line is for codex only, substituted and absolute. Never the exploration path: the reviewer judges the change against the brief alone.
 3. `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh secrets place <worktree>` — on every path out of the round, the reviewer's failure included.
 
 `secrets` failing `OUTSIDE_ROOT` means orca never placed secrets in that checkout — carry on. Any other typed `FAIL:` from `secrets remove` stops the round before the reviewer spawns: tell the user, and stop the pass.

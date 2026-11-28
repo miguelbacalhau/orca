@@ -10,8 +10,9 @@
 # Sourced, never executed. bash has textual inclusion, not modules, so
 # the rules are conventions, enforced by review: this file owns its
 # function names (fail, emit_frame, b64_encode, b64_decode,
-# resolve_repo, canonicalize, is_run_dir, is_worktree_root, is_marker,
-# worktree_tree, notes_key, is_banned) and verbs never redefine them;
+# resolve_repo, default_worktree, canonicalize, is_run_dir,
+# is_worktree_root, is_marker, worktree_tree, notes_key, is_banned) and
+# verbs never redefine them;
 # callers source it via an absolute path ("$PLUGIN_ROOT/scripts/lib.sh"
 # — `source` resolves relative paths against the working directory, not
 # the sourcing script); and a sourced file's `exit` kills the caller —
@@ -84,6 +85,30 @@ resolve_repo() {
   is_bare="$(git --git-dir="$common_dir" rev-parse --is-bare-repository 2>/dev/null || true)"
   # shellcheck disable=SC2034  # set for the sourcing caller
   repo_root="$(dirname "$common_dir")"
+}
+
+# default_worktree — the default worktree's path on stdout, nothing when
+# there is none. Reads common_dir, is_bare, and repo_root (resolve_repo,
+# or a verb's own resolution). A conventional checkout is its own; in the
+# bare layout it is wherever the bare HEAD's branch is checked out,
+# whatever that directory is called — so a user who switched main/ to
+# another branch has none.
+default_worktree() {
+  if [ "$is_bare" != "true" ]; then
+    printf '%s\n' "$repo_root"
+    return 0
+  fi
+  local dbranch cur="" found="" line
+  dbranch="$(git --git-dir="$common_dir" symbolic-ref --short HEAD 2>/dev/null || true)"
+  [ -n "$dbranch" ] || return 0
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*) cur="${line#worktree }" ;;
+      "branch refs/heads/$dbranch") found="$cur" ;;
+    esac
+  done < <(git --git-dir="$common_dir" worktree list --porcelain 2>/dev/null)
+  [ -n "$found" ] && printf '%s\n' "$found"
+  return 0
 }
 
 # ---- symlink canonicalizer --------------------------------------------

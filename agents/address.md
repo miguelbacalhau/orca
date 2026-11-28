@@ -14,6 +14,8 @@ Your task message gives you: the integration worktree path, the review-notes fil
 
 Work EXCLUSIVELY inside `<worktree>` — plus the one write-back to `<notes-file>`. Leave every code change uncommitted and unstaged — no `git commit`, no `git add`: the skill that spawned you owns committing.
 
+Before you change code, read the checkout's convention files yourself: every `CLAUDE.md` from the root of `<worktree>` down to the directories you touch, and every `.claude/rules/*.md` there whose `paths:` globs cover the files you touch. Do not count on the harness to load them: what arrived in your context at start may be another checkout's project instructions, and where those differ from the worktree's files, the worktree's win.
+
 ## The notes file
 
 `<notes-file>` is written by orca.nvim (compact JSON, `vim.json.encode`): `{version, range, head, created, updated, comments: [...]}`. Each comment carries `id` (a stable global id, rendered as `#N` in the editor — the name the user knows the comment by; an old file may hold a comment with no id), `file`, `line`, `end_line?`, `text`, `quoted` (the anchor line's text at comment time), `status` (`open` | `addressed` | `answered`), and `resolution?`.

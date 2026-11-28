@@ -508,6 +508,46 @@ MERGED_ITEM="$BUILT,$MP_FRAME,$MERGED,$MF_FRAME"
   [[ "$output" == *'"deliverableState":"unverified"'* ]]
 }
 
+@test "an implement agent that ends without its result fails as an agent error, never as infeasible" {
+  # What a blocked restarted agent comes to: its StructuredOutput is denied
+  # (hooks/pin.ts), so agent() throws instead of returning a judgment.
+  local thrown='{"throw":"agent({schema}): subagent completed without calling StructuredOutput (after in-conversation nudge)"}'
+  run_wf "{$BASE,\"items\":$ONE_ITEM}" "[$OK,\"planned\",$WT_FRAME,$thrown,$FAIL,$OK]"
+  [[ "$output" == *'"ok":true'* ]]
+  [[ "$output" == *'"label":"implement:W1"'* ]]
+  [[ "$output" == *'"id":"W1","reason":"agent({schema}): subagent completed without calling StructuredOutput'* ]]
+  [[ "$output" != *'implementation infeasible'* ]]
+  # Not spec-rooted: no escalation agent is asked whether to rebuild.
+  [[ "$output" != *'An orca work item failed mid-build'* ]]
+  [[ "$output" != *'"label":"review:'* ]]
+}
+
+@test "the pin hook's worktree labels are the ones the composers write" {
+  local labels
+  labels="$(grep -oE "^export const [A-Z_]*WORKTREE = '[^']+'" "$ORCA_ROOT/hooks/pin.ts" | sed "s/.*= '//; s/'$//" | sort)"
+  [ "$labels" = "$(printf 'Integration worktree\nReview worktree\nWorktree')" ]
+  # The work loop: implement, fix, commit, review by Worktree; merge,
+  # integrate, plan by Integration worktree — each in the header block.
+  [ "$(grep -c '\[`Worktree: \${' "$SCRIPTS/work-loop.workflow.js")" -ge 5 ]
+  [ "$(grep -c '`Integration worktree: \${integrationWt}`' "$SCRIPTS/work-loop.workflow.js")" = 3 ]
+  # The spec workflow's reviewer.
+  [ "$(grep -c '\[`Review worktree: \${reviewWorktree}`' "$SCRIPTS/spec.workflow.js")" = 1 ]
+  # The skills' fixed task-message blocks open with the line (indented when
+  # the block sits inside a list item).
+  local f
+  for f in skills/new/provision.md skills/review/SKILL.md; do
+    grep -qE '^ *Worktree: <worktree>$' "$ORCA_ROOT/$f"
+  done
+  [ "$(grep -cE '^ *Worktree: <worktree>$' "$ORCA_ROOT/skills/new/loop.md")" = 3 ]
+  [ "$(grep -cE '^ *Worktree: <worktree>$' "$ORCA_ROOT/skills/new/planning.md")" = 2 ]
+  # Every agent type the workflows start that the hook pins is spelled there.
+  local type
+  for type in implement fix commit merge integrate plan; do
+    grep -q "agentType: 'orca:$type'" "$SCRIPTS/work-loop.workflow.js"
+    grep -q "^  'orca:$type': workflowAgent(" "$ORCA_ROOT/hooks/pin.ts"
+  done
+}
+
 @test "the hook's allow-list is exactly the verbs the work loop calls" {
   local called allowed
   called="$(grep -oE "orca\('[a-z-]+'" "$SCRIPTS/work-loop.workflow.js" | sed "s/orca('//; s/'//" | sort -u)"

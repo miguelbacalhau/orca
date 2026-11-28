@@ -13,7 +13,7 @@ Repository: <the session's working directory>
 Objective: <dir>
 ```
 
-(the plugin root substituted, absolute: nothing in a subagent's shell carries it). The agent claims the objective for this session, arrives in its worktree (creating it off the base commit the first time, re-adding it when it is gone), and runs the reviewer check there. It returns one object. For the rest of the session, hold its `worktree`, `branch`, and `arrival` (planning and the loop need the first two, `orca:provision` the first and last) and the reviewer values below.
+(the plugin root substituted, absolute: nothing in a subagent's shell carries it). The agent claims the objective for this session, arrives in its worktree (creating it off the base commit the first time, re-adding it when it is gone), and runs the reviewer check from the session's directory. It returns one object. For the rest of the session, hold its `worktree`, `branch`, and `arrival` (planning and the loop need the first two, `orca:provision` the first and last) and the reviewer values below.
 
 `status: open_failed`: the skill names the causes (`reason`) that stop it first. Any other reason (`WORKTREE_FAILED`, `WORKTREE_MISMATCH`, `BRANCH_FOREIGN`, `CLAIM_BUSY`, …) means the worktree is not there. Relay the reason and detail in one line. The claim stands. The discussion still runs, since it needs only the objective's files. Planning and the loop need the worktree, though: before either runs, re-open (it continues where it stopped). A second failure goes to the user.
 
@@ -24,6 +24,8 @@ It comes back in the open's object, so there is no call of your own to make. Hol
 - **`reviewer`**: `codex`, `claude`, or `fail` (the config or the reviewer check failed).
 - **`codex`**: `ok`, `skipped`, or `fail`.
 - **`codex_fix`**: the remediation when `codex` is `fail`, else empty.
+
+The object carries one more value from the same check, held with them: **`root_in_scope`** — `yes`, `no`, or `n/a` — whether the repository root, and with it the objective's worktree, is inside what this session may touch. `no` means the session was started in a worktree whose settings do not list the root in `permissions.additionalDirectories`. Say it in one line when the object lands, and again before the first phase starts: outside `bypassPermissions` the implementer and the reviewers will be refused every read and write in the objective's worktree; `/orca:doctor` writes the setting, and a fresh session picks it up. Never write the setting yourself, and never stop over it — a session in bypass mode works without it.
 
 Mention them in a line only when something is wrong, and never pause the discussion over them. `codex: fail` → relay `codex_fix` (`/orca:doctor` walks every remediation). `reviewer: fail` → one line pointing at `/orca:config`. The reviewer is first needed at plan review, and planning and the loop say what they need. Never switch reviewers on the user's behalf.
 

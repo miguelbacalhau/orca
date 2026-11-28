@@ -165,3 +165,19 @@ report_for() {
   [ "$status" -eq 0 ]
   refute_line 'REPORT:'
 }
+
+@test "discover answers the same from the root, the default worktree, and a subdirectory of it" {
+  make_deliverable "$BATS_TEST_TMPDIR/r"
+  mkdir -p "$BATS_TEST_TMPDIR/r/main/src/lib"
+  cd "$BATS_TEST_TMPDIR/r"
+  run bash "$SCRIPTS/orca.sh" review discover
+  [ "$status" -eq 0 ]
+  from_root="$output"
+  [[ "$from_root" == *"$BATS_TEST_TMPDIR/r/orca-foo"* ]]
+  for from in main main/src/lib; do
+    cd "$BATS_TEST_TMPDIR/r/$from"
+    run bash "$SCRIPTS/orca.sh" review discover
+    [ "$status" -eq 0 ]
+    [ "$output" = "$from_root" ]
+  done
+}

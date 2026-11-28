@@ -12,6 +12,8 @@ The work loop runs a few dozen `orca.sh` verbs per run: the lease, worktree arri
 
 No model sees the request or the output, and no tokens are spent. A call takes about a tenth of a second.
 
+The verb runs in the directory the session was started in — the default worktree or the repository root, either works: every path the work loop passes is absolute.
+
 ## Guards
 
 Each guard refuses with `{v, refused}`, which the work loop raises as an error:
@@ -39,3 +41,5 @@ Hook answers, including refusals and errors, are journaled like any agent result
 - **Without the hook, the request leaves the machine.** The verb request — its verb and arguments (run-directory paths, the slug and branch) — is sent to the API as an unknown model name and rejected. At launch, only the first verb gets that far.
 
 Tests: `tests/relay.test.ts` (`claude plugin test .`) for the hook, `tests/work-loop.bats` for the work loop's side.
+
+The same hooks module holds [the pin hook](pin-hook.md), which starts each stage agent in its worktree.

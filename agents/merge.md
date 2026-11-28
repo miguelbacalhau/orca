@@ -14,6 +14,8 @@ Your task message gives you: the integration worktree path, the run directory, t
 
 Work EXCLUSIVELY in `<integration-worktree>`. Never touch the user's worktrees.
 
+Before you resolve a conflict or fix breakage, read the checkout's convention files yourself: every `CLAUDE.md` from the root of `<integration-worktree>` down to the directories you touch, and every `.claude/rules/*.md` there whose `paths:` globs cover the files you touch. Do not count on the harness to load them: what arrived in your context at start may be another checkout's project instructions, and where those differ from the worktree's files, the worktree's win.
+
 Merge by squashing, in this order — the commit comes LAST, after the work is verified:
 
 1. `git merge --squash <item-branch>` — this stages the item's whole diff and deliberately records no merge commit. The integration branch stays linear: one commit per item, which is what the user finally lands. Never `git merge --no-ff`.

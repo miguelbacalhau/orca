@@ -5,7 +5,9 @@
 // usage: node run-workflow.js <script> <args-json> <responses-json>
 //
 // <responses-json> is an array consumed in order, one entry per agent()
-// call; {"die": true} makes that call return null (a skipped/dead agent).
+// call; {"die": true} makes that call return null (a skipped/dead agent),
+// {"throw": "<message>"} makes it throw, as an agent() call does when the
+// agent ends without its schema'd result.
 // Prints one JSON line: {ok, result?, error?, calls: [{prompt, opts}]} —
 // ok:false carries a launch-validation or runtime throw in `error`.
 'use strict'
@@ -25,6 +27,7 @@ const sandbox = {
     calls.push({ prompt, opts })
     const r = responses.shift()
     if (r === undefined) throw new Error(`agent() call #${calls.length} has no scripted response`)
+    if (r && typeof r.throw === 'string') throw new Error(r.throw)
     return r && r.die ? null : r
   },
   parallel: async (thunks) => Promise.all(thunks.map(t => t().catch(() => null))),

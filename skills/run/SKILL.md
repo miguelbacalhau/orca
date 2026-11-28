@@ -15,7 +15,7 @@ The brief is where the user sets intent — written in this skill's interview or
 
 ## Step 0: Triage
 
-This skill is a dispatcher over `.orca` state: what is on disk decides whether this invocation resumes, runs, or interviews. Work the ordered checks below at the repo root — resolve `<repo-root>` as the parent of `git rev-parse --path-format=absolute --git-common-dir` — discovering by listing, never by reading files to decide. Present the first hit, but never force it: every offer includes starting something new instead.
+This skill is a dispatcher over `.orca` state: what is on disk decides whether this invocation resumes, runs, or interviews. Work the ordered checks below against the repository root, from whichever directory this session was started in — resolve `<repo-root>` as the parent of `git rev-parse --path-format=absolute --git-common-dir`, and name every path under it absolutely — discovering by listing, never by reading files to decide. Present the first hit, but never force it: every offer includes starting something new instead.
 
 **The argument gate — an argument is the intent.** Invoked with an `<idea>` argument, skip checks 2 and 3 and go straight to the interview (check 3's `interview.md`), seeded with it. Do not offer queued briefs, do not ask which to run, no picker — the user just typed the answer. Run the triage call below anyway (it is one cheap read), because two kinds of state still surface as **one-line mentions that never block**:
 
@@ -98,7 +98,7 @@ The user's confirmation of the restated brief authorizes the run. If the brief o
 
 ### Environment pre-flight (script)
 
-The run's mechanical prerequisites — the bare-repo layout and, when the reviewer is codex, the Codex tooling — are validated by one bundled script, which also resolves **which independent reviewer this run uses**. If the interview's early pre-flight already ran the script in this same invocation, reuse its output — gates and reviewer line alike — instead of re-running it; re-run only when it reported a `FAIL` the user has since fixed. Otherwise run it during this step, before the confirmation, from the project root:
+The run's mechanical prerequisites — the bare-repo layout and, when the reviewer is codex, the Codex tooling — are validated by one bundled script, which also resolves **which independent reviewer this run uses**. If the interview's early pre-flight already ran the script in this same invocation, reuse its output — gates and reviewer line alike — instead of re-running it; re-run only when it reported a `FAIL` the user has since fixed. Otherwise run it during this step, before the confirmation, from the directory this session was started in:
 
 ```bash
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh preflight
@@ -143,7 +143,7 @@ The mode is also enforced where the run's shell commands execute: the work loop 
 
 ## Step 2: Write the spec and work breakdown
 
-Create the run directory at the project root — the directory that holds the bare repo and its worktrees. It holds only run metadata. Every worktree lives at the **top level of the repo**, as a sibling of the bare repo and the user's own worktrees — never inside `.orca/`:
+Create the run directory under `<repo-root>` — the directory that holds the bare repo and its worktrees, whichever directory this session was started in. It holds only run metadata. Every worktree lives at the **top level of the repo**, as a sibling of the bare repo and the user's own worktrees — never inside `.orca/`:
 
 ```text
 <repo-root>/
@@ -182,28 +182,51 @@ Failure here is non-fatal: a run with a stale or missing decision log still runs
 With the run directory scaffolded, **delegate the spec — do not explore the codebase in the main context.** Heavy exploration lives and dies in a subagent, and the main conversation only reads the artifact that comes back. Compose the spec agent's complete task message from only:
 
 - the run directory
-- the repository root (`<repo-root>`)
+- the directory to explore and what is uncommitted in it — the four-part block below, from `preflight where`
 - the current timestamp, from `date +"%Y-%m-%d %H:%M"` — the agent has no shell, so it cannot generate one for the spec's `Created` line
 - the **brief**: the outcome, features, non-goals, direction decisions (the Direction section, when present — settled decisions that bind the spec the same way constraints do), inputs/outputs, constraints, and doubt rule from the confirmed brief, plus any amendments confirmed with it
 - a `Project context:` line naming `<repo-root>/.orca/decisions.md` (decision log), framed as generated from trunk commit history with each entry citing its carrying commit — recorded choices are authoritative unless the brief deliberately overrides one; a missing file is skipped, not an error
+
+**The build base, and where the spec agent explores.** The run builds on one branch — the **build branch**: the trunk confirmed in Step 1, or, when the brief's Direction section carries a `**Base branch:**` (a follow-up on an unlanded deliverable), that branch. Name it to the CLI, always — the confirmed trunk is not necessarily the repository's default branch:
+
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh preflight where --base <build-branch>
+```
+
+A typed `FAIL: BAD_REF` means the branch does not exist: a hard stop, as Step 3 says of a missing base branch. From its TAB-separated lines:
+
+- `BUILD_BASE:` — the sha and the branch. **Hold the sha as `<build-base-sha>`**: it is the commit the spec is told the run builds on, the commit the spec-review worktree below is created at — every time it is created — and the branch Step 3 creates the integration worktree from.
+- `EXPLORE:` — the one checkout the spec agent explores, never `<repo-root>` itself (the root holds the default worktree plus every `orca-*` checkout, so a search there returns each hit several times and reads other runs' half-built code). It is the worktree that has the build branch checked out — the default worktree for the trunk, `<repo-root>/orca-<slug>` for an unlanded follow-up — and, when that branch is checked out nowhere, the default worktree, then this session's own checkout, then the root.
+- `AT_BASE: no` — the directory explored is not at the build base (the branch has no checkout, or its checkout sits on another commit): say so once, in one line, and add to the task message, after the block below, `The directory explored is not at the build base: <sha> is what the run builds on.`
+
+Put this block in the task message — the `UNCOMMITTED:` lines give the paths (`UNCOMMITTED_TOTAL: 0` → `none`; `-` → it could not be read: write `unknown`, never `none`):
+
+```text
+Explore: <explore-dir>
+Build base: <sha> (<branch>)
+Uncommitted in <explore-dir>:
+<the UNCOMMITTED: lines' text, one per line — or the single word none>
+```
+
+The spec agent has no shell: without these lines an untracked helper file in the user's checkout looks like committed code to it. The decision log path stays under `<repo-root>/.orca/`.
 
 **Read the model config once, before the spec spawn.** Run `bash ${CLAUDE_PLUGIN_ROOT}/scripts/orca.sh config validate` now, while nothing has been spent — the same vocabulary the workflow script re-checks at launch, but a failure there would land only after the whole spec stage has run. On success it emits `VALID:` followed by one-line JSON carrying the pinned `reviewer` (when set) and the canonical `agents` block (when non-empty) — exactly the values the Workflow args take; an absent config file emits `VALID: {}`. Hold that JSON for the rest of the run: Step 4 passes the held values into the Workflow args, and no step re-reads the file — a config edited mid-run must not change a run already in flight. On a typed `FAIL:` line, stop before spawning anything, relay the field it names, and point the user at orca:config — never author or repair the file here.
 
 **Hold the resolved reviewer alongside it.** The run's reviewer is the held JSON's `reviewer` when present (the pinned value), else the detected value from Step 1's `REVIEWER:` preflight line — that line is the source; do not probe the machine a second time. The held value goes into the Workflow args and the spec.md record below; like the agents block, it is fixed at launch.
 
-**Create the spec-review worktree.** The spec the agent writes gets an independent adversarial review — by the run's held reviewer, against the brief and the codebase — inside the same workflow, before anything launches over it. The reviewer works in a clean throwaway checkout, never the user's worktree: both reviewer variants see identical inputs, with no uncommitted state and no placed secrets. Create it immediately before the workflow invocation, at the tip of the trunk confirmed in Step 1:
+**Create the spec-review worktree.** The spec the agent writes gets an independent adversarial review — by the run's held reviewer, against the brief and the codebase — inside the same workflow, before anything launches over it. The reviewer works in a clean throwaway checkout, never the user's worktree: both reviewer variants see identical inputs, with no uncommitted state and no placed secrets. Create it immediately before the workflow invocation, at the build base held above — the commit the run will build from, which for a follow-up with a `**Base branch:**` is that branch's tip, not the trunk's: a reviewer in a trunk checkout would report the feature being extended as missing.
 
 ```bash
-git worktree add --detach <repo-root>/orca-<slug>-specreview <trunk-tip>
+git worktree add --detach <repo-root>/orca-<slug>-specreview <build-base-sha>
 ```
 
-No branch, no `secrets place` — clean by construction. Every spec-workflow invocation (a Step 3 checkpoint re-spawn included) is bracketed by this create and the matching remove below.
+No branch, no `secrets place` — clean by construction. Every spec-workflow invocation (a relaunch after a dead spec agent and a Step 3 checkpoint re-spawn included) is bracketed by this create and the matching remove below, and every re-creation uses the same `<build-base-sha>`.
 
 **Spawn the spec agent through its bundled workflow.** Invoke the Workflow tool with `scriptPath: "${CLAUDE_PLUGIN_ROOT}/scripts/spec.workflow.js"` — the substituted value is already absolute; never pass `~` or an unsubstituted variable (same rule as Step 4) — and `args: { prompt, model?, effort?, runDir, reviewWorktree, reviewer, pluginRoot }`: `prompt` is the composed task message; `model`/`effort` come from the held `agents.spec` block, each passed only when set (both apply on every spec spawn — the workflow's own revise round and a Step 3 checkpoint re-spawn included); `runDir` and `reviewWorktree` are the absolute run-directory and review-worktree paths; `reviewer` is the held reviewer from this step — the spec reviewer is the run's reviewer, no separate knob; `pluginRoot` is `${CLAUDE_PLUGIN_ROOT}` substituted (the codex reviewer shells out to `orca.sh codex` and nothing in a subagent's environment carries that path). The workflow runs the gated sequence — spec, independent spec review (`orca:spec-review-<reviewer>`, writing `<run-dir>/reviews/spec-<reviewer>.json`), and on Critical/High findings exactly one revise round that folds them into the spec, with no re-review — its output is the spec that launches — in the background: wait for its task notification before proceeding — do not poll `spec.md`, and never fabricate the result; its `log()` lines are not visible mid-run ([anthropics/claude-code#74419](https://github.com/anthropics/claude-code/issues/74419)).
 
 It returns `{ summary, died, review }`. **Remove the review worktree first** — `git worktree remove <repo-root>/orca-<slug>-specreview` — on every path out of this step, the failure and stop paths included. Then branch on the result:
 
-- `died: true` (`review` absent): relaunch the workflow once, re-creating the review worktree first; if the second launch dies too, report the failure to the user and stop the run before anything else is spent.
+- `died: true` (`review` absent): relaunch the workflow once, re-creating the review worktree first, at the same `<build-base-sha>`; if the second launch dies too, report the failure to the user and stop the run before anything else is spent.
 - `review.written` with `criticalHigh > 0` and `revised: true`: the revise round addressed (or explicitly rebutted, as Risks entries) the findings, and its output is the spec that launches — proceed, carrying the counts into the Step 3 announce. There is deliberately no re-review: a second adversarial pass is blind to the first and churns rather than converges, and the item reviews and integration verification still gate everything built over the spec.
 - `review.written` with `criticalHigh > 0` and `revised: false`: the revise spawn died and the Critical/High findings stand unaddressed. This is the same posture as a spec agent reporting an unsplittable scope: surface the findings to the user, pointing at `<run-dir>/reviews/spec-<reviewer>.json` as the evidence, and stop rather than launching against a spec known to be wrong — creating no worktrees, branches, or session tasks beyond what already exists.
 - `review.written: false`: the review failed open — a reviewer failure must not brick the run. Relay `review.reason` as a one-way status line and proceed; the spec stands unreviewed, and every downstream gate (item reviews, integration verification) still stands.
@@ -222,7 +245,7 @@ Read the returned `spec.md` — an artifact, not source. Its Work Breakdown is t
 Report the spec to the user — outcome, work items, dependency order, what will run in parallel, key assumptions — plus one line on the spec review's outcome: the reviewer, the finding counts, and whether a revise round ran (or that the review failed open). One-way status, like the rest of the announce. How this lands depends on the breakdown-checkpoint choice recorded in the brief:
 
 - **Opted out (the default):** this is a one-way status update. Proceed immediately; do not wait for or request approval — the Step 1 confirmation already authorized the run. If the user interjects on their own, incorporate it; never solicit it.
-- **Opted in:** this is the one authorized pause. Present the spec and breakdown and ask once for approval. Incorporate any changes they request: a **structural** revision — re-splitting items, reordering dependencies, reworking an interface — re-spawns the `orca:spec` agent through the same Workflow invocation as Step 2, the prompt carrying the current `spec.md` plus the requested changes (held `agents.spec` overrides applied), because it may need fresh codebase exploration — with the same `runDir`/`reviewWorktree`/`reviewer` args passed again, the review worktree re-created first and removed after, so the re-spawned spec is re-reviewed with zero extra wiring and its result branches exactly as in Step 2; a **trivial** revision — wording, a renamed item, a tweaked assumption — edit inline. Then proceed. This is the final interactive moment of the run; after it, the run is autonomous and never waits on the user again.
+- **Opted in:** this is the one authorized pause. Present the spec and breakdown and ask once for approval. Incorporate any changes they request: a **structural** revision — re-splitting items, reordering dependencies, reworking an interface — re-spawns the `orca:spec` agent through the same Workflow invocation as Step 2, the prompt carrying the current `spec.md` plus the requested changes (held `agents.spec` overrides applied), because it may need fresh codebase exploration — with the same `runDir`/`reviewWorktree`/`reviewer` args passed again, the review worktree re-created first (at the same `<build-base-sha>`) and removed after, so the re-spawned spec is re-reviewed with zero extra wiring and its result branches exactly as in Step 2; a **trivial** revision — wording, a renamed item, a tweaked assumption — edit inline. Then proceed. This is the final interactive moment of the run; after it, the run is autonomous and never waits on the user again.
 
 Create the integration worktree at the repo root, on a fresh branch. The base is the trunk tip — unless the brief's Direction section carries a `**Base branch:**` field (followup briefs over an unlanded deliverable set it): then the run must build on that branch, so the worktree contains the feature being extended. Verify a named base exists first (`git rev-parse --verify refs/heads/<base-branch>` against the bare repo); a `**Base branch:**` that names a missing branch is a hard stop — report it and let the user decide, never silently fall back to the trunk (the run would build against code that lacks the feature it extends).
 

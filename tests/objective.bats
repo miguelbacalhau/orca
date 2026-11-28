@@ -2528,3 +2528,34 @@ commit_in() { # <worktree> <file> — one commit adding <file>
   [ "$status" -eq 0 ]
   [ "$(frame_value state)" = abandoned ]
 }
+
+# ---- a session in the default worktree ---------------------------------
+
+@test "from a shell in main/: new, open, list, and archive act on the repository, and archive removes the orca-* worktree" {
+  mkdir -p "$R/main/packages/x"
+  cd "$R/main/packages/x"
+  run orca objective new "$PWD" gamma main
+  [ "$status" -eq 0 ]
+  D="$(frame_value dir)"
+  [ "$D" = "$(ls -d "$R"/.orca/objectives/*-gamma)" ]
+  [ "$(frame_value worktree)" = "$R/orca-gamma" ]
+  run orca objective open "$D"
+  [ "$status" -eq 0 ]
+  W="$(frame_value worktree)"
+  [ "$W" = "$R/orca-gamma" ] && [ -d "$W" ]
+  # nothing was created in, or checked out over, the user's worktree
+  [ "$(git -C "$R/main" rev-parse --abbrev-ref HEAD)" = main ]
+  [ -z "$(git -C "$R/main" status --porcelain)" ]
+  run orca objective list . --all
+  [ "$status" -eq 0 ]
+  has_line $'OBJECTIVE:\t'"$D"$'\tgamma'
+  run orca objective current .
+  [ "$status" -eq 0 ]
+  # main/ is never "this shell stands inside the worktree": the archive goes through
+  run orca objective archive "$D" --abandon
+  [ "$status" -eq 0 ]
+  [ "$(frame_value state)" = abandoned ]
+  [ "$(frame_value worktree)" = removed ]
+  [ ! -e "$W" ]
+  [ -d "$R/main/packages/x" ]
+}

@@ -1,7 +1,8 @@
 // orca's $.state contract: what the hooks module keeps in $.state so it
 // survives a hot reload — the run band's run and band (hooks/run-band.tsx),
-// the objective band's objective and band (hooks/objective-band.tsx), and the
-// verb hook's permission gate (hooks/relay.ts).
+// the objective band's objective and band (hooks/objective-band.tsx), the
+// verb hook's permission gate (hooks/relay.ts), and the pin hook's bindings
+// (hooks/pin.ts).
 
 // One work item as the work-loop launch passed it.
 export type OrcaItem = { id: string; title: string; deps: string[] }
@@ -63,6 +64,20 @@ export type OrcaObjective = {
 // takes it up again only once its files draw a different band.
 export type OrcaObjectiveDropped = { dir: string; band: string }
 
+// One stage agent the pin hook knows, by agent id.
+export type OrcaPin = {
+  // The worktree the agent is bound to; null for a workflow agent that is
+  // known and not pinned (its line named no usable worktree, or it is blocked).
+  worktree: string | null
+  // Started by a workflow script's agent(): bound by id and dropped when it
+  // stops. false for an Agent-tool agent, whose spawn ran it in the worktree
+  // and whose binding is kept for the session.
+  workflow: boolean
+  // A restarted workflow agent no spawn answered for: its writing tools and
+  // its StructuredOutput are denied.
+  blocked?: true
+}
+
 declare module 'claude-code' {
   interface PluginState {
     orca: {
@@ -75,6 +90,8 @@ declare module 'claude-code' {
       // reported it; null until one has. The verb hook runs verbs only while
       // it is bypassPermissions.
       permissionMode: string | null
+      // The pin hook's bindings, agent id → pin.
+      pins: Record<string, OrcaPin>
     }
   }
 }

@@ -222,7 +222,7 @@ describe('when the band goes', () => {
 
 const BAND = {
   component: 'AbovePrompt' as const,
-  props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 100, scroll: { offset: 0, bodyRows: 19 }, view: {} },
+  props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 20, bodyColumns: 100, scroll: { offset: 0, bodyRows: 19 }, view: {} },
 }
 
 type Node = { text: string; mtimeMs: number }

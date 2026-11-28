@@ -12,8 +12,52 @@
 #   <KEY>: PASS
 #   <KEY>: FAIL: <terse remediation>
 #   <KEY>: SKIPPED: <why it was not checked>   (CODEX only)
-# plus informational TRUNK_CANDIDATE, REVIEWER, and CONFIG lines and a
-# final RESULT line.
+# plus informational TRUNK_CANDIDATE, REVIEWER, and CONFIG lines, the
+# location lines below, and a final RESULT line.
+#
+# Location lines — where the session stands, TAB-separated (a path may
+# hold spaces), printed whenever the directory is inside a repository:
+#   SESSION:<TAB>root | worktree <path> | conventional
+#       the bare layout's root, a worktree of it (its top level), or a
+#       conventional checkout
+#   ROOT_IN_SCOPE:<TAB>yes | no | n/a
+#       whether the repository root — the orca-* worktrees and .orca/ — is
+#       inside what a session started here may touch: n/a when the session
+#       stands at the root itself (or in a conventional checkout, which is
+#       the root); otherwise yes when a permissions.additionalDirectories
+#       entry of this worktree's .claude/settings.local.json or
+#       settings.json, or of the user's ~/.claude/settings.json, names the
+#       root or a directory above it
+#   DEFAULT_WORKTREE:<TAB><path> | -
+#       where the default branch is checked out (lib.sh default_worktree)
+#
+# Usage:
+#   orca.sh preflight                 every gate, plus the location lines
+#   orca.sh preflight where [--base <branch>]
+#                                     the location lines only, then where a
+#                                     run's spec and research explore and
+#                                     what the run builds on:
+#     EXPLORE:<TAB><dir><TAB>base | default | session | root
+#         with --base, the worktree that has <branch> checked out (base).
+#         Otherwise, or when <branch> is checked out nowhere: the default
+#         worktree; when the default branch is checked out nowhere either,
+#         the session's own worktree, else the root
+#     BUILD_BASE:<TAB><sha><TAB><branch>
+#         the commit a run builds on, resolved from the branch alone and
+#         never from the directory explored: <branch>'s tip with --base (the
+#         confirmed trunk, or a follow-up's base branch), else the default
+#         branch's; - for a value that does not resolve
+#     AT_BASE:<TAB>yes | no | -
+#         whether the directory explored has BUILD_BASE checked out (its
+#         HEAD is that commit); - when it is no work tree or either is unknown
+#     UNCOMMITTED:<TAB><git status --porcelain line>     one per path,
+#         untracked files always listed one by one, whatever the user's
+#         status.showUntrackedFiles
+#     UNCOMMITTED_TOTAL:<TAB><n> | -
+#         - when it is unknown: <dir> is no work tree, or git status failed
+#         there — never a 0 it did not count
+#   `where` exits 0, or 1 with a typed FAIL: (NOT_GIT, OLD_GIT, BAD_ARGS,
+#   BAD_REF for a --base that names no branch).
 #
 # No AGENTS gate: the subagent definitions ship inside the orca plugin, so
 # a session that can run this skill has them by construction. Nor is there
@@ -26,10 +70,145 @@
 #
 # Exit 0 iff every gate passes; non-zero if any gate fails. No side effects.
 #
-# Sourced by orca.sh (orca.sh preflight); of the lib it uses only
-# codex_binary_check — this verb otherwise keeps its own internal helpers. The fail below is a
-# VARIABLE, distinct from lib.sh's fail() function (bash separates the
-# two namespaces).
+# Sourced by orca.sh (orca.sh preflight); of the lib it uses
+# codex_binary_check, canonicalize, default_worktree, and — in `where` —
+# resolve_repo and the fail() function; this verb otherwise keeps its own
+# internal helpers. The fail below is a VARIABLE, distinct from lib.sh's
+# fail() function (bash separates the two namespaces).
+
+# ---- where the session stands -------------------------------------------
+# Reads common_dir, is_bare, repo_root, worktree_root.
+
+# The additionalDirectories entries of one settings file, one per line.
+# grep-only by design, like the BASH_MAX_TIMEOUT_MS read below: the array
+# is taken as written, and an entry holding an escaped quote is not read.
+additional_dirs() { # <settings-file>
+  [[ -f "$1" ]] || return 0
+  tr '\n' ' ' <"$1" \
+    | grep -o '"additionalDirectories"[[:space:]]*:[[:space:]]*\[[^]]*\]' \
+    | sed 's/^[^[]*\[//; s/\]$//' \
+    | grep -o '"[^"]*"' | sed 's/^"//; s/"$//'
+  return 0
+}
+
+# yes when an entry of <settings-file> is the repository root or a
+# directory above it. A relative entry is read against <base-dir>, the
+# directory the settings file belongs to; an empty <base-dir> skips it.
+root_in_settings() { # <settings-file> <base-dir>
+  local entry dir root_canon
+  root_canon="$(canonicalize "$repo_root")"
+  while IFS= read -r entry; do
+    [[ -n "$entry" ]] || continue
+    case "$entry" in
+      /*) dir="$entry" ;;
+      "~") dir="$HOME" ;;
+      "~/"*) dir="$HOME/${entry#"~/"}" ;;
+      *) [[ -n "$2" ]] || continue; dir="$2/$entry" ;;
+    esac
+    dir="$(canonicalize "$dir")"
+    if [[ "$dir" == "/" || "$root_canon" == "$dir" || "$root_canon" == "$dir"/* ]]; then
+      return 0
+    fi
+  done < <(additional_dirs "$1")
+  return 1
+}
+
+location_lines() {
+  local scope
+  if [[ "$is_bare" != "true" ]]; then
+    printf 'SESSION:\tconventional\n'
+  elif [[ -n "$worktree_root" ]]; then
+    printf 'SESSION:\tworktree %s\n' "$worktree_root"
+  else
+    printf 'SESSION:\troot\n'
+  fi
+  if [[ -z "$worktree_root" || "$(canonicalize "$worktree_root")" == "$(canonicalize "$repo_root")" ]]; then
+    scope="n/a"
+  elif root_in_settings "$worktree_root/.claude/settings.local.json" "$worktree_root" \
+    || root_in_settings "$worktree_root/.claude/settings.json" "$worktree_root" \
+    || root_in_settings "$HOME/.claude/settings.json" ""; then
+    scope="yes"
+  else
+    scope="no"
+  fi
+  printf 'ROOT_IN_SCOPE:\t%s\n' "$scope"
+  default_wt="$(default_worktree)"
+  printf 'DEFAULT_WORKTREE:\t%s\n' "${default_wt:--}"
+}
+
+# ---- where: the location lines and the directory to explore ---------------
+if [[ "${1:-}" == "where" ]]; then
+  where_usage="usage: preflight where [--base <branch>]"
+  base_arg=""
+  case $# in
+    1) ;;
+    3) [[ "$2" == "--base" && -n "$3" ]] || fail BAD_ARGS "$where_usage"; base_arg="$3" ;;
+    *) fail BAD_ARGS "$where_usage" ;;
+  esac
+  resolve_repo
+  worktree_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  location_lines
+
+  # The build base comes from the branch — the one the caller names, else
+  # the default branch — and never from whichever directory gets explored.
+  base_branch="$base_arg"
+  [[ -n "$base_branch" ]] || base_branch="$(git --git-dir="$common_dir" symbolic-ref --short HEAD 2>/dev/null || true)"
+  base_sha=""
+  [[ -n "$base_branch" ]] && base_sha="$(git --git-dir="$common_dir" rev-parse --verify -q "refs/heads/$base_branch^{commit}" 2>/dev/null || true)"
+  [[ -z "$base_arg" || -n "$base_sha" ]] || fail BAD_REF "no branch named $base_arg"
+
+  # Where to explore: the named branch's own worktree when it has one.
+  explore="" explore_why=""
+  if [[ -n "$base_arg" ]]; then
+    cur=""
+    while IFS= read -r line; do
+      case "$line" in
+        "worktree "*) cur="${line#worktree }" ;;
+        "branch refs/heads/$base_arg") explore="$cur" explore_why=base ;;
+      esac
+    done < <(git --git-dir="$common_dir" worktree list --porcelain 2>/dev/null)
+  fi
+  if [[ -z "$explore" ]]; then
+    if [[ -n "$default_wt" ]]; then
+      explore="$default_wt" explore_why=default
+    elif [[ -n "$worktree_root" ]]; then
+      explore="$worktree_root" explore_why=session
+    else
+      explore="$repo_root" explore_why=root
+    fi
+  fi
+  printf 'EXPLORE:\t%s\t%s\n' "$explore" "$explore_why"
+  printf 'BUILD_BASE:\t%s\t%s\n' "${base_sha:--}" "${base_branch:--}"
+
+  if [[ "$(git -C "$explore" rev-parse --is-inside-work-tree 2>/dev/null)" != "true" ]]; then
+    printf 'AT_BASE:\t-\n'
+    printf 'UNCOMMITTED_TOTAL:\t-\n'
+    exit 0
+  fi
+  explore_head="$(git -C "$explore" rev-parse --verify -q HEAD 2>/dev/null || true)"
+  if [[ -z "$explore_head" || -z "$base_sha" ]]; then
+    printf 'AT_BASE:\t-\n'
+  elif [[ "$explore_head" == "$base_sha" ]]; then
+    printf 'AT_BASE:\tyes\n'
+  else
+    printf 'AT_BASE:\tno\n'
+  fi
+  # Untracked files asked for explicitly (a user's status.showUntrackedFiles=no
+  # would hide exactly the files this evidence exists for), and the exit
+  # status read: a scan that failed is unknown, never an empty list.
+  if status_out="$(git -C "$explore" status --porcelain --untracked-files=all 2>/dev/null)"; then
+    uncommitted=0
+    while IFS= read -r line; do
+      [[ -n "$line" ]] || continue
+      printf 'UNCOMMITTED:\t%s\n' "$line"
+      uncommitted=$((uncommitted + 1))
+    done <<<"$status_out"
+    printf 'UNCOMMITTED_TOTAL:\t%d\n' "$uncommitted"
+  else
+    printf 'UNCOMMITTED_TOTAL:\t-\n'
+  fi
+  exit 0
+fi
 
 fail=0
 
@@ -83,6 +262,8 @@ worktree_root=""
 if [[ -n "$common_dir" ]]; then
   repo_root="$(dirname "$common_dir")"
   worktree_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  # Informational: where the session stands (see the header).
+  location_lines
 fi
 
 # Informational signpost, never a FAIL: the legacy JSON config is not

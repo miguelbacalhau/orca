@@ -7,7 +7,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { classifyLabel, derive as deriveAt, parseJournal, parseTaskNotifications, specState } from '../hooks/derive'
+import { classifyLabel, derive as deriveAt, parseJournal, parseTaskNotifications, projectDirName, specState } from '../hooks/derive'
 import type { JournalRead, RunFiles } from '../hooks/derive'
 import { headerRule, layoutRows } from '../hooks/layout'
 import type { OrcaBand, OrcaItem, OrcaRun } from '../types'
@@ -303,7 +303,7 @@ const WORK_LOOP = '/plugins/orca/scripts/work-loop.workflow.js'
 const SPEC = '/plugins/orca/scripts/spec.workflow.js'
 const BAND = {
   component: 'AbovePrompt' as const,
-  props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 100, scroll: { offset: 0, bodyRows: 19 }, view: {} },
+  props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 20, bodyColumns: 100, scroll: { offset: 0, bodyRows: 19 }, view: {} },
 }
 
 type Node = { text: string; mtimeMs: number }
@@ -400,6 +400,30 @@ describe('the band in a session', () => {
     await ui.redraw()
     expect(await ui.find({ type: 'Text', text: /orca/ })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: 'engine band' })).toBeDefined()
+  })
+
+  test('from a session in the default worktree the journal is found under that directory\'s project folder', async ($, on) => {
+    expect(projectDirName('/repo/main')).toBe('-repo-main')
+    expect(projectDirName('/repo/main/packages/x')).toBe('-repo-main-packages-x')
+    const clock = mock.clock(on, { now: 10_000 })
+    const journalFile = '/home/.claude/projects/-repo-main-packages-x/sess-main/subagents/workflows/wf_3/journal.jsonl'
+    serveFiles(on, new Map<string, Node>([
+      [`${RUN_DIR}/spec.md`, { text: 'spec', mtimeMs: 2 }],
+      [journalFile, { text: journal(['started', 'i1', 'implement:W1']), mtimeMs: 10_200 }],
+    ]))
+    // A launch result with no transcript directory: the path is rebuilt from the session.
+    on('tool.call', { tool: 'Workflow' }, () => ({
+      result: { status: 'async_launched', taskId: 'task3', taskType: 'local_workflow', runId: 'wf_3' },
+    }))
+    on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home' : undefined }))
+    on('session.cwd', () => ({ value: '/repo/main/packages/x' }))
+    on('session.id', () => ({ value: 'sess-main' }))
+    engineBand(on)
+    await $.tool.call({ tool: 'Workflow', scriptPath: WORK_LOOP, args: { runDir: RUN_DIR, items: [{ id: 'W1', title: 'a', deps: [], files: [] }] } })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'orca', surface: 'terminal', ...BAND })
+    // A live stage is something only the journal says.
+    expect(await ui.find({ type: 'Text', text: '● implement' })).toBeDefined()
   })
 
   test('the work loop\'s task notification takes the band down', async ($, on) => {

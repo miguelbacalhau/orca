@@ -364,3 +364,33 @@ install_candidate() { # <repo> <candidate> [extra args...]
   run orca provision "$BATS_TEST_TMPDIR/r/main" whenever
   assert_fail_reason BAD_ARGS
 }
+
+# ---- anchored on a worktree ----------------------------------------------
+
+@test "status, verify, and install anchored on a target worktree act on that repository, wherever the caller stood" {
+  r="$BATS_TEST_TMPDIR/r"
+  make_setup_layout "$r"
+  mkdir -p "$r/main/src" "$BATS_TEST_TMPDIR/elsewhere"
+  candidate "$BATS_TEST_TMPDIR/cand" 'echo built >built.txt'
+  # the session stands outside the repository; each call is `cd <target-worktree> && …`
+  cd "$BATS_TEST_TMPDIR/elsewhere"
+  run bash -c 'cd "$1" && bash "$2/orca.sh" setup status' _ "$r/main" "$SCRIPTS"
+  [ "$status" -eq 0 ]
+  has_line $'SETUP:\tabsent'
+  run bash -c 'cd "$1" && bash "$2/orca.sh" setup verify "$3" --check "test -f built.txt"' _ "$r/main/src" "$SCRIPTS" "$BATS_TEST_TMPDIR/cand"
+  [ "$status" -eq 0 ]
+  [ "$(frame_get rc)" = 0 ]
+  [ "$(frame_get check_rc)" = 0 ]
+  [ "$(frame_get removed)" = yes ]
+  case "$(frame_get worktree)" in "$r/.orca/doctor/"*) ;; *) false ;; esac
+  # the throwaway worktree ran the candidate, not the user's
+  [ ! -e "$r/main/built.txt" ] && [ ! -e "$r/main/src/built.txt" ]
+  run bash -c 'cd "$1" && bash "$2/orca.sh" setup install "$3" --sources -' _ "$r/main" "$SCRIPTS" "$BATS_TEST_TMPDIR/cand"
+  [ "$status" -eq 0 ]
+  [ -f "$r/.orca/setup" ] && [ ! -e "$r/main/.orca" ]
+  run bash -c 'cd "$1" && bash "$2/orca.sh" setup status' _ "$r/main/src" "$SCRIPTS"
+  [ "$status" -eq 0 ]
+  has_line $'SETUP:\tcurrent'
+  # the caller's own directory was never touched
+  [ -z "$(ls -A "$BATS_TEST_TMPDIR/elsewhere")" ]
+}
